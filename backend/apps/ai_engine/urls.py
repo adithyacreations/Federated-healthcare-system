@@ -10,6 +10,7 @@ from .views import (
     XRayPredictionView,
     BrainTumorPredictionView,
     ChestMultiLabelView,
+    SkinDiseaseView,
     GeminiHealthSummaryView,
     GeminiChatView,
 )
@@ -25,6 +26,7 @@ urlpatterns = [
     path('xray-predict/', XRayPredictionView.as_view(), name='ai-xray-predict'),
     path('brain-tumor/', BrainTumorPredictionView.as_view(), name='ai-brain-tumor'),
     path('chest-multilabel/', ChestMultiLabelView.as_view(), name='ai-chest-multilabel'),
+    path('skin-disease/', SkinDiseaseView.as_view(), name='ai-skin-disease'),
 
     # Gemini proxies — keep the API key server-side (final URLs: /api/ai/...)
     path('health-summary/', GeminiHealthSummaryView.as_view(), name='ai-health-summary'),

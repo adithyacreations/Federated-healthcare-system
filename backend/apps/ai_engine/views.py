@@ -731,6 +731,126 @@ class ChestMultiLabelView(APIView):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  Skin Disease AI — 4-class lesion classifier (top-1 78.2%, top-3 99.8%)
+# ════════════════════════════════════════════════════════════════════════════
+
+class SkinDiseaseView(APIView):
+    """AI-assisted skin lesion screening.
+
+    Classes: Benign Lesion / Inflammatory Infection / Melanoma / Skin Cancer.
+    Melanoma and Skin Cancer are flagged as urgent. The Keras model is heavy, so
+    it is loaded once and cached on the class. Screening aid only — not a
+    diagnosis.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    _model = None
+    _class_info = None
+
+    @classmethod
+    def get_model(cls):
+        if cls._model is None:
+            try:
+                import json
+                import tensorflow as tf
+
+                model_path = os.path.normpath(os.path.join(
+                    settings.BASE_DIR, '..', 'ml_models', 'skin_disease_v4_model.keras'
+                ))
+                info_path = os.path.normpath(os.path.join(
+                    settings.BASE_DIR, '..', 'ml_models', 'skin_disease_classes.json'
+                ))
+
+                if os.path.exists(model_path):
+                    cls._model = tf.keras.models.load_model(model_path)
+                    with open(info_path) as f:
+                        cls._class_info = json.load(f)
+                    print("[AI] Skin model loaded!")
+                else:
+                    print(f"[AI] Skin model not found: {model_path}")
+            except Exception as e:
+                print(f"[AI] Skin load error: {e}")
+        return cls._model, cls._class_info
+
+    def post(self, request):
+        image_file = request.FILES.get('image')
+        if not image_file:
+            return Response({
+                'success': False,
+                'message': 'No image provided!',
+            }, status=400)
+
+        try:
+            import io
+            import numpy as np
+            from PIL import Image
+
+            model, class_info = self.get_model()
+            if model is None:
+                return Response({
+                    'success': False,
+                    'message': 'Skin model not available!',
+                }, status=503)
+
+            img_size = class_info.get('input_size', 224)
+
+            img = Image.open(io.BytesIO(image_file.read())).convert('RGB')
+            img = img.resize((img_size, img_size))
+            img_array = np.array(img) / 255.0
+            img_array = np.expand_dims(img_array, axis=0)
+
+            predictions = model.predict(img_array, verbose=0)
+            pred_index = int(np.argmax(predictions[0]))
+            confidence = float(np.max(predictions[0])) * 100
+
+            classes = class_info.get('classes', [])
+            descriptions = class_info.get('class_descriptions', {})
+
+            predicted_class = classes[pred_index] if pred_index < len(classes) else 'Unknown'
+            predicted_label = descriptions.get(predicted_class, predicted_class)
+
+            is_urgent = (
+                'melanoma' in predicted_class.lower()
+                or 'cancer' in predicted_class.lower()
+            )
+
+            all_predictions = [
+                {
+                    'class': cls,
+                    'label': descriptions.get(cls, cls),
+                    'probability': round(float(predictions[0][i]) * 100, 2),
+                }
+                for i, cls in enumerate(classes)
+            ]
+            all_predictions.sort(key=lambda x: x['probability'], reverse=True)
+
+            return Response({
+                'success': True,
+                'data': {
+                    'predicted_class': predicted_class,
+                    'predicted_label': predicted_label,
+                    'confidence': round(confidence, 2),
+                    'is_urgent': is_urgent,
+                    'all_predictions': all_predictions,
+                    'model_accuracy': class_info.get('accuracy', 0.782),
+                    'top3_accuracy': class_info.get('top3_accuracy', 0.998),
+                    'disclaimer': 'AI screening only. This is NOT a medical diagnosis. '
+                                  'Always consult a qualified dermatologist.',
+                },
+            })
+
+        except Exception as e:
+            print(f"[AI] Skin error: {e}")
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': f'Analysis failed: {str(e)}',
+            }, status=500)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  Gemini proxy — keeps the Gemini API key server-side
 # ════════════════════════════════════════════════════════════════════════════
 #  The browser must NEVER see the Gemini key, so it no longer talks to Google
