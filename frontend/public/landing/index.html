@@ -1,0 +1,2970 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FederCare — AI Health Network</title>
+    <meta name="description" content="FederCare: a privacy-preserving federated learning platform connecting hospitals, doctors and patients through intelligent AI.">
+    <meta name="keywords" content="federated learning, healthcare AI, telemedicine, federcare, hospital network">
+    <link rel="shortcut icon" href="assets/images/favicon.png" type="image/x-icon">
+
+    <link rel="stylesheet" href="assets/fonts/remixicon.css">
+    <link rel="stylesheet" href="assets/css/magnific-popup.css">
+    <link rel="stylesheet" href="assets/css/slick.min.css">
+    <link rel="stylesheet" href="assets/css/output.css">
+
+    <style>
+        /* FederCare-specific tweaks layered on top of the template */
+        .fc-logo {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 700;
+            font-size: 26px;
+            color: var(--black-100);
+            letter-spacing: -0.5px;
+            line-height: 1;
+        }
+        .fc-logo .fc-mark {
+            width: 36px; height: 36px;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: var(--primary-color);
+            color: #fff;
+            border-radius: 10px;
+            font-size: 22px;
+        }
+        .fc-logo .fc-mark i { line-height: 1; }
+        .fc-logo .fc-accent { color: var(--primary-color); }
+
+        /* Photo "card" used everywhere icons used to be */
+        .fc-photo {
+            width: 100%;
+            aspect-ratio: 16/10;
+            border-radius: 14px;
+            overflow: hidden;
+            background: #eadfd0;
+            position: relative;
+        }
+        .fc-photo img {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            transition: transform .8s ease;
+        }
+        .fc-photo:hover img { transform: scale(1.06); }
+        .fc-photo::after {
+            content: "";
+            position: absolute; inset: 0;
+            background: linear-gradient(180deg, transparent 55%, rgba(0,0,0,.35));
+            pointer-events: none;
+        }
+        .fc-photo .fc-photo-badge {
+            position: absolute;
+            left: 14px; bottom: 14px;
+            background: rgba(255,255,255,.92);
+            color: var(--black-100);
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 600;
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            z-index: 2;
+            letter-spacing: 0.2px;
+        }
+        .fc-photo .fc-photo-dot {
+            position: absolute; top: 14px; right: 14px;
+            width: 10px; height: 10px; border-radius: 50%;
+            background: var(--primary-color);
+            box-shadow: 0 0 0 6px rgba(255,79,1,.25);
+            z-index: 2;
+        }
+
+        /* Feature cards — replace icons with photo */
+        .fc-feature-photo {
+            width: 110px; height: 110px;
+            border-radius: 50%;
+            margin: 0 auto 18px;
+            overflow: hidden;
+            border: 3px solid var(--primary-color);
+            box-shadow: 0 18px 40px -20px rgba(255,79,1,.45);
+        }
+        .fc-feature-photo img {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+
+        /* Stats strip */
+        .fc-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+        @media (max-width: 768px) {
+            .fc-stats { grid-template-columns: repeat(2, 1fr); }
+        }
+        .fc-stat {
+            background: #fff;
+            border: 1px solid rgba(0,0,0,.06);
+            border-radius: 20px;
+            padding: 28px 24px;
+            text-align: left;
+            position: relative;
+            overflow: hidden;
+        }
+        .fc-stat .fc-stat-num {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 700;
+            font-size: 56px;
+            line-height: 1;
+            color: var(--black-100);
+            letter-spacing: -1.5px;
+        }
+        .fc-stat .fc-stat-num span { color: var(--primary-color); }
+        .fc-stat .fc-stat-label {
+            margin-top: 10px;
+            font-size: 15px;
+            color: rgb(119,119,125);
+            font-weight: 500;
+        }
+        .fc-stat .fc-stat-decor {
+            position: absolute; right: -10px; top: -10px;
+            width: 70px; height: 70px;
+            border-radius: 50%;
+            background: rgba(255,79,1,.08);
+        }
+
+        /* Partners — text-based hospital "logos" */
+        .fc-partner {
+            display: inline-flex !important;
+            align-items: center;
+            gap: 10px;
+            padding: 0 28px;
+            white-space: nowrap;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 600;
+            font-size: 22px;
+            color: var(--black-100);
+            opacity: .85;
+        }
+        .fc-partner i {
+            color: var(--primary-color);
+            font-size: 26px;
+        }
+
+        /* Module cards */
+        .fc-module {
+            background: #fff;
+            border: 1px solid rgba(0,0,0,.06);
+            border-radius: 18px;
+            overflow: hidden;
+            transition: transform .4s ease, box-shadow .4s ease, border-color .4s ease;
+        }
+        .fc-module:hover {
+            transform: translateY(-4px);
+            border-color: var(--primary-color);
+            box-shadow: 0 24px 50px -28px rgba(0,0,0,.25);
+        }
+        .fc-module .fc-module-img {
+            height: 220px;
+            position: relative;
+            overflow: hidden;
+        }
+        .fc-module .fc-module-img img {
+            width: 100%; height: 100%;
+            display: block;
+            object-fit: cover;
+            transition: transform .6s ease;
+        }
+        .fc-module:hover .fc-module-img img { transform: scale(1.08); }
+        .fc-module .fc-module-num {
+            position: absolute;
+            top: 12px; left: 12px;
+            background: rgba(0,0,0,.65);
+            color: #fff;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 600;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            backdrop-filter: blur(4px);
+        }
+        .fc-module .fc-module-body { padding: 22px 22px 24px; }
+        .fc-module h4 {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--black-100);
+        }
+        .fc-module p { color: rgb(119,119,125); font-size: 15px; line-height: 1.55; margin: 0; }
+
+        /* Hero work strip — uniform image heights */
+        .single-header-work-img img {
+            width: 100%;
+            height: 280px;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* Services section — image and text alignment */
+        .info-item img {
+            width: 100%;
+            height: 260px;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* Projects grid — uniform image heights */
+        .work-popup > div > img {
+            width: 100%;
+            height: 420px;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* Services section — align cards across the row */
+        .info-item { display: flex; flex-direction: column; height: 100%; }
+        .info-item > div:first-child { min-height: 170px; }
+        .info-item img { margin-top: auto; }
+
+        /* Tech chips */
+        .fc-tech-wrap {
+            display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+        }
+        .fc-chip {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 18px;
+            border: 1px solid rgba(0,0,0,.12);
+            border-radius: 999px;
+            background: #fff;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 500;
+            font-size: 15px;
+            color: var(--black-100);
+            transition: all .3s ease;
+        }
+        .fc-chip:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            transform: translateY(-2px);
+        }
+        .fc-chip i { color: var(--primary-color); font-size: 16px; }
+
+        /* Team card */
+        .fc-team-card {
+            background: #fff;
+            border: 1px solid rgba(0,0,0,.06);
+            border-radius: 20px;
+            padding: 32px;
+            display: flex;
+            align-items: center;
+            gap: 22px;
+        }
+        .fc-team-avatar {
+            width: 88px; height: 88px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 700;
+            font-size: 30px;
+            flex-shrink: 0;
+            letter-spacing: -1px;
+        }
+        .fc-team-card.alt .fc-team-avatar { background: var(--black-100); color: var(--primary-color); }
+
+        /* Pricing role cards subtle reskinning */
+        .fc-role-icon {
+            width: 56px; height: 56px;
+            border-radius: 14px;
+            background: rgba(255,79,1,.1);
+            color: var(--primary-color);
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 28px;
+            margin-bottom: 6px;
+        }
+
+        /* Hero overlay polish */
+        .fc-pill-icon {
+            color: var(--primary-color);
+            margin-right: 4px;
+        }
+
+        /* Section eyebrow chips already templated; this just tightens spacing */
+        .fc-section-eyebrow i { color: var(--primary-color); }
+
+        /* Project grid label */
+        .fc-project-tag {
+            background: rgba(255,79,1,.85) !important;
+        }
+
+        /* Footer adjustments */
+        footer { background: var(--black-100); color: #d8d8d8; margin-top: 60px; }
+        footer a { color: #d8d8d8; }
+        footer .text-primary { color: var(--primary-color); }
+
+        /* Smooth scroll */
+        html { scroll-behavior: smooth; }
+
+        /* ========== Infinite image marquee ========== */
+        .fc-marquee-stage {
+            position: relative;
+            margin-top: -30px;
+            padding: 20px 0 8px;
+        }
+        .fc-marquee-mask {
+            width: 100%;
+            overflow: hidden;
+            -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
+        }
+        .fc-marquee-track {
+            display: flex;
+            gap: 24px;
+            width: max-content;
+            animation: fcMarqueeScroll 36s linear infinite;
+        }
+        .fc-marquee-stage:hover .fc-marquee-track {
+            animation-play-state: paused;
+        }
+        @keyframes fcMarqueeScroll {
+            0%   { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .fc-marquee-item {
+            flex-shrink: 0;
+            width: 240px;
+            height: 240px;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow:
+                0 18px 38px -18px rgba(16, 16, 16, 0.30),
+                0 4px 12px -6px rgba(255, 79, 1, 0.16);
+            transition: transform .35s ease, filter .35s ease, box-shadow .35s ease;
+        }
+        .fc-marquee-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .fc-marquee-item:hover {
+            transform: scale(1.05) translateY(-4px);
+            filter: brightness(1.06);
+            box-shadow:
+                0 28px 48px -22px rgba(16, 16, 16, 0.40),
+                0 0 0 3px rgba(255, 79, 1, 0.55);
+        }
+        @media (min-width: 768px) {
+            .fc-marquee-item { width: 280px; height: 280px; }
+            .fc-marquee-track { gap: 28px; }
+        }
+        @media (min-width: 1280px) {
+            .fc-marquee-item { width: 320px; height: 320px; }
+            .fc-marquee-track { gap: 32px; }
+        }
+
+        /* ========== Vercep-style features (triple marquee + dashed grid) ========== */
+        .fc-vfeat {
+            position: relative;
+            background: linear-gradient(180deg, #fff6ec 0%, #fceadc 100%);
+            padding: 96px 0 0;
+            color: var(--black-100);
+            overflow: hidden;
+        }
+        .fc-vfeat-inner {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        .fc-vfeat-head {
+            max-width: 880px;
+            margin: 0 auto;
+            padding: 0 20px;
+            text-align: center;
+        }
+        .fc-vfeat-title {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 500;
+            font-size: clamp(36px, 5vw, 60px);
+            line-height: 1.05;
+            letter-spacing: -1.5px;
+            color: var(--black-100);
+            margin: 0 0 18px;
+        }
+        .fc-vfeat-lead {
+            font-size: 17px;
+            line-height: 1.65;
+            color: rgba(16, 16, 16, 0.7);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        /* Triple marquee */
+        .fc-vfeat-marq-wrap {
+            position: relative;
+            max-width: 880px;
+            margin: 56px auto 0;
+            overflow: hidden;
+            padding: 0;
+        }
+        .fc-vfeat-marq-fade {
+            position: absolute;
+            top: 0; bottom: 0;
+            width: 80px;
+            z-index: 3;
+            pointer-events: none;
+        }
+        .fc-vfeat-marq-fade-l { left: 0; background: linear-gradient(90deg, #fff6ec 0%, transparent 100%); }
+        .fc-vfeat-marq-fade-r { right: 0; background: linear-gradient(-90deg, #fff6ec 0%, transparent 100%); }
+        .fc-vfeat-marq-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .fc-vfeat-marq {
+            width: 100%;
+            overflow: hidden;
+        }
+        .fc-vfeat-marq-track {
+            display: flex;
+            gap: 12px;
+            width: max-content;
+            animation-duration: 45s;
+            animation-timing-function: linear;
+            animation-iteration-count: infinite;
+            animation-name: fcVfeatLeft;
+            will-change: transform;
+        }
+        .fc-vfeat-marq-1 .fc-vfeat-marq-track { animation-duration: 45s; }
+        .fc-vfeat-marq-2 .fc-vfeat-marq-track { animation-duration: 50s; animation-name: fcVfeatRight; }
+        .fc-vfeat-marq-3 .fc-vfeat-marq-track { animation-duration: 42s; }
+        .fc-vfeat:hover .fc-vfeat-marq-track { animation-play-state: paused; }
+        @keyframes fcVfeatLeft  { from { transform: translateX(0); }   to { transform: translateX(-50%); } }
+        @keyframes fcVfeatRight { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+        .fc-vfeat-chip {
+            flex-shrink: 0;
+            background: #ffe1c9;
+            border: 1px solid #ffd2af;
+            color: #4a2c14;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 15px;
+            font-weight: 500;
+            padding: 8px 16px;
+            line-height: 1.2;
+            white-space: nowrap;
+            border-radius: 0;
+        }
+        /* Dashed feature grid */
+        .fc-vfeat-grid {
+            margin-top: 60px;
+            display: grid;
+            grid-template-columns: 1fr;
+            border-top: 1px dashed rgba(16, 16, 16, 0.35);
+        }
+        @media (min-width: 640px) {
+            .fc-vfeat-grid { grid-template-columns: repeat(2, 1fr); }
+            .fc-vfeat-feature:nth-child(even) { border-left: 1px dashed rgba(16, 16, 16, 0.35); }
+        }
+        @media (min-width: 1024px) {
+            .fc-vfeat-grid { grid-template-columns: repeat(4, 1fr); }
+            .fc-vfeat-feature:nth-child(even) { border-left: none; }
+            .fc-vfeat-feature + .fc-vfeat-feature { border-left: 1px dashed rgba(16, 16, 16, 0.35); }
+        }
+        .fc-vfeat-feature {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding: 40px 24px;
+            position: relative;
+        }
+        @media (min-width: 1024px) {
+            .fc-vfeat-feature { padding: 56px 32px; }
+        }
+        @media (max-width: 639px) {
+            .fc-vfeat-feature + .fc-vfeat-feature { border-top: 1px dashed rgba(16, 16, 16, 0.35); }
+        }
+        .fc-vfeat-feature-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            font-size: 30px;
+            color: rgba(16, 16, 16, 0.7);
+            line-height: 1;
+        }
+        /* Photo header per card */
+        .fc-vfeat-feature-img {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #f4e0cc;
+            box-shadow: 0 10px 24px -14px rgba(16,16,16,0.25);
+        }
+        .fc-vfeat-feature-img img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transition: transform .6s ease;
+        }
+        .fc-vfeat-feature:hover .fc-vfeat-feature-img img { transform: scale(1.05); }
+        .fc-vfeat-feature-tag {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.92);
+            color: var(--primary-color);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            backdrop-filter: blur(6px);
+            box-shadow: 0 4px 10px -4px rgba(16,16,16,0.25);
+        }
+        .fc-vfeat-feature-body { display: flex; flex-direction: column; gap: 8px; padding-top: 20px; }
+        @media (min-width: 1024px) { .fc-vfeat-feature-body { padding-top: 28px; } }
+        .fc-vfeat-feature-body h3 {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 500;
+            font-size: clamp(22px, 2.4vw, 30px);
+            line-height: 1.15;
+            letter-spacing: -0.5px;
+            color: var(--black-100);
+            margin: 0;
+        }
+        .fc-vfeat-feature-body p {
+            font-size: 15px;
+            line-height: 1.6;
+            color: rgba(16, 16, 16, 0.7);
+            margin: 0;
+        }
+
+        /* ========== About3 team + CTA layout ========== */
+        .fc-about3 {
+            padding: 96px 16px 64px;
+            background: var(--background);
+            color: var(--black-100);
+        }
+        .fc-about3-inner {
+            max-width: 1180px;
+            margin: 0 auto;
+        }
+        .fc-about3-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 28px;
+        }
+        @media (min-width: 1024px) {
+            .fc-about3-grid { grid-template-columns: 2fr 1fr; gap: 28px; }
+        }
+        /* Main (left, large card) */
+        .fc-about3-main {
+            position: relative;
+            border-radius: 18px;
+            overflow: hidden;
+            min-height: 460px;
+            background: linear-gradient(135deg, #fff 0%, #fff5ea 100%);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            box-shadow: 0 24px 60px -36px rgba(16, 16, 16, 0.25);
+            display: flex;
+            align-items: stretch;
+        }
+        @media (min-width: 1024px) {
+            .fc-about3-main { max-height: 620px; }
+        }
+        .fc-about3-main-bg {
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 100% 0%, rgba(255, 79, 1, 0.12) 0%, transparent 50%),
+                radial-gradient(circle at 0% 100%, rgba(16, 16, 16, 0.04) 0%, transparent 60%),
+                repeating-linear-gradient(45deg, rgba(255, 79, 1, 0.03) 0 2px, transparent 2px 22px);
+        }
+        .fc-about3-main-content {
+            position: relative;
+            z-index: 1;
+            padding: 48px 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            align-items: flex-start;
+            justify-content: center;
+            width: 100%;
+        }
+        .fc-about3-avatar {
+            background: var(--primary-color);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 700;
+            letter-spacing: -1px;
+            flex-shrink: 0;
+        }
+        .fc-about3-avatar-lg {
+            width: 132px; height: 132px;
+            font-size: 48px;
+            margin-bottom: 14px;
+            box-shadow: 0 20px 40px -16px rgba(255, 79, 1, 0.45);
+        }
+        .fc-about3-avatar-dark {
+            width: 72px; height: 72px;
+            font-size: 24px;
+            background: var(--black-100);
+            color: var(--primary-color);
+        }
+        .fc-about3-main-name {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: clamp(36px, 4.4vw, 52px);
+            font-weight: 700;
+            letter-spacing: -1.5px;
+            line-height: 1;
+            margin: 0;
+            color: var(--black-100);
+        }
+        .fc-about3-main-role {
+            color: var(--primary-color);
+            font-weight: 600;
+            font-size: 18px;
+            margin: 0;
+            font-family: "Bricolage Grotesque", sans-serif;
+        }
+        .fc-about3-main-meta {
+            color: rgba(16, 16, 16, 0.6);
+            font-size: 14px;
+            margin: 0;
+        }
+        .fc-about3-main-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 16px;
+        }
+        .fc-about3-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            background: rgba(255, 79, 1, 0.10);
+            color: var(--primary-color);
+            font-size: 13px;
+            font-weight: 600;
+            font-family: "Bricolage Grotesque", sans-serif;
+            padding: 6px 12px;
+            border-radius: 999px;
+        }
+        .fc-about3-tag i { font-size: 14px; }
+
+        /* Right column wrapper */
+        .fc-about3-side {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+        @media (min-width: 768px) and (max-width: 1023px) {
+            .fc-about3-side { flex-direction: row; }
+            .fc-about3-side > * { flex: 1; }
+        }
+        /* Breakout — dark CTA card */
+        .fc-about3-breakout {
+            background: var(--black-100);
+            border-radius: 16px;
+            padding: 28px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 22px;
+            color: #fff;
+            position: relative;
+            overflow: hidden;
+        }
+        .fc-about3-breakout::before {
+            content: "";
+            position: absolute;
+            top: -40px; right: -40px;
+            width: 160px; height: 160px;
+            background: rgba(255, 79, 1, 0.18);
+            border-radius: 50%;
+            filter: blur(40px);
+            pointer-events: none;
+        }
+        .fc-about3-breakout-logo {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 700;
+            font-size: 22px;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+        .fc-about3-breakout-logo .fc-mark {
+            width: 38px; height: 38px;
+            background: var(--primary-color);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            font-size: 20px;
+        }
+        .fc-about3-breakout-logo .fc-accent { color: var(--primary-color); }
+        .fc-about3-breakout-title {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 22px;
+            font-weight: 600;
+            color: #fff;
+            margin: 0 0 6px;
+            position: relative;
+        }
+        .fc-about3-breakout-desc {
+            color: rgba(255, 255, 255, 0.65);
+            font-size: 14px;
+            line-height: 1.55;
+            margin: 0;
+            position: relative;
+        }
+        .fc-about3-breakout-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--primary-color);
+            color: #fff;
+            text-decoration: none;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+            padding: 12px 22px;
+            border-radius: 10px;
+            align-self: flex-start;
+            transition: transform .2s ease, background-color .25s ease;
+            position: relative;
+        }
+        .fc-about3-breakout-btn:hover {
+            transform: translateY(-2px);
+            background: #e84a02;
+        }
+
+        /* Secondary — Princy Thomas card */
+        .fc-about3-secondary {
+            background: #fff;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            border-radius: 16px;
+            padding: 22px 24px;
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            flex: 1;
+            min-height: 140px;
+        }
+        .fc-about3-sec-name {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--black-100);
+            margin: 0 0 4px;
+            letter-spacing: -0.3px;
+        }
+        .fc-about3-sec-role {
+            color: var(--primary-color);
+            font-weight: 600;
+            font-size: 14px;
+            margin: 0 0 4px;
+            font-family: "Bricolage Grotesque", sans-serif;
+        }
+        .fc-about3-sec-meta {
+            color: rgba(16, 16, 16, 0.55);
+            font-size: 13px;
+            margin: 0;
+        }
+
+        /* ========== Hero title + text rotate ========== */
+        .fc-hero-title {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 700;
+            font-size: clamp(48px, 9vw, 110px);
+            line-height: 1;
+            letter-spacing: -2px;
+            color: var(--black-100);
+            margin: 24px 0 14px;
+            text-align: center;
+        }
+        .fc-hero-rotate-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: baseline;
+            gap: 12px;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 500;
+            font-size: clamp(22px, 3.4vw, 38px);
+            line-height: 1.15;
+            color: var(--black-100);
+            margin: 0 0 6px;
+        }
+        .fc-hero-rotate-prefix { white-space: nowrap; }
+        .fc-text-rotate {
+            display: inline-flex;
+            position: relative;
+            overflow: hidden;
+            background: var(--primary-color);
+            color: #fff;
+            padding: 4px 18px 8px;
+            border-radius: 14px;
+            min-height: 1.15em;
+            box-shadow: 0 8px 20px -10px rgba(255, 79, 1, 0.6);
+        }
+        .fc-text-rotate-track { display: inline-flex; white-space: nowrap; }
+        .fc-tr-char {
+            display: inline-block;
+            transform: translateY(100%);
+            opacity: 0;
+            transition: transform .55s cubic-bezier(.2, .8, .2, 1), opacity .35s ease;
+        }
+        .fc-tr-char.in { transform: translateY(0); opacity: 1; }
+        .fc-tr-char.out { transform: translateY(-120%); opacity: 0; }
+        .sr-only {
+            position: absolute;
+            width: 1px; height: 1px;
+            padding: 0; margin: -1px; overflow: hidden;
+            clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+        }
+
+        /* ========== Circular Testimonials ========== */
+        .fc-ct-wrap {
+            width: 100%;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 24px 16px 0;
+        }
+        .fc-ct-grid { display: grid; gap: 5rem; align-items: center; }
+        @media (min-width: 900px) {
+            .fc-ct-grid { grid-template-columns: 1fr 1fr; gap: 5rem; }
+        }
+        .fc-ct-images {
+            position: relative;
+            width: 100%;
+            height: 24rem;
+            perspective: 1000px;
+        }
+        .fc-ct-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 1.5rem;
+            box-shadow: 0 18px 40px rgba(0,0,0,0.18);
+            transition: transform .8s cubic-bezier(.4,2,.3,1), opacity .8s cubic-bezier(.4,2,.3,1);
+            opacity: 0;
+            pointer-events: none;
+            will-change: transform, opacity;
+            backface-visibility: hidden;
+        }
+        .fc-ct-content {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 320px;
+        }
+        .fc-ct-name {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 700;
+            font-size: 28px;
+            line-height: 1.15;
+            color: var(--black-100);
+            margin: 0 0 6px;
+            letter-spacing: -0.5px;
+        }
+        .fc-ct-designation {
+            font-size: 16px;
+            color: rgb(119,119,125);
+            margin: 0 0 1.75rem;
+            font-weight: 500;
+        }
+        .fc-ct-quote {
+            font-size: 19px;
+            line-height: 1.7;
+            color: #2a2a2a;
+            margin: 0;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-style: italic;
+        }
+        .fc-ct-quote .fc-ct-word {
+            display: inline-block;
+            opacity: 0;
+            filter: blur(10px);
+            transform: translateY(5px);
+            transition: opacity .22s ease, filter .22s ease, transform .22s ease;
+        }
+        .fc-ct-quote .fc-ct-word.in {
+            opacity: 1;
+            filter: blur(0);
+            transform: translateY(0);
+        }
+        .fc-ct-arrows { display: flex; gap: 1rem; padding-top: 2.5rem; }
+        .fc-ct-arrow {
+            width: 2.7rem;
+            height: 2.7rem;
+            border-radius: 50%;
+            border: none;
+            background: var(--black-100);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color .3s ease, transform .2s ease;
+            font-size: 20px;
+        }
+        .fc-ct-arrow:hover {
+            background: var(--primary-color);
+            transform: translateY(-2px);
+        }
+        @media (max-width: 899px) {
+            .fc-ct-images { height: 20rem; max-width: 360px; margin: 0 auto; }
+            .fc-ct-content { text-align: center; align-items: center; min-height: 0; }
+            .fc-ct-arrows { justify-content: center; padding-top: 1.5rem; }
+        }
+
+        /* ========== About FederCare section ========== */
+        .fc-about {
+            position: relative;
+            padding: 96px 16px;
+            background: linear-gradient(180deg, var(--background) 0%, #fffaf2 100%);
+            color: var(--black-100);
+            overflow: hidden;
+        }
+        .fc-about-inner { position: relative; z-index: 2; max-width: 1160px; margin: 0 auto; }
+        .fc-about-blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            z-index: 1;
+            pointer-events: none;
+            will-change: transform;
+        }
+        .fc-about-blob-1 { top: 80px; left: 32px; width: 260px; height: 260px; background: rgba(255, 79, 1, 0.08); }
+        .fc-about-blob-2 { bottom: 80px; right: 32px; width: 320px; height: 320px; background: rgba(16, 16, 16, 0.06); }
+        .fc-about-dot {
+            position: absolute;
+            border-radius: 50%;
+            z-index: 1;
+            pointer-events: none;
+        }
+        .fc-about-dot-1 { top: 48%; left: 22%; width: 14px; height: 14px; background: rgba(255, 79, 1, 0.35); animation: fcAboutDotA 3s ease-in-out infinite; }
+        .fc-about-dot-2 { bottom: 32%; right: 22%; width: 20px; height: 20px; background: rgba(16, 16, 16, 0.18); animation: fcAboutDotB 4s ease-in-out infinite; }
+        @keyframes fcAboutDotA { 0%,100% { transform: translateY(0); opacity: .5 } 50% { transform: translateY(-15px); opacity: 1 } }
+        @keyframes fcAboutDotB { 0%,100% { transform: translateY(0); opacity: .5 } 50% { transform: translateY(20px); opacity: 1 } }
+        .fc-about-head {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            margin-bottom: 64px;
+        }
+        .fc-about-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--primary-color);
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 600;
+            font-size: 13px;
+            letter-spacing: 2px;
+            margin-bottom: 12px;
+        }
+        .fc-about-title {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 300;
+            font-size: clamp(36px, 5vw, 56px);
+            line-height: 1.05;
+            margin: 0 0 18px;
+            color: var(--black-100);
+            letter-spacing: -0.5px;
+        }
+        .fc-about-rule {
+            display: block;
+            width: 96px; height: 3px;
+            background: var(--primary-color);
+            margin-bottom: 26px;
+            border-radius: 3px;
+            transform-origin: center;
+            animation: fcAboutRuleIn 1s .4s ease-out both;
+        }
+        @keyframes fcAboutRuleIn { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+        .fc-about-lead {
+            max-width: 640px;
+            text-align: center;
+            color: rgba(16,16,16,0.72);
+            font-size: 17px;
+            line-height: 1.65;
+            margin: 0;
+        }
+        .fc-about-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 36px;
+            align-items: stretch;
+        }
+        @media (max-width: 900px) {
+            .fc-about-grid { grid-template-columns: 1fr; gap: 28px; }
+        }
+        .fc-about-col {
+            display: flex;
+            flex-direction: column;
+            gap: 48px;
+        }
+        @media (max-width: 900px) {
+            .fc-about-col { gap: 24px; }
+        }
+        .fc-service { transition: transform .25s ease; }
+        .fc-service:hover { transform: translateY(-4px); }
+        .fc-service-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+        .fc-service-icon {
+            position: relative;
+            width: 48px; height: 48px;
+            border-radius: 12px;
+            background: rgba(255, 79, 1, 0.10);
+            color: var(--primary-color);
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 22px;
+            transition: background-color .3s ease, transform .3s ease;
+        }
+        .fc-service:hover .fc-service-icon { background: rgba(255, 79, 1, 0.18); transform: rotate(-4deg); }
+        .fc-service-icon-sec {
+            position: absolute;
+            top: -6px; right: -6px;
+            font-size: 14px !important;
+            color: rgba(16,16,16,0.55);
+            background: #fff;
+            border-radius: 50%;
+            padding: 2px;
+            line-height: 1;
+        }
+        .fc-service-head h3 {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--black-100);
+            margin: 0;
+            transition: color .3s ease;
+        }
+        .fc-service:hover .fc-service-head h3 { color: var(--primary-color); }
+        .fc-service p {
+            font-size: 14.5px;
+            line-height: 1.65;
+            color: rgba(16,16,16,0.72);
+            padding-left: 62px;
+            margin: 0;
+        }
+        .fc-about-center { display: flex; align-items: center; justify-content: center; }
+        @media (max-width: 900px) { .fc-about-center { order: -1; margin-bottom: 12px; } }
+        .fc-about-img {
+            position: relative;
+            width: 100%;
+            max-width: 280px;
+            aspect-ratio: 3 / 4;
+            border-radius: 6px;
+            overflow: visible;
+            isolation: isolate;
+        }
+        .fc-about-img > img {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            border-radius: 6px;
+            box-shadow: 0 24px 60px -30px rgba(0,0,0,0.5);
+            position: relative;
+            z-index: 2;
+            transition: transform .4s ease;
+        }
+        .fc-about-img:hover > img { transform: scale(1.02); }
+        .fc-about-img-overlay {
+            position: absolute;
+            inset: 0;
+            border-radius: 6px;
+            background: linear-gradient(0deg, rgba(16,16,16,0.55), transparent 55%);
+            display: flex; align-items: flex-end; justify-content: center;
+            padding: 16px;
+            z-index: 3;
+        }
+        .fc-about-img-btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: #fff;
+            color: var(--black-100);
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 500;
+            font-size: 14px;
+            padding: 9px 16px;
+            border-radius: 999px;
+            text-decoration: none;
+            transition: transform .2s ease;
+        }
+        .fc-about-img-btn:hover { transform: scale(1.04); }
+        .fc-about-img-frame {
+            position: absolute;
+            inset: -14px;
+            border: 4px solid var(--primary-color);
+            border-radius: 10px;
+            z-index: 1;
+            opacity: .85;
+        }
+        .fc-about-img-blob-1 {
+            position: absolute;
+            top: -22px; right: -36px;
+            width: 64px; height: 64px;
+            border-radius: 50%;
+            background: rgba(255, 79, 1, 0.12);
+            z-index: 0;
+            will-change: transform;
+        }
+        .fc-about-img-blob-2 {
+            position: absolute;
+            bottom: -28px; left: -40px;
+            width: 80px; height: 80px;
+            border-radius: 50%;
+            background: rgba(16, 16, 16, 0.10);
+            z-index: 0;
+            will-change: transform;
+        }
+        .fc-about-img-pulse {
+            position: absolute;
+            left: 50%; transform: translateX(-50%);
+            border-radius: 50%;
+            z-index: 3;
+        }
+        .fc-about-img-pulse-top {
+            top: -40px;
+            width: 12px; height: 12px;
+            background: var(--primary-color);
+            animation: fcAboutDotA 2s ease-in-out infinite;
+        }
+        .fc-about-img-pulse-bottom {
+            bottom: -48px;
+            width: 9px; height: 9px;
+            background: rgba(16,16,16,0.55);
+            animation: fcAboutDotB 2s ease-in-out .5s infinite;
+        }
+        .fc-about-stats {
+            margin-top: 96px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+        }
+        @media (max-width: 900px) { .fc-about-stats { grid-template-columns: repeat(2, 1fr); gap: 16px; } }
+        .fc-about-stat {
+            background: rgba(255, 255, 255, 0.55);
+            backdrop-filter: blur(6px);
+            border-radius: 16px;
+            padding: 28px 18px;
+            text-align: center;
+            display: flex; flex-direction: column; align-items: center;
+            transition: transform .25s ease, background-color .3s ease;
+        }
+        .fc-about-stat:hover { transform: translateY(-5px); background: #fff; }
+        .fc-about-stat-icon {
+            width: 56px; height: 56px;
+            border-radius: 50%;
+            background: rgba(16, 16, 16, 0.05);
+            color: var(--primary-color);
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 26px;
+            margin-bottom: 16px;
+            transition: background-color .3s ease, transform .6s ease;
+        }
+        .fc-about-stat:hover .fc-about-stat-icon { background: rgba(255, 79, 1, 0.12); transform: rotate(360deg); }
+        .fc-about-stat-num {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 34px;
+            font-weight: 700;
+            color: var(--black-100);
+            line-height: 1;
+            letter-spacing: -1px;
+        }
+        .fc-about-stat p {
+            font-size: 14px;
+            color: rgba(16,16,16,0.65);
+            margin: 6px 0 0;
+        }
+        .fc-about-stat-rule {
+            display: block;
+            width: 40px; height: 2px;
+            background: var(--primary-color);
+            margin-top: 14px;
+            transition: width .3s ease;
+        }
+        .fc-about-stat:hover .fc-about-stat-rule { width: 64px; }
+        .fc-about-cta {
+            margin-top: 80px;
+            background: var(--black-100);
+            color: #fff;
+            padding: 32px 36px;
+            border-radius: 18px;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+        .fc-about-cta-text h3 {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 24px;
+            font-weight: 500;
+            margin: 0 0 6px;
+            color: #fff;
+        }
+        .fc-about-cta-text p {
+            color: rgba(255,255,255,0.75);
+            margin: 0;
+            font-size: 15px;
+        }
+        .fc-about-cta-btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--primary-color);
+            color: #fff;
+            padding: 13px 26px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-weight: 600;
+            font-size: 15px;
+            transition: transform .2s ease, background-color .3s ease;
+        }
+        .fc-about-cta-btn:hover { transform: scale(1.04); background: #e84a02; }
+
+        /* ========== 4-column footer (white + orange) ========== */
+        .fc-footer4 {
+            position: relative;
+            background: #ffffff;
+            color: #1a1a1a;
+            margin-top: 80px;
+            border-top: 1px solid rgba(0,0,0,0.06);
+            overflow: hidden;
+            font-family: "Bricolage Grotesque", sans-serif;
+        }
+        .fc-footer4::before, .fc-footer4::after {
+            content: "";
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .fc-footer4::before {
+            top: -120px; left: 12%;
+            width: 320px; height: 320px;
+            background: rgba(255, 79, 1, 0.12);
+        }
+        .fc-footer4::after {
+            bottom: 80px; right: 14%;
+            width: 380px; height: 380px;
+            background: rgba(255, 79, 1, 0.10);
+        }
+        .fc-footer4-inner {
+            position: relative;
+            z-index: 1;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 80px 32px 32px;
+        }
+        @media (min-width: 1024px) {
+            .fc-footer4-inner { padding: 100px 32px 32px; }
+        }
+        .fc-footer4-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 48px;
+        }
+        @media (min-width: 1024px) {
+            .fc-footer4-grid { grid-template-columns: 1fr 2fr; gap: 64px; }
+        }
+        /* Brand column */
+        .fc-footer4-brand { text-align: center; }
+        @media (min-width: 640px) {
+            .fc-footer4-brand { text-align: left; }
+        }
+        .fc-footer4-logo {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: #1a1a1a;
+        }
+        .fc-footer4-logo-mark {
+            width: 40px; height: 40px;
+            border-radius: 12px;
+            background: var(--primary-color);
+            color: #fff;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 22px;
+        }
+        .fc-footer4-logo-name {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: #1a1a1a;
+        }
+        .fc-footer4-logo-name .fc-accent { color: var(--primary-color); }
+        .fc-footer4-desc {
+            margin: 24px auto 0;
+            max-width: 360px;
+            color: rgba(26, 26, 26, 0.55);
+            font-size: 14.5px;
+            line-height: 1.65;
+        }
+        @media (min-width: 640px) {
+            .fc-footer4-desc { margin: 24px 0 0; }
+        }
+        .fc-footer4-socials {
+            list-style: none;
+            margin: 32px 0 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            gap: 18px;
+        }
+        @media (min-width: 640px) {
+            .fc-footer4-socials { justify-content: flex-start; gap: 22px; }
+        }
+        .fc-footer4-socials a {
+            color: var(--primary-color);
+            font-size: 22px;
+            display: inline-flex;
+            transition: opacity .25s ease, transform .25s ease;
+        }
+        .fc-footer4-socials a:hover {
+            opacity: 0.7;
+            transform: translateY(-2px);
+        }
+
+        /* Link columns */
+        .fc-footer4-cols {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 36px;
+        }
+        @media (min-width: 640px) {
+            .fc-footer4-cols { grid-template-columns: 1fr 1fr; }
+        }
+        @media (min-width: 1024px) {
+            .fc-footer4-cols { grid-template-columns: repeat(4, 1fr); gap: 32px; }
+        }
+        .fc-footer4-col { text-align: center; }
+        @media (min-width: 640px) { .fc-footer4-col { text-align: left; } }
+        .fc-footer4-col-title {
+            font-family: "Bricolage Grotesque", sans-serif;
+            font-size: 17px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 0 0 24px;
+        }
+        .fc-footer4-col ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .fc-footer4-col li { font-size: 14px; }
+        .fc-footer4-col a {
+            color: rgba(26, 26, 26, 0.65);
+            text-decoration: none;
+            transition: color .25s ease;
+        }
+        .fc-footer4-col a:hover { color: var(--primary-color); }
+
+        /* Live demo ping indicator */
+        .fc-footer4-live {
+            display: inline-flex !important;
+            align-items: center;
+            gap: 8px;
+        }
+        .fc-footer4-ping {
+            position: relative;
+            display: inline-flex;
+            width: 9px; height: 9px;
+        }
+        .fc-footer4-ping-ring,
+        .fc-footer4-ping-dot {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background: var(--primary-color);
+        }
+        .fc-footer4-ping-ring {
+            opacity: 0.75;
+            animation: fcPing 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+        @keyframes fcPing {
+            75%, 100% { transform: scale(2.2); opacity: 0; }
+        }
+
+        /* Contact column */
+        .fc-footer4-contact li {
+            display: flex !important;
+            align-items: flex-start;
+            gap: 10px;
+            justify-content: center;
+        }
+        @media (min-width: 640px) {
+            .fc-footer4-contact li { justify-content: flex-start; }
+        }
+        .fc-footer4-contact i {
+            color: var(--primary-color);
+            font-size: 18px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .fc-footer4-contact a, .fc-footer4-contact span, .fc-footer4-contact address {
+            color: rgba(26, 26, 26, 0.65);
+            font-style: normal;
+            text-decoration: none;
+        }
+        .fc-footer4-contact a:hover { color: var(--primary-color); }
+
+        /* Bottom */
+        .fc-footer4-bottom {
+            margin-top: 56px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .fc-footer4-copyright {
+            color: rgba(26, 26, 26, 0.55);
+            font-size: 13px;
+            margin: 0;
+            order: 2;
+        }
+        .fc-footer4-credit {
+            color: rgba(26, 26, 26, 0.55);
+            font-size: 13px;
+            margin: 0;
+            order: 1;
+        }
+        @media (max-width: 639px) {
+            .fc-footer4-bottom { justify-content: center; text-align: center; }
+            .fc-footer4-copyright, .fc-footer4-credit { order: 0; width: 100%; }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- header start -->
+    <header id="header" class="fixed top-0 py-5 w-full z-50 bg-background transition-all duration-500">
+        <div class="container">
+            <div class="flex justify-between items-center">
+                <a href="#" class="fc-logo">
+                    <span class="fc-mark"><i class="ri-pulse-line"></i></span>
+                    Feder<span class="fc-accent">Care</span>
+                </a>
+                <div class="text-3xl mt-1 cursor-pointer block lg:hidden" id="menu-toggle">
+                    <i class="ri-menu-line"></i>
+                </div>
+                <nav id="menu"
+                    class="lg:bg-secondary bg-black-300 lg:rounded-[50px] lg:static absolute left-0 top-16 z-50 w-full max-h-0 overflow-hidden opacity-0 invisible lg:max-h-full lg:opacity-100 lg:visible lg:w-auto transition-all duration-500 ease-linear">
+                    <ul class="flex lg:flex-row flex-col">
+                        <li class="border-b border-b-black-100 lg:border-b-0">
+                            <a href="#how" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">How It Works</a>
+                        </li>
+                        <li class="border-b border-b-black-100 lg:border-b-0">
+                            <a href="#features" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">Features</a>
+                        </li>
+                        <li class="border-b border-b-black-100 lg:border-b-0">
+                            <a href="#modules" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">Modules</a>
+                        </li>
+                        <li class="border-b border-b-black-100 lg:border-b-0">
+                            <a href="#tech" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">Technology</a>
+                        </li>
+                        <li class="border-b border-b-black-100 lg:border-b-0">
+                            <a href="#team" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">Team</a>
+                        </li>
+                        <li class="border-b border-b-black-100 lg:border-b-0">
+                            <a href="#pricing" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">Pricing</a>
+                        </li>
+                        <li class="border-b border-b-black-100 lg:border-b-0">
+                            <a href="#faqs" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">FAQs</a>
+                        </li>
+                        <li class="border-b border-b-black-100 lg:border-b-0">
+                            <a href="/login" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">Login</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </header>
+    <!-- header end -->
+
+    <!-- Hero start -->
+    <section id="home" class="lg:pt-[200px] pt-[120px]">
+        <div class="container">
+            <div class="md:w-[85%] mx-auto text-center relative fadeInUp" data-delay="0.2">
+                <h3 class="border border-[#bebebe] py-2.5 px-5 rounded-3xl md:text-base md:leading-5 text-sm inline-block font-normal mb-[5px]">
+                    <i class="ri-shield-cross-line fc-pill-icon"></i>Privacy-preserving · Federated AI · HIPAA-aware
+                </h3>
+
+                <!-- Title + rotating descriptor -->
+                <h1 class="fc-hero-title">FederCare</h1>
+                <div class="fc-hero-rotate-row">
+                    <span class="fc-hero-rotate-prefix">A platform for</span>
+                    <span class="fc-text-rotate" id="fcTextRotate" data-words="hospitals|doctors|patients|pharmacies|labs|ambulances">
+                        <span class="fc-text-rotate-track" aria-hidden="true"></span>
+                        <span class="sr-only" id="fcTextRotateSr">hospitals</span>
+                    </span>
+                </div>
+
+                <p class="text-xl leading-7 mb-[5px] px-15 text-black-100 mt-4">
+                    Privacy-preserving federated learning platform connecting hospitals,
+                    doctors and patients through intelligent AI.
+                </p>
+                <div class="mt-7.5">
+                    <a href="/login" class="btn bg-primary text-secondary border-primary hover:bg-black-200 hover:text-white">Get Started</a>
+                    <a href="/login" class="btn bg-black-200 text-white border-black-200 hover:text-primary">Login</a>
+                </div>
+                <div class="absolute lg:right-[-25%] top-1/2 right-0">
+                    <img src="assets/images/shapes/shape1.png" alt="Shape" class="lg:max-w-[300px] max-w-[70px]">
+                </div>
+                <div class="absolute lg:-left-[30%] top-[10%] left-0">
+                    <img src="assets/images/shapes/shape2.png" alt="Shape" class="lg:max-w-[200px] max-w-15">
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- Hero End -->
+
+    <!-- Recent Work / Infinite image marquee -->
+    <div class="pt-5" id="portfolio">
+        <div>
+            <img src="assets/images/shapes/work-scribble.png" alt="custom" class="max-w-[300px]">
+        </div>
+        <div class="fc-marquee-stage">
+            <div class="fc-marquee-mask">
+                <div class="fc-marquee-track">
+                    <!-- 8 images duplicated for seamless loop -->
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1530497610245-94d3c16cda28?w=700&q=80&auto=format&fit=crop" alt="X-ray imaging" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=700&q=80&auto=format&fit=crop" alt="Stethoscope on laptop" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1587745416684-47953f16f02f?w=700&q=80&auto=format&fit=crop" alt="Ambulance" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=700&q=80&auto=format&fit=crop" alt="Lab analysis" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=700&q=80&auto=format&fit=crop" alt="Doctor consultation" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=700&q=80&auto=format&fit=crop" alt="Hospital corridor" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=700&q=80&auto=format&fit=crop" alt="Pharmacy" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1631549916768-4119b2e5f926?w=700&q=80&auto=format&fit=crop" alt="Medicine ordering" loading="lazy"></div>
+                    <!-- Duplicate set for seamless loop -->
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1530497610245-94d3c16cda28?w=700&q=80&auto=format&fit=crop" alt="" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=700&q=80&auto=format&fit=crop" alt="" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1587745416684-47953f16f02f?w=700&q=80&auto=format&fit=crop" alt="" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=700&q=80&auto=format&fit=crop" alt="" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=700&q=80&auto=format&fit=crop" alt="" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=700&q=80&auto=format&fit=crop" alt="" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=700&q=80&auto=format&fit=crop" alt="" loading="lazy"></div>
+                    <div class="fc-marquee-item"><img src="https://images.unsplash.com/photo-1631549916768-4119b2e5f926?w=700&q=80&auto=format&fit=crop" alt="" loading="lazy"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Section -->
+    <section class="lg:pt-25 pt-15">
+        <div class="container">
+            <div class="fc-stats fadeInUp" data-delay="0.2">
+                <div class="fc-stat">
+                    <div class="fc-stat-decor"></div>
+                    <div class="fc-stat-num">3<span>+</span></div>
+                    <div class="fc-stat-label">Hospitals Connected</div>
+                </div>
+                <div class="fc-stat">
+                    <div class="fc-stat-decor"></div>
+                    <div class="fc-stat-num">8</div>
+                    <div class="fc-stat-label">User Roles</div>
+                </div>
+                <div class="fc-stat">
+                    <div class="fc-stat-decor"></div>
+                    <div class="fc-stat-num">41</div>
+                    <div class="fc-stat-label">Diseases Detected</div>
+                </div>
+                <div class="fc-stat">
+                    <div class="fc-stat-decor"></div>
+                    <div class="fc-stat-num">99.5<span>%</span></div>
+                    <div class="fc-stat-label">X-Ray Accuracy</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- partners start -->
+    <div class="lg:pt-25 pt-15">
+        <div class="container">
+            <h2 class="uppercase text-base text-center tracking-[5px] mb-7.5 font-medium">Trusted by leading hospitals & care networks</h2>
+            <div class="company-list">
+                <div class="logo-slider overflow-hidden flex">
+                    <div class="logos-slide">
+                        <span class="fc-partner"><i class="ri-hospital-line"></i>Apollo Medanta</span>
+                        <span class="fc-partner"><i class="ri-heart-pulse-line"></i>City Medical Center</span>
+                        <span class="fc-partner"><i class="ri-microscope-line"></i>MIIT Health Labs</span>
+                        <span class="fc-partner"><i class="ri-capsule-line"></i>MedPlus Pharmacy</span>
+                        <span class="fc-partner"><i class="ri-stethoscope-line"></i>Kerala Care Network</span>
+                        <span class="fc-partner"><i class="ri-first-aid-kit-line"></i>108 Emergency Services</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- partners end -->
+
+    <!-- About section (FederCare services + stats + CTA) -->
+    <section id="about-section" class="fc-about">
+        <!-- Decorative background blobs -->
+        <div class="fc-about-blob fc-about-blob-1" data-parallax="-50"></div>
+        <div class="fc-about-blob fc-about-blob-2" data-parallax="50"></div>
+        <div class="fc-about-dot fc-about-dot-1"></div>
+        <div class="fc-about-dot fc-about-dot-2"></div>
+
+        <div class="container fc-about-inner">
+            <!-- Eyebrow + title -->
+            <div class="fc-about-head fadeInUp" data-delay="0.2">
+                <span class="fc-about-eyebrow">
+                    <i class="ri-flashlight-line"></i> DISCOVER OUR STORY
+                </span>
+                <h2 class="fc-about-title">About FederCare</h2>
+                <span class="fc-about-rule"></span>
+                <p class="fc-about-lead">
+                    FederCare is a privacy-preserving AI health network that lets hospitals, doctors and patients share intelligence — never raw data. We connect care across an entire region while keeping every record on the device it belongs to.
+                </p>
+            </div>
+
+            <!-- 3-column services grid -->
+            <div class="fc-about-grid">
+                <!-- Left column -->
+                <div class="fc-about-col">
+                    <div class="fc-service fadeInUp" data-delay="0.2" data-dir="left">
+                        <div class="fc-service-head">
+                            <span class="fc-service-icon">
+                                <i class="ri-shield-keyhole-line"></i>
+                                <i class="ri-sparkling-2-line fc-service-icon-sec"></i>
+                            </span>
+                            <h3>Privacy First</h3>
+                        </div>
+                        <p>Federated learning means models travel — not patient records. Raw data stays in your hospital while the network grows smarter together.</p>
+                    </div>
+                    <div class="fc-service fadeInUp" data-delay="0.3" data-dir="left">
+                        <div class="fc-service-head">
+                            <span class="fc-service-icon">
+                                <i class="ri-cpu-line"></i>
+                                <i class="ri-checkbox-circle-line fc-service-icon-sec"></i>
+                            </span>
+                            <h3>Clinical AI</h3>
+                        </div>
+                        <p>41-disease symptom checker, MobileNetV2 X-ray triage and abnormal-value lab analysis — each model audited and explainable.</p>
+                    </div>
+                    <div class="fc-service fadeInUp" data-delay="0.4" data-dir="left">
+                        <div class="fc-service-head">
+                            <span class="fc-service-icon">
+                                <i class="ri-pulse-line"></i>
+                                <i class="ri-star-line fc-service-icon-sec"></i>
+                            </span>
+                            <h3>Telecare</h3>
+                        </div>
+                        <p>Secure Jitsi consultations, prescription signing and EHR access in one flow — the doctor's whole tool-kit, on one screen.</p>
+                    </div>
+                </div>
+
+                <!-- Center image -->
+                <div class="fc-about-center">
+                    <div class="fc-about-img fadeInUp" data-delay="0.2">
+                        <img src="https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=700&q=80&auto=format&fit=crop" alt="Hospital corridor">
+                        <div class="fc-about-img-overlay">
+                            <a href="#modules" class="fc-about-img-btn">
+                                Our Platform <i class="ri-arrow-right-line"></i>
+                            </a>
+                        </div>
+                        <span class="fc-about-img-frame"></span>
+                        <span class="fc-about-img-blob-1" data-parallax="-50"></span>
+                        <span class="fc-about-img-blob-2" data-parallax="50"></span>
+                        <span class="fc-about-img-pulse fc-about-img-pulse-top"></span>
+                        <span class="fc-about-img-pulse fc-about-img-pulse-bottom"></span>
+                    </div>
+                </div>
+
+                <!-- Right column -->
+                <div class="fc-about-col">
+                    <div class="fc-service fadeInUp" data-delay="0.2" data-dir="right">
+                        <div class="fc-service-head">
+                            <span class="fc-service-icon">
+                                <i class="ri-map-pin-line"></i>
+                                <i class="ri-sparkling-2-line fc-service-icon-sec"></i>
+                            </span>
+                            <h3>Emergency SOS</h3>
+                        </div>
+                        <p>One tap dispatches the nearest ambulance with GPS routing and patient context — the receiving hospital is alerted in parallel.</p>
+                    </div>
+                    <div class="fc-service fadeInUp" data-delay="0.3" data-dir="right">
+                        <div class="fc-service-head">
+                            <span class="fc-service-icon">
+                                <i class="ri-capsule-line"></i>
+                                <i class="ri-checkbox-circle-line fc-service-icon-sec"></i>
+                            </span>
+                            <h3>Pharmacy Network</h3>
+                        </div>
+                        <p>Verified prescriptions, smart catalog, OTP-confirmed delivery — every dose tracked, every handoff auditable.</p>
+                    </div>
+                    <div class="fc-service fadeInUp" data-delay="0.4" data-dir="right">
+                        <div class="fc-service-head">
+                            <span class="fc-service-icon">
+                                <i class="ri-hospital-line"></i>
+                                <i class="ri-star-line fc-service-icon-sec"></i>
+                            </span>
+                            <h3>Hospital OS</h3>
+                        </div>
+                        <p>Inventory, beds, staff, equipment vendors and federated training rounds — operations for a connected hospital, in one dashboard.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stat counters -->
+            <div class="fc-about-stats" id="fcAboutStats">
+                <div class="fc-about-stat fadeInUp" data-delay="0.1">
+                    <span class="fc-about-stat-icon"><i class="ri-medal-line"></i></span>
+                    <div class="fc-about-stat-num" data-target="3" data-suffix="+">0</div>
+                    <p>Partner Hospitals</p>
+                    <span class="fc-about-stat-rule"></span>
+                </div>
+                <div class="fc-about-stat fadeInUp" data-delay="0.2">
+                    <span class="fc-about-stat-icon"><i class="ri-team-line"></i></span>
+                    <div class="fc-about-stat-num" data-target="8" data-suffix="">0</div>
+                    <p>User Roles</p>
+                    <span class="fc-about-stat-rule"></span>
+                </div>
+                <div class="fc-about-stat fadeInUp" data-delay="0.3">
+                    <span class="fc-about-stat-icon"><i class="ri-stethoscope-line"></i></span>
+                    <div class="fc-about-stat-num" data-target="41" data-suffix="">0</div>
+                    <p>Diseases Detected</p>
+                    <span class="fc-about-stat-rule"></span>
+                </div>
+                <div class="fc-about-stat fadeInUp" data-delay="0.4">
+                    <span class="fc-about-stat-icon"><i class="ri-line-chart-line"></i></span>
+                    <div class="fc-about-stat-num" data-target="99.5" data-suffix="%">0</div>
+                    <p>X-Ray Recall</p>
+                    <span class="fc-about-stat-rule"></span>
+                </div>
+            </div>
+
+            <!-- CTA strip -->
+            <div class="fc-about-cta fadeInUp" data-delay="0.5">
+                <div class="fc-about-cta-text">
+                    <h3>Ready to bring smarter care to your hospital?</h3>
+                    <p>Let's build the federated future of healthcare together.</p>
+                </div>
+                <a href="/login" class="fc-about-cta-btn">
+                    Get Started <i class="ri-arrow-right-line"></i>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- work process start -->
+    <section id="how" class="lg:pt-25 pt-15">
+        <div class="container">
+            <div class="text-center pb-15 fadeInUp" data-delay="0.2">
+                <h3 class="border border-[#bebebe] py-2.5 px-5 rounded-3xl md:text-base md:leading-5 text-sm inline-block font-normal mb-[5px] fc-section-eyebrow">
+                    <i class="ri-arrow-right-up-line"></i>
+                    How It Works
+                </h3>
+                <h2 class="xl:leading-[90px] xl:text-[80px] md:leading-[60px] md:text-[50px] leading-[50px] text-[40px] text-black-100 font-medium">
+                    Three steps to connected care
+                </h2>
+                <p class="md:text-xl md:leading-7 text-base mt-2">From sign-up to AI-assisted diagnosis in minutes.</p>
+            </div>
+
+            <div class="grid lg:grid-cols-3 gap-x-6 gap-y-12.5 lg:pt-15 pt-0">
+                <div class="flex flex-col items-center text-center relative sm:px-[25px] px-0">
+                    <div class="lg:w-[65px] lg:h-[65px] w-12.5 h-12.5 rounded-full flex items-center justify-center border border-[rgba(0,0,0,.08)] relative">
+                        <i class="ri-user-add-line text-[25px]"></i>
+                        <div class="overlay-list absolute -right-2 -top-2 bg-primary flex justify-center items-center text-white lg:w-7.5 lg:h-7.5 w-6 h-6 rounded-full">
+                            <span class="lg:font-medium text-sm">01</span>
+                        </div>
+                    </div>
+                    <div class="lg:pt-6 pt-5">
+                        <div class="title-box">
+                            <h3 class="lg:text-[32px] text-[26px] lg:leading-[30px] font-bold"><a href="#">Register</a></h3>
+                        </div>
+                        <div class="text-box lg:mt-[22px] mt-4">
+                            <p class="text-lg font-medium leading-7">Choose your role — patient, doctor, hospital, pharmacist, lab tech or vendor. Verified onboarding in under 24 hours.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex flex-col items-center text-center relative sm:px-[25px] px-0">
+                    <div class="absolute top-0 left-[-110px] opacity-50 lg:block hidden">
+                        <img src="assets/images/shapes/workprocess-shape2.png" alt="shapes">
+                    </div>
+                    <div class="lg:w-[65px] lg:h-[65px] w-12.5 h-12.5 rounded-full flex items-center justify-center border border-[rgba(0,0,0,.08)] relative">
+                        <i class="ri-links-line text-[25px]"></i>
+                        <div class="overlay-list absolute -right-2 -top-2 bg-primary flex justify-center items-center text-white lg:w-7.5 lg:h-7.5 w-6 h-6 rounded-full">
+                            <span class="lg:font-medium text-sm">02</span>
+                        </div>
+                    </div>
+                    <div class="lg:pt-6 pt-5">
+                        <div class="title-box">
+                            <h3 class="lg:text-[32px] text-[26px] lg:leading-[30px] font-bold"><a href="#">Connect</a></h3>
+                        </div>
+                        <div class="text-box lg:mt-[22px] mt-4">
+                            <p class="text-lg font-medium leading-7">Your data stays on-device while FedAvg models train across the network. Federated learning, zero raw-data sharing.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex flex-col items-center text-center relative sm:px-[25px] px-0">
+                    <div class="absolute top-0 left-[-110px] opacity-50 lg:block hidden">
+                        <img src="assets/images/shapes/workprocess-shape1.png" alt="shapes">
+                    </div>
+                    <div class="lg:w-[65px] lg:h-[65px] w-12.5 h-12.5 rounded-full flex items-center justify-center border border-[rgba(0,0,0,.08)] relative">
+                        <i class="ri-heart-pulse-line text-[25px]"></i>
+                        <div class="overlay-list absolute -right-2 -top-2 bg-primary flex justify-center items-center text-white lg:w-7.5 lg:h-7.5 w-6 h-6 rounded-full">
+                            <span class="lg:font-medium text-sm">03</span>
+                        </div>
+                    </div>
+                    <div class="lg:pt-6 pt-5">
+                        <div class="title-box">
+                            <h3 class="lg:text-[32px] text-[26px] lg:leading-[30px] font-bold"><a href="#">Care</a></h3>
+                        </div>
+                        <div class="text-box lg:mt-[22px] mt-4">
+                            <p class="text-lg font-medium leading-7">Book consultations, order medicines, trigger SOS, get AI-assisted diagnosis — every action backed by smarter models.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- work process end -->
+
+    <!-- services start -->
+    <section id="services" class="lg:pt-25 pt-15">
+        <div class="container">
+            <div class="text-center pb-15 fadeInUp" data-delay="0.2">
+                <h3 class="border border-[#bebebe] py-2.5 px-5 rounded-3xl md:text-base md:leading-5 text-sm inline-block font-normal mb-[5px] fc-section-eyebrow">
+                    <i class="ri-arrow-right-up-line"></i>
+                    Capabilities
+                </h3>
+                <h2 class="xl:leading-[90px] xl:text-[80px] md:leading-[60px] md:text-[50px] leading-[50px] text-[40px] text-black-100 font-medium">
+                    AI, emergency & telecare
+                </h2>
+                <p class="md:text-xl md:leading-7 text-base mt-2">Three pillars of the FederCare platform.</p>
+            </div>
+
+            <div class="grid lg:grid-cols-3 md:grid-cols-2 gap-6">
+                <div>
+                    <div class="info-item border border-[#bebebe] pt-7.5 pl-7.5 rounded-[15px] fadeInUp" data-delay="0.2">
+                        <div class="mb-10 pr-7.5">
+                            <h4 class="lg:text-3xl text-[26px] lg:leading-[49px] font-medium mb-2">Federated AI</h4>
+                            <p class="lg:text-lg text-base font-medium lg:leading-7">FedAvg-trained models across hospitals — privacy preserved, accuracy compounded.</p>
+                        </div>
+                        <img src="https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=900&q=80&auto=format&fit=crop" alt="Federated learning neural network" class="w-full h-[260px] object-cover rounded-tl-lg">
+                    </div>
+                </div>
+                <div>
+                    <div class="info-item border border-[#bebebe] pt-7.5 pl-7.5 rounded-[15px] fadeInUp" data-delay="0.4">
+                        <div class="mb-10 pr-7.5">
+                            <h4 class="lg:text-3xl text-[26px] lg:leading-[49px] font-medium mb-2">Emergency Response</h4>
+                            <p class="lg:text-lg text-base font-medium lg:leading-7">GPS-based ambulance dispatch with real-time tracking and route navigation.</p>
+                        </div>
+                        <img src="https://images.unsplash.com/photo-1587745416684-47953f16f02f?w=900&q=80&auto=format&fit=crop" alt="Emergency ambulance" class="w-full h-[260px] object-cover rounded-tl-lg">
+                    </div>
+                </div>
+                <div>
+                    <div class="info-item border border-[#bebebe] pt-7.5 pl-7.5 rounded-[15px] fadeInUp" data-delay="0.6">
+                        <div class="mb-10 pr-7.5">
+                            <h4 class="lg:text-3xl text-[26px] lg:leading-[49px] font-medium mb-2">Telemedicine</h4>
+                            <p class="lg:text-lg text-base font-medium lg:leading-7">Jitsi-powered secure video consultations with AI diagnosis on the side.</p>
+                        </div>
+                        <img src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=900&q=80&auto=format&fit=crop" alt="Video consultation" class="w-full h-[260px] object-cover rounded-tl-lg">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- services end -->
+
+    <!-- Modules start -->
+    <section id="modules" class="lg:pt-25 pt-15">
+        <div class="container">
+            <div class="text-center pb-15 fadeInUp" data-delay="0.2">
+                <h3 class="border border-[#bebebe] py-2.5 px-5 rounded-3xl md:text-base md:leading-5 text-sm inline-block font-normal mb-[5px] fc-section-eyebrow">
+                    <i class="ri-arrow-right-up-line"></i>
+                    Platform Modules
+                </h3>
+                <h2 class="xl:leading-[90px] xl:text-[80px] md:leading-[60px] md:text-[50px] leading-[50px] text-[40px] text-black-100 font-medium">
+                    Eight roles. One platform.
+                </h2>
+                <p class="md:text-xl md:leading-7 text-base mt-2">Tailored dashboards for every actor in the care network.</p>
+            </div>
+
+            <div class="grid lg:grid-cols-4 md:grid-cols-2 grid-cols-1 gap-6">
+                <div class="fc-module fadeInUp" data-delay="0.1">
+                    <div class="fc-module-img">
+                        <span class="fc-module-num">01 · Super Admin</span>
+                        <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=700&q=80&auto=format&fit=crop" alt="Super Admin dashboard">
+                    </div>
+                    <div class="fc-module-body">
+                        <h4>Super Admin</h4>
+                        <p>Manage the entire platform, approve users, monitor FL training and epidemic alerts.</p>
+                    </div>
+                </div>
+                <div class="fc-module fadeInUp" data-delay="0.2">
+                    <div class="fc-module-img">
+                        <span class="fc-module-num">02 · Hospital Admin</span>
+                        <img src="https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=700&q=80&auto=format&fit=crop" alt="Hospital corridor">
+                    </div>
+                    <div class="fc-module-body">
+                        <h4>Hospital Admin</h4>
+                        <p>Manage hospital resources, staff, beds, inventory and equipment orders.</p>
+                    </div>
+                </div>
+                <div class="fc-module fadeInUp" data-delay="0.3">
+                    <div class="fc-module-img">
+                        <span class="fc-module-num">03 · Doctor</span>
+                        <img src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=700&q=80&auto=format&fit=crop" alt="Doctor with stethoscope">
+                    </div>
+                    <div class="fc-module-body">
+                        <h4>Doctor</h4>
+                        <p>Video consultations, AI diagnosis, prescriptions, lab orders and EHR access.</p>
+                    </div>
+                </div>
+                <div class="fc-module fadeInUp" data-delay="0.4">
+                    <div class="fc-module-img">
+                        <span class="fc-module-num">04 · Patient</span>
+                        <img src="https://images.unsplash.com/photo-1666214280391-8ff5bd3c0bf0?w=700&q=80&auto=format&fit=crop" alt="Patient using app">
+                    </div>
+                    <div class="fc-module-body">
+                        <h4>Patient</h4>
+                        <p>Book consultations, order medicines, lab tests, emergency SOS and EHR wallet.</p>
+                    </div>
+                </div>
+                <div class="fc-module fadeInUp" data-delay="0.5">
+                    <div class="fc-module-img">
+                        <span class="fc-module-num">05 · Pharmacist</span>
+                        <img src="https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=700&q=80&auto=format&fit=crop" alt="Pharmacist">
+                    </div>
+                    <div class="fc-module-body">
+                        <h4>Pharmacist</h4>
+                        <p>Manage medicine catalog, verify prescriptions and track OTP-verified deliveries.</p>
+                    </div>
+                </div>
+                <div class="fc-module fadeInUp" data-delay="0.6">
+                    <div class="fc-module-img">
+                        <span class="fc-module-num">06 · Lab Technician</span>
+                        <img src="https://images.unsplash.com/photo-1579154204601-01588f351e67?w=700&q=80&auto=format&fit=crop" alt="Lab technician">
+                    </div>
+                    <div class="fc-module-body">
+                        <h4>Lab Technician</h4>
+                        <p>Process lab orders, upload reports with AI analysis and abnormal value detection.</p>
+                    </div>
+                </div>
+                <div class="fc-module fadeInUp" data-delay="0.7">
+                    <div class="fc-module-img">
+                        <span class="fc-module-num">07 · Ambulance Driver</span>
+                        <img src="https://images.unsplash.com/photo-1597764690523-15bea4c581c9?w=700&q=80&auto=format&fit=crop" alt="Ambulance driver">
+                    </div>
+                    <div class="fc-module-body">
+                        <h4>Ambulance Driver</h4>
+                        <p>Receive emergency dispatch alerts, GPS tracking and real-time patient updates.</p>
+                    </div>
+                </div>
+                <div class="fc-module fadeInUp" data-delay="0.8">
+                    <div class="fc-module-img">
+                        <span class="fc-module-num">08 · Equipment Vendor</span>
+                        <img src="https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=700&q=80&auto=format&fit=crop" alt="Medical equipment">
+                    </div>
+                    <div class="fc-module-body">
+                        <h4>Equipment Vendor</h4>
+                        <p>List medical equipment, manage hospital orders and OTP delivery confirmation.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- Modules end -->
+
+    <!-- projects start -->
+    <div class="lg:pt-25 pt-15" id="projects">
+        <div class="container">
+            <div class="text-center pb-15 fadeInUp" data-delay="0.2">
+                <h3 class="border border-[#bebebe] py-2.5 px-5 rounded-3xl md:text-base md:leading-5 text-sm inline-block font-normal mb-[5px] fc-section-eyebrow">
+                    <i class="ri-arrow-right-up-line"></i>
+                    In Action
+                </h3>
+                <h2 class="xl:leading-[90px] xl:text-[80px] md:leading-[60px] md:text-[50px] leading-[50px] text-[40px] text-black-100 font-medium">
+                    Featured workflows
+                </h2>
+                <p class="md:text-xl md:leading-7 text-base mt-2">A glimpse of FederCare in real-world settings.</p>
+            </div>
+            <div class="grid md:grid-cols-2 gap-6">
+                <div>
+                    <a href="https://images.unsplash.com/photo-1530497610245-94d3c16cda28?w=1600&q=80&auto=format&fit=crop" class="work-popup">
+                        <div class="rounded-lg overflow-hidden relative after:absolute after:left-0 after:top-0 after:w-full after:h-full after:bg-[linear-gradient(0deg,_rgba(0,0,0,.3),_transparent)] after:opacity-0 hover:after:opacity-100 after:transition-all after:duration-500 group">
+                            <img src="https://images.unsplash.com/photo-1530497610245-94d3c16cda28?w=1200&q=80&auto=format&fit=crop" alt="" class="group-hover:blur-[1.5px] group-hover:scale-[1.04] transition-all duration-500 w-full h-[420px] object-cover">
+                            <span class="fc-project-tag absolute top-4 right-4 inline-block rounded-[32px] py-[7px] px-[14px] text-white text-sm uppercase tracking-wider leading-[30px] font-medium">X-Ray AI</span>
+                            <div class="z-20 absolute left-7.5 -bottom-0 opacity-0 group-hover:opacity-100 group-hover:bottom-6 transition-all duration-500">
+                                <h1 class="lg:text-3xl text-[26px] font-semibold text-white">MobileNetV2 pneumonia screening</h1>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+                <div>
+                    <a href="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=1600&q=80&auto=format&fit=crop" class="work-popup">
+                        <div class="rounded-lg overflow-hidden relative after:absolute after:left-0 after:top-0 after:w-full after:h-full after:bg-[linear-gradient(0deg,_rgba(0,0,0,.3),_transparent)] after:opacity-0 hover:after:opacity-100 after:transition-all after:duration-500 group">
+                            <img src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=1200&q=80&auto=format&fit=crop" alt="" class="group-hover:blur-[1.5px] group-hover:scale-[1.04] transition-all duration-500 w-full h-[420px] object-cover">
+                            <span class="fc-project-tag absolute top-4 right-4 inline-block rounded-[32px] py-[7px] px-[14px] text-white text-sm uppercase tracking-wider leading-[30px] font-medium">Video Care</span>
+                            <div class="z-20 absolute left-7.5 -bottom-0 opacity-0 group-hover:opacity-100 group-hover:bottom-6 transition-all duration-500">
+                                <h1 class="lg:text-3xl text-[26px] font-semibold text-white">Secure Jitsi consultations</h1>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+                <div>
+                    <a href="https://images.unsplash.com/photo-1587745416684-47953f16f02f?w=1600&q=80&auto=format&fit=crop" class="work-popup">
+                        <div class="rounded-lg overflow-hidden relative after:absolute after:left-0 after:top-0 after:w-full after:h-full after:bg-[linear-gradient(0deg,_rgba(0,0,0,.3),_transparent)] after:opacity-0 hover:after:opacity-100 after:transition-all after:duration-500 group">
+                            <img src="https://images.unsplash.com/photo-1587745416684-47953f16f02f?w=1200&q=80&auto=format&fit=crop" alt="" class="group-hover:blur-[1.5px] group-hover:scale-[1.04] transition-all duration-500 w-full h-[420px] object-cover">
+                            <span class="fc-project-tag absolute top-4 right-4 inline-block rounded-[32px] py-[7px] px-[14px] text-white text-sm uppercase tracking-wider leading-[30px] font-medium">SOS</span>
+                            <div class="z-20 absolute left-7.5 -bottom-0 opacity-0 group-hover:opacity-100 group-hover:bottom-6 transition-all duration-500">
+                                <h1 class="lg:text-3xl text-[26px] font-semibold text-white">GPS ambulance dispatch</h1>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+                <div>
+                    <a href="https://images.unsplash.com/photo-1631549916768-4119b2e5f926?w=1600&q=80&auto=format&fit=crop" class="work-popup">
+                        <div class="rounded-lg overflow-hidden relative after:absolute after:left-0 after:top-0 after:w-full after:h-full after:bg-[linear-gradient(0deg,_rgba(0,0,0,.3),_transparent)] after:opacity-0 hover:after:opacity-100 after:transition-all after:duration-500 group">
+                            <img src="https://images.unsplash.com/photo-1631549916768-4119b2e5f926?w=1200&q=80&auto=format&fit=crop" alt="" class="group-hover:blur-[1.5px] group-hover:scale-[1.04] transition-all duration-500 w-full h-[420px] object-cover">
+                            <span class="fc-project-tag absolute top-4 right-4 inline-block rounded-[32px] py-[7px] px-[14px] text-white text-sm uppercase tracking-wider leading-[30px] font-medium">Pharmacy</span>
+                            <div class="z-20 absolute left-7.5 -bottom-0 opacity-0 group-hover:opacity-100 group-hover:bottom-6 transition-all duration-500">
+                                <h1 class="lg:text-3xl text-[26px] font-semibold text-white">Prescription verification & OTP delivery</h1>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+            </div>
+            <div class="mt-7.5 text-center">
+                <a href="/login" class="btn bg-primary text-secondary border-primary hover:bg-black-200 hover:text-white">View live demo</a>
+            </div>
+        </div>
+    </div>
+    <!-- projects end -->
+
+    <!-- Testimonials start (circular 3D carousel) -->
+    <section class="lg:pt-25 pt-15">
+        <div class="container">
+            <div class="text-center pb-15 fadeInUp" data-delay="0.2">
+                <h3 class="border border-[#bebebe] py-2.5 px-5 rounded-3xl md:text-base md:leading-5 text-sm inline-block font-normal mb-[5px] fc-section-eyebrow">
+                    <i class="ri-arrow-right-up-line"></i>
+                    Testimonials
+                </h3>
+                <h2 class="xl:leading-[90px] xl:text-[80px] md:leading-[60px] md:text-[50px] leading-[50px] text-[40px] text-black-100 font-medium">
+                    What people say
+                </h2>
+                <p class="md:text-xl md:leading-7 text-base mt-2">Doctors, drivers and partners — in their own words.</p>
+            </div>
+
+            <div class="fc-ct-wrap fadeInUp" data-delay="0.2">
+                <div class="fc-ct-grid">
+                    <div class="fc-ct-images" id="fcCtImages"></div>
+                    <div class="fc-ct-content">
+                        <h3 class="fc-ct-name" id="fcCtName"></h3>
+                        <p class="fc-ct-designation" id="fcCtDesignation"></p>
+                        <p class="fc-ct-quote" id="fcCtQuote"></p>
+                        <div class="fc-ct-arrows">
+                            <button class="fc-ct-arrow" id="fcCtPrev" aria-label="Previous testimonial">
+                                <i class="ri-arrow-left-line"></i>
+                            </button>
+                            <button class="fc-ct-arrow" id="fcCtNext" aria-label="Next testimonial">
+                                <i class="ri-arrow-right-line"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- Testimonials end -->
+
+    <!-- Features Start (Vercep-style: hero text + triple marquee + 4-feature grid) -->
+    <section id="features" class="fc-vfeat">
+        <div class="fc-vfeat-inner">
+            <!-- Hero text -->
+            <div class="fc-vfeat-head">
+                <h2 class="fc-vfeat-title">Removing the friction from connected care</h2>
+                <p class="fc-vfeat-lead">
+                    Hospitals get lost in a sea of point-tools, conflicting standards and never-ending compliance. FederCare filters out the noise, focuses on what actually matters, and gives clinicians the kind of clarity that lets care happen — not paperwork.
+                </p>
+            </div>
+
+            <!-- Triple marquee of questions -->
+            <div class="fc-vfeat-marq-wrap">
+                <div class="fc-vfeat-marq-fade fc-vfeat-marq-fade-l"></div>
+                <div class="fc-vfeat-marq-fade fc-vfeat-marq-fade-r"></div>
+                <div class="fc-vfeat-marq-stack">
+                    <div class="fc-vfeat-marq fc-vfeat-marq-1">
+                        <div class="fc-vfeat-marq-track">
+                            <span class="fc-vfeat-chip">How do I protect patient data?</span>
+                            <span class="fc-vfeat-chip">Can hospitals share AI models safely?</span>
+                            <span class="fc-vfeat-chip">How do we coordinate emergencies?</span>
+                            <span class="fc-vfeat-chip">What's the X-ray accuracy?</span>
+                            <span class="fc-vfeat-chip">How do I protect patient data?</span>
+                            <span class="fc-vfeat-chip">Can hospitals share AI models safely?</span>
+                            <span class="fc-vfeat-chip">How do we coordinate emergencies?</span>
+                            <span class="fc-vfeat-chip">What's the X-ray accuracy?</span>
+                        </div>
+                    </div>
+                    <div class="fc-vfeat-marq fc-vfeat-marq-2">
+                        <div class="fc-vfeat-marq-track">
+                            <span class="fc-vfeat-chip">How do I onboard my clinic?</span>
+                            <span class="fc-vfeat-chip">Is the platform HIPAA-aware?</span>
+                            <span class="fc-vfeat-chip">How fast is ambulance dispatch?</span>
+                            <span class="fc-vfeat-chip">Can I verify prescriptions digitally?</span>
+                            <span class="fc-vfeat-chip">How do I onboard my clinic?</span>
+                            <span class="fc-vfeat-chip">Is the platform HIPAA-aware?</span>
+                            <span class="fc-vfeat-chip">How fast is ambulance dispatch?</span>
+                            <span class="fc-vfeat-chip">Can I verify prescriptions digitally?</span>
+                        </div>
+                    </div>
+                    <div class="fc-vfeat-marq fc-vfeat-marq-3">
+                        <div class="fc-vfeat-marq-track">
+                            <span class="fc-vfeat-chip">How accurate is the symptom checker?</span>
+                            <span class="fc-vfeat-chip">Where does training data live?</span>
+                            <span class="fc-vfeat-chip">How do labs upload reports?</span>
+                            <span class="fc-vfeat-chip">Can patients carry their EHR?</span>
+                            <span class="fc-vfeat-chip">How accurate is the symptom checker?</span>
+                            <span class="fc-vfeat-chip">Where does training data live?</span>
+                            <span class="fc-vfeat-chip">How do labs upload reports?</span>
+                            <span class="fc-vfeat-chip">Can patients carry their EHR?</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4-feature dashed grid -->
+            <div class="fc-vfeat-grid">
+                <div class="fc-vfeat-feature">
+                    <div class="fc-vfeat-feature-img">
+                        <img src="https://images.unsplash.com/photo-1633265486064-086b219458ec?w=600&q=80&auto=format&fit=crop" alt="Data privacy / encryption" loading="lazy">
+                        <span class="fc-vfeat-feature-tag"><i class="ri-shield-keyhole-line"></i></span>
+                    </div>
+                    <div class="fc-vfeat-feature-body">
+                        <h3>We keep data private</h3>
+                        <p>No PHI ever leaves the hospital. Federated learning lets us train models across institutions without moving a single patient record.</p>
+                    </div>
+                </div>
+                <div class="fc-vfeat-feature">
+                    <div class="fc-vfeat-feature-img">
+                        <img src="https://images.unsplash.com/photo-1587745416684-47953f16f02f?w=600&q=80&auto=format&fit=crop" alt="Ambulance / emergency response" loading="lazy">
+                        <span class="fc-vfeat-feature-tag"><i class="ri-flashlight-line"></i></span>
+                    </div>
+                    <div class="fc-vfeat-feature-body">
+                        <h3>We focus on real outcomes</h3>
+                        <p>Every module — from AI diagnosis to ambulance dispatch — is designed to cut time-to-care, not add to the click-count.</p>
+                    </div>
+                </div>
+                <div class="fc-vfeat-feature">
+                    <div class="fc-vfeat-feature-img">
+                        <img src="https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&q=80&auto=format&fit=crop" alt="Modern tech stack / circuit board" loading="lazy">
+                        <span class="fc-vfeat-feature-tag"><i class="ri-cpu-line"></i></span>
+                    </div>
+                    <div class="fc-vfeat-feature-body">
+                        <h3>We use proven tech</h3>
+                        <p>Django, TensorFlow, Flower FL, Jitsi, Cloudinary — battle-tested building blocks, wired together with care.</p>
+                    </div>
+                </div>
+                <div class="fc-vfeat-feature">
+                    <div class="fc-vfeat-feature-img">
+                        <img src="https://images.unsplash.com/photo-1530026405186-ed1f139313f8?w=600&q=80&auto=format&fit=crop" alt="Medical team supporting patients" loading="lazy">
+                        <span class="fc-vfeat-feature-tag"><i class="ri-team-line"></i></span>
+                    </div>
+                    <div class="fc-vfeat-feature-body">
+                        <h3>With you every step</h3>
+                        <p>From sign-up to scaled deployment, our team supports patients, doctors, hospitals, pharmacies and ambulance drivers alike.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- Features End -->
+
+    <!-- Technology Section -->
+    <section id="tech" class="lg:pt-25 pt-15">
+        <div class="container">
+            <div class="text-center pb-15 fadeInUp" data-delay="0.2">
+                <h3 class="border border-[#bebebe] py-2.5 px-5 rounded-3xl md:text-base md:leading-5 text-sm inline-block font-normal mb-[5px] fc-section-eyebrow">
+                    <i class="ri-arrow-right-up-line"></i>
+                    Technology
+                </h3>
+                <h2 class="xl:leading-[90px] xl:text-[80px] md:leading-[60px] md:text-[50px] leading-[50px] text-[40px] text-black-100 font-medium">
+                    Built with modern technology
+                </h2>
+                <p class="md:text-xl md:leading-7 text-base mt-2">A production-grade stack from frontend to federated training.</p>
+            </div>
+            <div class="lg:w-[85%] mx-auto fadeInUp" data-delay="0.3">
+                <div class="fc-tech-wrap">
+                    <span class="fc-chip"><i class="ri-server-line"></i>Django 4.2</span>
+                    <span class="fc-chip"><i class="ri-reactjs-line"></i>React 18</span>
+                    <span class="fc-chip"><i class="ri-cpu-line"></i>TensorFlow 2.15</span>
+                    <span class="fc-chip"><i class="ri-flask-line"></i>Scikit-learn</span>
+                    <span class="fc-chip"><i class="ri-flower-line"></i>Flower FL</span>
+                    <span class="fc-chip"><i class="ri-broadcast-line"></i>Django Channels</span>
+                    <span class="fc-chip"><i class="ri-paint-brush-line"></i>Tailwind CSS</span>
+                    <span class="fc-chip"><i class="ri-magic-line"></i>Framer Motion</span>
+                    <span class="fc-chip"><i class="ri-video-chat-line"></i>Jitsi Meet</span>
+                    <span class="fc-chip"><i class="ri-bank-card-line"></i>Razorpay</span>
+                    <span class="fc-chip"><i class="ri-cloud-line"></i>Cloudinary</span>
+                    <span class="fc-chip"><i class="ri-database-2-line"></i>SQLite</span>
+                    <span class="fc-chip"><i class="ri-map-pin-line"></i>Leaflet.js</span>
+                    <span class="fc-chip"><i class="ri-links-line"></i>WebSocket</span>
+                    <span class="fc-chip"><i class="ri-key-2-line"></i>JWT Auth</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing / Get Started start (FederCare 3-column pricing — fixed grid layout) -->
+    <section id="pricing" class="lg:pt-25 pt-15" style="background:#FAF7F2;padding-bottom:80px;">
+        <div class="container">
+
+            <!-- Heading + sub + billing toggle -->
+            <div style="max-width:1100px;margin:0 auto;padding:0 20px;text-align:center;" class="fadeInUp" data-delay="0.2">
+                <h3 style="display:inline-block;border:1px solid #bebebe;padding:8px 18px;border-radius:24px;font-size:14px;font-weight:500;color:#101010;margin-bottom:14px;">
+                    <i class="ri-price-tag-3-line"></i> Simple Pricing
+                </h3>
+                <h2 style="font-family:'Bricolage Grotesque',sans-serif;font-size:48px;line-height:1.1;font-weight:600;color:#101010;margin:0 0 12px 0;">
+                    Choose Your Plan
+                </h2>
+                <p style="color:#666;font-size:16px;max-width:560px;margin:0 auto 28px;">
+                    Start free and scale as you grow. All plans include privacy-first federated learning.
+                </p>
+
+                <div style="display:inline-flex;align-items:center;background:#fff;border:1px solid #E5E5E5;border-radius:999px;padding:4px;gap:4px;margin-bottom:48px;">
+                    <button type="button" id="fc-monthly-btn"
+                            style="padding:8px 20px;border-radius:999px;background:#F97316;color:#fff;border:none;font-weight:600;font-size:14px;cursor:pointer;transition:background 0.2s,color 0.2s;">
+                        Monthly Billing
+                    </button>
+                    <button type="button" id="fc-yearly-btn"
+                            style="padding:8px 20px;border-radius:999px;background:transparent;color:#666;border:none;font-size:14px;font-weight:500;cursor:pointer;transition:background 0.2s,color 0.2s;">
+                        Yearly Billing
+                        <span style="background:#F0FDF4;color:#16A34A;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;margin-left:6px;">Save 20%</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3-column plan grid -->
+            <div class="fc-pricing-grid"
+                 style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;max-width:1100px;margin:0 auto;padding:0 20px;align-items:stretch;">
+
+                <!-- BASIC -->
+                <div class="fc-plan-card fadeInUp" data-delay="0.2"
+                     style="background:#FFFFFF;border:2px solid #E5E5E5;border-radius:16px;padding:32px;position:relative;transition:transform 0.3s,box-shadow 0.3s;display:flex;flex-direction:column;">
+                    <h3 style="font-size:24px;font-weight:800;color:#000000;margin:0 0 8px 0;">Basic Plan</h3>
+                    <p style="color:#666666;font-size:14px;margin:0 0 20px 0;line-height:1.5;">
+                        Perfect for small clinics getting started with FederCare.
+                    </p>
+                    <div style="margin:0 0 24px 0;">
+                        <span class="fc-price" data-month="Free" data-year="Free"
+                              style="font-size:48px;font-weight:900;color:#000000;">Free</span>
+                        <span class="fc-period" data-period-always="forever"
+                              style="font-size:14px;color:#999999;margin-left:4px;">/forever</span>
+                    </div>
+                    <a href="/login"
+                       style="display:block;width:100%;padding:14px;background:#111111;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center;margin-bottom:24px;transition:opacity 0.2s;">
+                        Get Started Free
+                    </a>
+                    <ul style="list-style:none;padding:0;margin:0;">
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>1 Doctor account</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Up to 50 patients</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Basic consultations</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Medicine &amp; lab booking</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Email support</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Basic FL access</li>
+                    </ul>
+                </div>
+
+                <!-- PROFESSIONAL (POPULAR) -->
+                <div class="fc-plan-card fadeInUp" data-delay="0.3"
+                     style="background:#FFF7ED;border:2px solid #F97316;border-radius:16px;padding:32px;position:relative;transition:transform 0.3s,box-shadow 0.3s;display:flex;flex-direction:column;">
+                    <span style="position:absolute;top:16px;right:16px;background:#F97316;color:#fff;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;">Popular</span>
+                    <h3 style="font-size:24px;font-weight:800;color:#000000;margin:0 0 8px 0;">Professional Plan</h3>
+                    <p style="color:#666666;font-size:14px;margin:0 0 20px 0;line-height:1.5;">
+                        Best value for growing hospitals that need video, AI, and emergency SOS.
+                    </p>
+                    <div style="margin:0 0 24px 0;">
+                        <span class="fc-price" data-month="₹2,999" data-year="₹28,790"
+                              style="font-size:48px;font-weight:900;color:#000000;">₹2,999</span>
+                        <span class="fc-period" data-month-period="/month" data-year-period="/year"
+                              style="font-size:14px;color:#999999;margin-left:4px;">/month</span>
+                    </div>
+                    <a href="/login"
+                       style="display:block;width:100%;padding:14px;background:#F97316;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center;margin-bottom:24px;transition:opacity 0.2s;">
+                        Start Free Trial
+                    </a>
+                    <ul style="list-style:none;padding:0;margin:0;">
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Up to 10 doctors, unlimited patients</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Video consultations (Jitsi)</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>AI diagnosis (41 diseases) + X-Ray AI</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Emergency SOS &amp; bed management</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Full FL training participation</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Priority support &amp; custom branding</li>
+                    </ul>
+                </div>
+
+                <!-- ENTERPRISE -->
+                <div class="fc-plan-card fadeInUp" data-delay="0.4"
+                     style="background:#FFFFFF;border:2px solid #E5E5E5;border-radius:16px;padding:32px;position:relative;transition:transform 0.3s,box-shadow 0.3s;display:flex;flex-direction:column;">
+                    <h3 style="font-size:24px;font-weight:800;color:#000000;margin:0 0 8px 0;">Enterprise Plan</h3>
+                    <p style="color:#666666;font-size:14px;margin:0 0 20px 0;line-height:1.5;">
+                        Advanced plan for hospital networks with unlimited access.
+                    </p>
+                    <div style="margin:0 0 24px 0;">
+                        <span class="fc-price" data-month="₹9,999" data-year="₹95,990"
+                              style="font-size:48px;font-weight:900;color:#000000;">₹9,999</span>
+                        <span class="fc-period" data-month-period="/month" data-year-period="/year"
+                              style="font-size:14px;color:#999999;margin-left:4px;">/month</span>
+                    </div>
+                    <a href="mailto:federcaresupport@gmail.com"
+                       style="display:block;width:100%;padding:14px;background:#111111;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center;margin-bottom:24px;transition:opacity 0.2s;">
+                        Contact Sales
+                    </a>
+                    <ul style="list-style:none;padding:0;margin:0;">
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Unlimited doctors &amp; hospitals</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Multi-hospital FL network</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Advanced epidemic detection</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Custom AI model training &amp; API access</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>Dedicated manager &amp; 24/7 phone support</li>
+                        <li style="display:flex;align-items:center;gap:10px;font-size:14px;color:#444444;margin-bottom:10px;"><span style="width:20px;height:20px;border-radius:50%;border:2px solid #F97316;color:#F97316;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</span>SLA guarantee &amp; on-premise deployment</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Trust strip -->
+            <div style="max-width:1100px;margin:48px auto 0;padding:0 20px;text-align:center;" class="fadeInUp" data-delay="0.3">
+                <p style="color:#666;margin:0 0 14px;">
+                    🔒 All plans include end-to-end encryption and HIPAA-compliant federated learning
+                </p>
+                <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:12px;">
+                    <span style="font-size:12px;padding:8px 16px;border-radius:999px;border:1px solid #e5e5e5;background:#fff;color:#666;">🔐 Privacy First</span>
+                    <span style="font-size:12px;padding:8px 16px;border-radius:999px;border:1px solid #e5e5e5;background:#fff;color:#666;">🏥 HIPAA Aware</span>
+                    <span style="font-size:12px;padding:8px 16px;border-radius:999px;border:1px solid #e5e5e5;background:#fff;color:#666;">🧠 Federated AI</span>
+                    <span style="font-size:12px;padding:8px 16px;border-radius:999px;border:1px solid #e5e5e5;background:#fff;color:#666;">📱 Mobile Ready</span>
+                    <span style="font-size:12px;padding:8px 16px;border-radius:999px;border:1px solid #e5e5e5;background:#fff;color:#666;">⚡ 99.9% Uptime</span>
+                    <span style="font-size:12px;padding:8px 16px;border-radius:999px;border:1px solid #e5e5e5;background:#fff;color:#666;">🎓 MCA Project 2026</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile responsive: single column under 768px -->
+        <style>
+            @media (max-width: 768px) {
+                #pricing .fc-pricing-grid { grid-template-columns: 1fr !important; }
+            }
+            #pricing .fc-plan-card a:hover { opacity: 0.9; }
+        </style>
+
+        <!-- Billing toggle behaviour + hover lift -->
+        <script>
+            (function () {
+                var section = document.getElementById('pricing');
+                if (!section) return;
+
+                var monthlyBtn = document.getElementById('fc-monthly-btn');
+                var yearlyBtn  = document.getElementById('fc-yearly-btn');
+                var prices  = section.querySelectorAll('.fc-price');
+                var periods = section.querySelectorAll('.fc-period');
+                var cards   = section.querySelectorAll('.fc-plan-card');
+
+                function setActive(period) {
+                    if (period === 'year') {
+                        yearlyBtn.style.background = '#F97316';
+                        yearlyBtn.style.color = '#fff';
+                        monthlyBtn.style.background = 'transparent';
+                        monthlyBtn.style.color = '#666';
+                    } else {
+                        monthlyBtn.style.background = '#F97316';
+                        monthlyBtn.style.color = '#fff';
+                        yearlyBtn.style.background = 'transparent';
+                        yearlyBtn.style.color = '#666';
+                    }
+                    prices.forEach(function (el) {
+                        var next = el.getAttribute('data-' + period);
+                        if (next != null) el.textContent = next;
+                    });
+                    periods.forEach(function (el) {
+                        if (el.getAttribute('data-period-always')) return; // Basic stays /forever
+                        var next = el.getAttribute('data-' + period + '-period');
+                        if (next) el.textContent = next;
+                    });
+                }
+
+                monthlyBtn && monthlyBtn.addEventListener('click', function () { setActive('month'); });
+                yearlyBtn  && yearlyBtn .addEventListener('click', function () { setActive('year');  });
+
+                cards.forEach(function (card) {
+                    card.addEventListener('mouseenter', function () {
+                        card.style.transform = 'translateY(-8px)';
+                        card.style.boxShadow = '0 20px 40px rgba(0,0,0,0.10)';
+                    });
+                    card.addEventListener('mouseleave', function () {
+                        card.style.transform = 'translateY(0)';
+                        card.style.boxShadow = 'none';
+                    });
+                });
+            })();
+        </script>
+    </section>
+        <!-- Pricing End -->
+
+    <!-- faqs start -->
+    <section id="faqs" class="lg:pt-25 pt-15">
+        <div class="container">
+            <div class="text-center pb-15 fadeInUp" data-delay="0.2">
+                <h3 class="border border-[#bebebe] py-2.5 px-5 rounded-3xl md:text-base md:leading-5 text-sm inline-block font-normal mb-[5px] fc-section-eyebrow">
+                    <i class="ri-arrow-right-up-line"></i>
+                    FAQs
+                </h3>
+                <h2 class="xl:leading-[90px] xl:text-[80px] md:leading-[60px] md:text-[50px] leading-[50px] text-[40px] text-black-100 font-medium">
+                    Frequently asked questions
+                </h2>
+                <p class="md:text-xl md:leading-7 text-base mt-2">Privacy, AI, onboarding — the most common questions, answered.</p>
+            </div>
+
+            <div class="grid lg:grid-cols-[33.33%_auto] md:grid-cols-2 grid-cols-1 gap-6">
+                <div class="p-12.5 rounded-[15px] bg-black-200 text-center">
+                    <div class="w-[140px] h-[140px] rounded-full bg-primary mx-auto inline-flex items-center justify-center text-white text-6xl font-bricolage font-semibold">F</div>
+                    <h2 class="text-white lg:text-[40px] text-3xl lg:leading-[1.2] py-3">Talk to the FederCare team</h2>
+                    <a href="/login" class="btn bg-primary text-secondary border-primary hover:bg-black-200 hover:text-white">
+                        Login to platform <i class="ri-login-circle-line"></i>
+                    </a>
+                    <p class="text-white mt-4">Prefer email? <a href="mailto:federcaresupport@gmail.com" class="text-primary">federcaresupport@gmail.com</a></p>
+                </div>
+
+                <div class="flex flex-col gap-[15px] lg:pl-7.5">
+                    <div class="accordion-item">
+                        <h2 data-open="false" class="accordion-header flex justify-between items-center lg:text-[22px] text-lg rounded-[10px] border border-[#ccc] py-4 px-5 font-medium cursor-pointer">
+                            How does federated learning protect patient data?
+                            <span class="inline-block w-[11px] h-[11px] rounded-full bg-secondary shrink-0"></span>
+                        </h2>
+                        <div class="accordion-body max-h-0 overflow-hidden opacity-0 invisible px-5 py-0 transition-all duration-500">
+                            <p class="mb-4">Raw patient records never leave the hospital. Each participating site trains a local model and shares only encrypted weight updates with the FedAvg aggregator — the global model improves while the data stays put.</p>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 data-open="false" class="accordion-header flex justify-between items-center lg:text-[22px] text-lg rounded-[10px] border border-[#ccc] py-4 px-5 font-medium cursor-pointer">
+                            How accurate is the X-Ray pneumonia detector?
+                            <span class="inline-block w-[11px] h-[11px] rounded-full bg-secondary shrink-0"></span>
+                        </h2>
+                        <div class="accordion-body max-h-0 overflow-hidden opacity-0 invisible px-5 py-0 transition-all duration-500">
+                            <p class="mb-4">Our MobileNetV2-based classifier achieves a 99.5% recall on the held-out validation set across 5,856 chest radiographs. It is designed as a triage aid, never as a replacement for a radiologist's report.</p>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 data-open="false" class="accordion-header flex justify-between items-center lg:text-[22px] text-lg rounded-[10px] border border-[#ccc] py-4 px-5 font-medium cursor-pointer">
+                            How does the Emergency SOS workflow work?
+                            <span class="inline-block w-[11px] h-[11px] rounded-full bg-secondary shrink-0"></span>
+                        </h2>
+                        <div class="accordion-body max-h-0 overflow-hidden opacity-0 invisible px-5 py-0 transition-all duration-500">
+                            <p class="mb-4">A patient triggers SOS from the mobile app, their GPS location is broadcast to the nearest available ambulance, and the driver receives turn-by-turn navigation along with patient context. The receiving hospital is alerted in parallel.</p>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 data-open="false" class="accordion-header flex justify-between items-center lg:text-[22px] text-lg rounded-[10px] border border-[#ccc] py-4 px-5 font-medium cursor-pointer">
+                            Can my hospital join the federated network?
+                            <span class="inline-block w-[11px] h-[11px] rounded-full bg-secondary shrink-0"></span>
+                        </h2>
+                        <div class="accordion-body max-h-0 overflow-hidden opacity-0 invisible px-5 py-0 transition-all duration-500">
+                            <p class="mb-4">Yes. After verification by the Super Admin, hospitals are issued a Flower FL client that participates in scheduled training rounds. No raw data, no PHI, no external storage — just gradient updates.</p>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 data-open="false" class="accordion-header flex justify-between items-center lg:text-[22px] text-lg rounded-[10px] border border-[#ccc] py-4 px-5 font-medium cursor-pointer">
+                            How are prescriptions verified before delivery?
+                            <span class="inline-block w-[11px] h-[11px] rounded-full bg-secondary shrink-0"></span>
+                        </h2>
+                        <div class="accordion-body max-h-0 overflow-hidden opacity-0 invisible px-5 py-0 transition-all duration-500">
+                            <p class="mb-4">Pharmacists verify the digital prescription against the doctor's signed record before dispatch. The patient confirms receipt with a one-time password, closing the loop with auditable delivery.</p>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 data-open="false" class="accordion-header flex justify-between items-center lg:text-[22px] text-lg rounded-[10px] border border-[#ccc] py-4 px-5 font-medium cursor-pointer">
+                            Is FederCare a commercial product?
+                            <span class="inline-block w-[11px] h-[11px] rounded-full bg-secondary shrink-0"></span>
+                        </h2>
+                        <div class="accordion-body max-h-0 overflow-hidden opacity-0 invisible px-5 py-0 transition-all duration-500">
+                            <p class="mb-4">FederCare is an academic MCA Final Year Project (2025–2026) at Mar Thoma Institute of Information Technology, Ayur, Kollam. It is intended as a reference implementation of a privacy-preserving healthcare network.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- faqs end -->
+
+    <!-- Team + CTA section (About3 layout) -->
+    <section id="team" class="fc-about3">
+        <div class="fc-about3-inner">
+            <div class="fc-about3-grid">
+                <!-- Main (large left): Adithya card -->
+                <div class="fc-about3-main">
+                    <div class="fc-about3-main-bg" aria-hidden="true"></div>
+                    <div class="fc-about3-main-content">
+                        <div class="fc-about3-avatar fc-about3-avatar-lg">AM</div>
+                        <h3 class="fc-about3-main-name">Adithya M</h3>
+                        <p class="fc-about3-main-role">Developer</p>
+                        <div class="fc-about3-main-tags">
+                            <span class="fc-about3-tag"><i class="ri-graduation-cap-line"></i>MCA Final Year</span>
+                            <span class="fc-about3-tag"><i class="ri-code-s-slash-line"></i>Full-Stack &amp; ML</span>
+                        </div>
+                        <div class="fc-about3-main-socials" style="display:flex;gap:12px;justify-content:center;margin-top:16px;">
+                            <a href="https://x.com/adithyan551" target="_blank" rel="noreferrer" aria-label="X (Twitter)" style="width:36px;height:36px;border-radius:50%;background-color:#000000;display:flex;align-items:center;justify-content:center;color:#fff;text-decoration:none;font-weight:900;font-size:14px;">𝕏</a>
+                            <a href="https://www.instagram.com/iam_adithya_m/" target="_blank" rel="noreferrer" aria-label="Instagram" style="width:36px;height:36px;border-radius:50%;background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);display:flex;align-items:center;justify-content:center;color:#fff;text-decoration:none;font-size:18px;">📸</a>
+                            <a href="https://www.linkedin.com/in/adithya-m-aa7102359/" target="_blank" rel="noreferrer" aria-label="LinkedIn" style="width:36px;height:36px;border-radius:50%;background-color:#0077B5;display:flex;align-items:center;justify-content:center;color:#fff;text-decoration:none;font-size:16px;font-weight:700;">in</a>
+                            <a href="https://github.com/adithyacreations/federcarenetwork" target="_blank" rel="noreferrer" aria-label="GitHub" style="width:36px;height:36px;border-radius:50%;background-color:#333333;display:flex;align-items:center;justify-content:center;color:#fff;text-decoration:none;font-size:18px;">🐙</a>
+                            <a href="mailto:federcaresupport@gmail.com" aria-label="Email" style="width:36px;height:36px;border-radius:50%;background-color:#EA4335;display:flex;align-items:center;justify-content:center;color:#fff;text-decoration:none;font-size:16px;">✉️</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right column -->
+                <div class="fc-about3-side">
+                    <!-- Breakout: Experience FederCare CTA -->
+                    <div class="fc-about3-breakout">
+                        <a href="#" class="fc-about3-breakout-logo">
+                            <span class="fc-mark"><i class="ri-pulse-line"></i></span>
+                            Feder<span class="fc-accent">Care</span>
+                        </a>
+                        <div>
+                            <p class="fc-about3-breakout-title">Experience FederCare</p>
+                            <p class="fc-about3-breakout-desc">Join the future of AI-powered healthcare — privacy first, intelligence built in.</p>
+                        </div>
+                        <a href="/login" class="fc-about3-breakout-btn">
+                            Login to Platform <i class="ri-arrow-right-line"></i>
+                        </a>
+                    </div>
+
+                    <!-- Secondary: Princy Thomas card -->
+                    <div class="fc-about3-secondary">
+                        <div class="fc-about3-avatar fc-about3-avatar-dark">PT</div>
+                        <div>
+                            <h4 class="fc-about3-sec-name">Mrs. Princy Thomas</h4>
+                            <p class="fc-about3-sec-role">Project Guide</p>
+                            <p class="fc-about3-sec-meta">MIIT · Ayur · Kollam</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- (Book/CTA merged into the section above) -->
+
+    <!-- 4-column footer -->
+    <footer class="fc-footer4" id="fcFooterWrap">
+        <div class="fc-footer4-inner">
+            <div class="fc-footer4-grid">
+                <!-- Brand column -->
+                <div class="fc-footer4-brand">
+                    <a href="#" class="fc-footer4-logo">
+                        <span class="fc-footer4-logo-mark"><i class="ri-pulse-line"></i></span>
+                        <span class="fc-footer4-logo-name">Feder<span class="fc-accent">Care</span></span>
+                    </a>
+                    <p class="fc-footer4-desc">
+                        A privacy-preserving AI health network connecting hospitals, doctors and patients through federated learning. Bringing intelligent, collaborative care to the future of medicine.
+                    </p>
+                    <ul class="fc-footer4-socials">
+                        <li><a href="https://x.com/adithyan551" target="_blank" rel="noreferrer" aria-label="Twitter"><i class="ri-twitter-x-line"></i></a></li>
+                        <li><a href="https://www.instagram.com/iam_adithya_m/" target="_blank" rel="noreferrer" aria-label="Instagram"><i class="ri-instagram-line"></i></a></li>
+                        <li><a href="https://github.com/adithyacreations/federcarenetwork" target="_blank" rel="noreferrer" aria-label="GitHub"><i class="ri-github-line"></i></a></li>
+                        <li><a href="https://www.linkedin.com/in/adithya-m-aa7102359/" target="_blank" rel="noreferrer" aria-label="LinkedIn"><i class="ri-linkedin-line"></i></a></li>
+                        <li><a href="mailto:federcaresupport@gmail.com" aria-label="Email"><i class="ri-mail-line"></i></a></li>
+                    </ul>
+                </div>
+
+                <!-- 4 link columns -->
+                <div class="fc-footer4-cols">
+                    <div class="fc-footer4-col">
+                        <p class="fc-footer4-col-title">About Us</p>
+                        <ul>
+                            <li><a href="#about-section">Our Mission</a></li>
+                            <li><a href="#team">The Team</a></li>
+                            <li><a href="#team">Project Guide</a></li>
+                            <li><a href="#about-section">MCA Program</a></li>
+                        </ul>
+                    </div>
+
+                    <div class="fc-footer4-col">
+                        <p class="fc-footer4-col-title">Our Services</p>
+                        <ul>
+                            <li><a href="#features">Federated Learning</a></li>
+                            <li><a href="#features">Telemedicine</a></li>
+                            <li><a href="#features">Emergency SOS</a></li>
+                            <li><a href="#features">Pharmacy Network</a></li>
+                        </ul>
+                    </div>
+
+                    <div class="fc-footer4-col">
+                        <p class="fc-footer4-col-title">Helpful Links</p>
+                        <ul>
+                            <li><a href="#faqs">FAQs</a></li>
+                            <li><a href="mailto:federcaresupport@gmail.com">Support</a></li>
+                            <li>
+                                <span class="fc-footer4-live-text">Live Demo</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="fc-footer4-col">
+                        <p class="fc-footer4-col-title">Contact Us</p>
+                        <ul class="fc-footer4-contact">
+                            <li>
+                                <i class="ri-mail-line"></i>
+                                <a href="mailto:federcaresupport@gmail.com">federcaresupport@gmail.com</a>
+                            </li>
+                            <li>
+                                <i class="ri-map-pin-line"></i>
+                                <address>MIIT Ayur, Kollam, Kerala, India</address>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="fc-footer4-bottom">
+                <p class="fc-footer4-copyright">&copy; 2026 FederCare · All rights reserved.</p>
+                <p class="fc-footer4-credit">MCA Final Year Project · Developed by Adithya M · Guide: Mrs. Princy Thomas</p>
+            </div>
+        </div>
+    </footer>
+
+    <div id="scroll-to-top" class="z-40 fixed right-2.5 bottom-5 w-10 h-10 items-center justify-center cursor-pointer" style="display: none;">
+        <i class="ri-arrow-up-s-line absolute text-primary"></i>
+        <svg id="rounded-scroll" width="100%" height="100%" viewBox="-1 -1 102 102" stroke="#ff4f01" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M50,1 a49,49 0 0,1 0,98 a49,49 0 0,1 0,-98"></path>
+        </svg>
+    </div>
+
+    <script src="assets/js/jquery-3.6.0.min.js"></script>
+    <script src="assets/js/slick.min.js"></script>
+    <script src="assets/js/jquery.magnific-popup.min.js"></script>
+    <script src="assets/js/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+    <script src="assets/js/script.js"></script>
+
+    <!-- Circular testimonials (vanilla port) -->
+    <script>
+    (function () {
+        const data = [
+            {
+                quote: "FederCare revolutionizes how hospitals collaborate on AI without compromising patient privacy. It is the kind of platform Indian healthcare has been waiting for.",
+                name: "Dr. Rajesh Kumar",
+                designation: "Senior Doctor · City Medical Center",
+                src: "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=900&q=80&auto=format&fit=crop"
+            },
+            {
+                quote: "The emergency SOS system with real-time GPS tracking has saved precious minutes in critical situations. Every second matters and FederCare knows it.",
+                name: "Suresh Kumar",
+                designation: "Ambulance Driver · 108 Emergency",
+                src: "https://images.unsplash.com/photo-1597764690523-15bea4c581c9?w=900&q=80&auto=format&fit=crop"
+            },
+            {
+                quote: "Prescription verification and OTP-confirmed medicine delivery is a brilliant safety touch. Our pharmacy workflow has never been smoother.",
+                name: "Priya Nair",
+                designation: "Pharmacist · MedPlus",
+                src: "https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=900&q=80&auto=format&fit=crop"
+            },
+            {
+                quote: "Training on data we never expose was unthinkable a year ago. FederCare's FedAvg pipeline makes it routine for our radiology team.",
+                name: "Dr. Anita Menon",
+                designation: "Radiologist · MIIT Health Labs",
+                src: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=900&q=80&auto=format&fit=crop"
+            }
+        ];
+
+        const imagesEl = document.getElementById('fcCtImages');
+        const nameEl = document.getElementById('fcCtName');
+        const designationEl = document.getElementById('fcCtDesignation');
+        const quoteEl = document.getElementById('fcCtQuote');
+        const prevBtn = document.getElementById('fcCtPrev');
+        const nextBtn = document.getElementById('fcCtNext');
+        if (!imagesEl) return;
+
+        // Build image stack
+        const imgEls = data.map((t, i) => {
+            const img = document.createElement('img');
+            img.src = t.src;
+            img.alt = t.name;
+            img.className = 'fc-ct-img';
+            img.dataset.index = i;
+            imagesEl.appendChild(img);
+            return img;
+        });
+
+        let active = 0;
+        let autoplayTimer = null;
+        const total = data.length;
+
+        function calculateGap() {
+            const w = imagesEl.offsetWidth || 400;
+            const minW = 280, maxW = 600, minGap = 50, maxGap = 95;
+            if (w <= minW) return minGap;
+            if (w >= maxW) return maxGap;
+            return minGap + (maxGap - minGap) * ((w - minW) / (maxW - minW));
+        }
+
+        function layout() {
+            const gap = calculateGap();
+            const lift = gap * 0.8;
+            imgEls.forEach((img, i) => {
+                const isActive = i === active;
+                const isLeft = (active - 1 + total) % total === i;
+                const isRight = (active + 1) % total === i;
+                if (isActive) {
+                    img.style.zIndex = 3;
+                    img.style.opacity = 1;
+                    img.style.pointerEvents = 'auto';
+                    img.style.transform = 'translateX(0) translateY(0) scale(1) rotateY(0deg)';
+                } else if (isLeft) {
+                    img.style.zIndex = 2;
+                    img.style.opacity = 1;
+                    img.style.pointerEvents = 'auto';
+                    img.style.transform = `translateX(-${gap}px) translateY(-${lift}px) scale(0.85) rotateY(15deg)`;
+                } else if (isRight) {
+                    img.style.zIndex = 2;
+                    img.style.opacity = 1;
+                    img.style.pointerEvents = 'auto';
+                    img.style.transform = `translateX(${gap}px) translateY(-${lift}px) scale(0.85) rotateY(-15deg)`;
+                } else {
+                    img.style.zIndex = 1;
+                    img.style.opacity = 0;
+                    img.style.pointerEvents = 'none';
+                }
+            });
+        }
+
+        function renderContent() {
+            const t = data[active];
+            nameEl.textContent = t.name;
+            designationEl.textContent = t.designation;
+            // Word-by-word blur-in
+            quoteEl.innerHTML = '';
+            const words = t.quote.split(' ');
+            words.forEach((w, i) => {
+                const span = document.createElement('span');
+                span.className = 'fc-ct-word';
+                span.textContent = w + ' ';
+                quoteEl.appendChild(span);
+                // Stagger reveal
+                setTimeout(() => span.classList.add('in'), 25 * i);
+            });
+        }
+
+        function update() {
+            layout();
+            renderContent();
+        }
+
+        function next() {
+            active = (active + 1) % total;
+            update();
+        }
+        function prev() {
+            active = (active - 1 + total) % total;
+            update();
+        }
+
+        function startAutoplay() {
+            stopAutoplay();
+            autoplayTimer = setInterval(next, 5000);
+        }
+        function stopAutoplay() {
+            if (autoplayTimer) { clearInterval(autoplayTimer); autoplayTimer = null; }
+        }
+
+        nextBtn.addEventListener('click', () => { next(); stopAutoplay(); });
+        prevBtn.addEventListener('click', () => { prev(); stopAutoplay(); });
+
+        // Click side image to navigate
+        imagesEl.addEventListener('click', (e) => {
+            if (e.target.classList.contains('fc-ct-img')) {
+                const idx = parseInt(e.target.dataset.index, 10);
+                if (idx === (active + 1) % total) { next(); stopAutoplay(); }
+                else if (idx === (active - 1 + total) % total) { prev(); stopAutoplay(); }
+            }
+        });
+
+        window.addEventListener('resize', layout);
+        // Wait one frame so layout() reads correct width
+        requestAnimationFrame(() => {
+            update();
+            startAutoplay();
+        });
+    })();
+    </script>
+
+    <!-- Text rotate animation (vanilla port) -->
+    <script>
+    (function () {
+        const root = document.getElementById('fcTextRotate');
+        if (!root) return;
+        const track = root.querySelector('.fc-text-rotate-track');
+        const sr = document.getElementById('fcTextRotateSr');
+        const words = root.dataset.words.split('|');
+        const STAGGER = 30; // ms between chars
+        const ROTATION = 2600; // ms per word
+        const EXIT_TIME = 450;
+        let idx = 0;
+
+        function splitChars(text) {
+            // Use Intl.Segmenter if available for proper grapheme handling
+            try {
+                const seg = new Intl.Segmenter('en', { granularity: 'grapheme' });
+                return Array.from(seg.segment(text), s => s.segment);
+            } catch (e) {
+                return Array.from(text);
+            }
+        }
+
+        function render(word) {
+            track.innerHTML = '';
+            const chars = splitChars(word);
+            const frag = document.createDocumentFragment();
+            chars.forEach((ch, i) => {
+                const span = document.createElement('span');
+                span.className = 'fc-tr-char';
+                span.textContent = ch === ' ' ? '\u00a0' : ch;
+                frag.appendChild(span);
+            });
+            track.appendChild(frag);
+            sr.textContent = word;
+            const spans = track.querySelectorAll('.fc-tr-char');
+            // Stagger in (from last per the demo: "staggerFrom: last")
+            const total = spans.length;
+            spans.forEach((s, i) => {
+                const delay = (total - 1 - i) * STAGGER;
+                setTimeout(() => s.classList.add('in'), delay);
+            });
+        }
+
+        function exit(cb) {
+            const spans = track.querySelectorAll('.fc-tr-char');
+            const total = spans.length;
+            spans.forEach((s, i) => {
+                const delay = (total - 1 - i) * STAGGER * 0.6;
+                setTimeout(() => {
+                    s.classList.remove('in');
+                    s.classList.add('out');
+                }, delay);
+            });
+            setTimeout(cb, EXIT_TIME);
+        }
+
+        function tick() {
+            exit(() => {
+                idx = (idx + 1) % words.length;
+                render(words[idx]);
+            });
+        }
+
+        render(words[0]);
+        const timer = setInterval(tick, ROTATION);
+
+        // Pause when offscreen
+        if ('IntersectionObserver' in window) {
+            let running = true;
+            const io = new IntersectionObserver((entries) => {
+                entries.forEach(e => {
+                    if (e.isIntersecting && !running) {
+                        running = true;
+                    } else if (!e.isIntersecting && running) {
+                        running = false;
+                    }
+                });
+            }, { threshold: 0.1 });
+            io.observe(root);
+            // (Keep timer running; just a placeholder hook if we want to gate)
+        }
+    })();
+    </script>
+
+    <!-- About section: stat counters + parallax blobs -->
+    <script>
+    (function () {
+        // ---- Counter animation ----
+        function animateCounter(el) {
+            const target = parseFloat(el.dataset.target);
+            const suffix = el.dataset.suffix || '';
+            const isFloat = !Number.isInteger(target);
+            const duration = 1600;
+            const start = performance.now();
+            function step(now) {
+                const t = Math.min(1, (now - start) / duration);
+                // ease-out cubic
+                const eased = 1 - Math.pow(1 - t, 3);
+                const value = target * eased;
+                el.textContent = (isFloat ? value.toFixed(1) : Math.floor(value)) + suffix;
+                if (t < 1) requestAnimationFrame(step);
+                else el.textContent = (isFloat ? target.toFixed(1) : target) + suffix;
+            }
+            requestAnimationFrame(step);
+        }
+        const stats = document.querySelectorAll('#fcAboutStats .fc-about-stat-num');
+        if (stats.length && 'IntersectionObserver' in window) {
+            const seen = new WeakSet();
+            const io = new IntersectionObserver((entries) => {
+                entries.forEach((e) => {
+                    if (e.isIntersecting && !seen.has(e.target)) {
+                        seen.add(e.target);
+                        animateCounter(e.target);
+                    }
+                });
+            }, { threshold: 0.4 });
+            stats.forEach((s) => io.observe(s));
+        } else {
+            stats.forEach(animateCounter);
+        }
+
+        // ---- Parallax decorative elements ----
+        const parallaxEls = document.querySelectorAll('[data-parallax]');
+        if (!parallaxEls.length) return;
+        let ticking = false;
+        function onScroll() {
+            if (ticking) return;
+            ticking = true;
+            requestAnimationFrame(() => {
+                const vh = window.innerHeight;
+                parallaxEls.forEach((el) => {
+                    const rect = el.getBoundingClientRect();
+                    // Skip if not near viewport
+                    if (rect.bottom < -200 || rect.top > vh + 200) return;
+                    const max = parseFloat(el.dataset.parallax);
+                    // Map element vertical center to a -1..1 range across viewport
+                    const center = rect.top + rect.height / 2;
+                    const rel = (center - vh / 2) / vh; // -1..1ish
+                    el.style.transform = 'translateY(' + (rel * max).toFixed(1) + 'px)';
+                });
+                ticking = false;
+            });
+        }
+        window.addEventListener('scroll', onScroll, { passive: true });
+        onScroll();
+    })();
+    </script>
+
+</body>
+
+</html>

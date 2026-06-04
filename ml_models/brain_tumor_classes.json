@@ -1,0 +1,18 @@
+{
+  "classes": [
+    "glioma",
+    "meningioma",
+    "notumor",
+    "pituitary"
+  ],
+  "num_classes": 4,
+  "model_type": "brain_tumor",
+  "input_size": 224,
+  "accuracy": 0.9062,
+  "class_descriptions": {
+    "glioma": "Glioma",
+    "meningioma": "Meningioma",
+    "notumor": "Notumor",
+    "pituitary": "Pituitary"
+  }
+}

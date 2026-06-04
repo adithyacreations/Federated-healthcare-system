@@ -1,0 +1,586 @@
+MODEL: LoginCredentials
+TABLE: login_credentials
+  login_id|UUIDField|Primary Key, NOT NULL
+  email|CharField|Unique, NOT NULL
+  password_hash|CharField|NOT NULL
+  role|CharField|NOT NULL
+  is_active|BooleanField|NOT NULL
+  is_approved|BooleanField|NOT NULL
+  last_login|DateTimeField|NULL
+  login_attempts|IntegerField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: SuperAdmin
+TABLE: super_admin
+  admin_id|UUIDField|Primary Key, NOT NULL
+  login_id|OneToOneField|Unique, FK to LoginCredentials, NOT NULL
+  full_name|CharField|NOT NULL
+  phone|CharField|NOT NULL
+  profile_photo|CharField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: RolePermissions
+TABLE: role_permissions
+  permission_id|UUIDField|Primary Key, NOT NULL
+  role|CharField|NOT NULL
+  module|CharField|NOT NULL
+  can_read|BooleanField|NOT NULL
+  can_write|BooleanField|NOT NULL
+  can_delete|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: LoginSession
+TABLE: login_sessions
+  session_id|UUIDField|Primary Key, NOT NULL
+  login_id|ForeignKey|FK to LoginCredentials, NOT NULL
+  jwt_token_hash|CharField|NOT NULL
+  device_info|TextField|NOT NULL
+  ip_address|GenericIPAddressField|NULL
+  expires_at|DateTimeField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: AuditLog
+TABLE: audit_logs
+  log_id|UUIDField|Primary Key, NOT NULL
+  login_id|ForeignKey|FK to LoginCredentials, NULL
+  action|CharField|NOT NULL
+  module|CharField|NOT NULL
+  entity_type|CharField|NOT NULL
+  entity_id|UUIDField|NULL
+  old_value|JSONField|NULL
+  new_value|JSONField|NULL
+  ip_address|GenericIPAddressField|NULL
+  logged_at|DateTimeField|NOT NULL
+---
+MODEL: Notification
+TABLE: notifications
+  notif_id|UUIDField|Primary Key, NOT NULL
+  login_id|ForeignKey|FK to LoginCredentials, NOT NULL
+  title|CharField|NOT NULL
+  message|TextField|NOT NULL
+  notif_type|CharField|NOT NULL
+  is_read|BooleanField|NOT NULL
+  related_id|UUIDField|NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: HospitalRegistration
+TABLE: hospital_registrations
+  hospital_id|UUIDField|Primary Key, NOT NULL
+  login_id|OneToOneField|Unique, FK to LoginCredentials, NOT NULL
+  hospital_name|CharField|NOT NULL
+  registration_no|CharField|Unique, NOT NULL
+  address|TextField|NOT NULL
+  city|CharField|NOT NULL
+  state|CharField|NOT NULL
+  latitude|DecimalField|NULL
+  longitude|DecimalField|NULL
+  contact_phone|CharField|NOT NULL
+  contact_email|CharField|NOT NULL
+  doc_url|CharField|NOT NULL
+  telemedicine_enabled|BooleanField|NOT NULL
+  approval_status|CharField|NOT NULL
+  profile_photo|CharField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: Department
+TABLE: departments
+  dept_id|UUIDField|Primary Key, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  dept_name|CharField|NOT NULL
+  description|TextField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: Bed
+TABLE: beds
+  bed_id|UUIDField|Primary Key, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  bed_type|CharField|NOT NULL
+  ward_name|CharField|NOT NULL
+  status|CharField|NOT NULL
+  reserved_for|ForeignKey|FK to PatientRegistration, NULL
+  reserved_at|DateTimeField|NULL
+  admitted_at|DateTimeField|NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: HospitalInventory
+TABLE: hospital_inventory
+  inventory_id|UUIDField|Primary Key, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  item_name|CharField|NOT NULL
+  category|CharField|NOT NULL
+  quantity|IntegerField|NOT NULL
+  unit|CharField|NOT NULL
+  reorder_level|IntegerField|NOT NULL
+  last_restocked|DateTimeField|NULL
+  maintenance_due|DateField|NULL
+---
+MODEL: HospitalPatient
+TABLE: hospital_patients
+  patient_id|UUIDField|Primary Key, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  added_by|ForeignKey|FK to LoginCredentials, NULL
+  full_name|CharField|NOT NULL
+  age|IntegerField|NOT NULL
+  gender|CharField|NOT NULL
+  blood_group|CharField|NOT NULL
+  symptoms|JSONField|NOT NULL
+  diagnosis|CharField|NOT NULL
+  visit_date|DateField|NOT NULL
+  notes|TextField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: PatientRegistration
+TABLE: patient_registrations
+  patient_id|UUIDField|Primary Key, NOT NULL
+  login_id|OneToOneField|Unique, FK to LoginCredentials, NOT NULL
+  full_name|CharField|NOT NULL
+  dob|DateField|NOT NULL
+  gender|CharField|NOT NULL
+  blood_group|CharField|NOT NULL
+  height_cm|DecimalField|NULL
+  weight_kg|DecimalField|NULL
+  bmi|DecimalField|NULL
+  address|TextField|NOT NULL
+  emergency_contact|CharField|NOT NULL
+  qr_code_url|CharField|NOT NULL
+  lifestyle_data|JSONField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: EHRRecord
+TABLE: ehr_records
+  record_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  added_by|ForeignKey|FK to LoginCredentials, NULL
+  record_type|CharField|NOT NULL
+  title|CharField|NOT NULL
+  content|TextField|NOT NULL
+  file_url|CharField|NOT NULL
+  is_sensitive|BooleanField|NOT NULL
+  recorded_at|DateTimeField|NOT NULL
+---
+MODEL: Allergy
+TABLE: allergies
+  allergy_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  allergen|CharField|NOT NULL
+  reaction|TextField|NOT NULL
+  severity|CharField|NOT NULL
+  noted_by|ForeignKey|FK to DoctorRegistration, NULL
+  noted_at|DateTimeField|NOT NULL
+---
+MODEL: EHRConsentLog
+TABLE: ehr_consent_log
+  consent_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  accessed_by|ForeignKey|FK to LoginCredentials, NOT NULL
+  access_type|CharField|NOT NULL
+  data_shared|JSONField|NOT NULL
+  consent_given|BooleanField|NOT NULL
+  expires_at|DateTimeField|NULL
+  accessed_at|DateTimeField|NOT NULL
+---
+MODEL: RiskAssessment
+TABLE: risk_assessments
+  risk_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  diabetes_risk|DecimalField|NULL
+  heart_risk|DecimalField|NULL
+  hypertension_risk|DecimalField|NULL
+  risk_level|CharField|NOT NULL
+  recommendations|TextField|NOT NULL
+  alert_sent|BooleanField|NOT NULL
+  assessed_at|DateTimeField|NOT NULL
+---
+MODEL: Complaint
+TABLE: patient_complaints
+  complaint_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  complaint_type|CharField|NOT NULL
+  doctor_id|ForeignKey|FK to DoctorRegistration, NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NULL
+  vendor_id|ForeignKey|FK to VendorRegistration, NULL
+  subject|CharField|NOT NULL
+  description|TextField|NOT NULL
+  status|CharField|NOT NULL
+  admin_response|TextField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: LabTestOrder
+TABLE: lab_test_orders
+  order_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NULL
+  doctor_id|ForeignKey|FK to DoctorRegistration, NULL
+  tests|JSONField|NOT NULL
+  total_fee|DecimalField|NOT NULL
+  appointment_date|DateField|NULL
+  appointment_time|TimeField|NULL
+  status|CharField|NOT NULL
+  payment_status|CharField|NOT NULL
+  razorpay_order_id|CharField|NOT NULL
+  razorpay_payment_id|CharField|NOT NULL
+  razorpay_signature|CharField|NOT NULL
+  report_url|CharField|NOT NULL
+  report_results|JSONField|NOT NULL
+  abnormal_flags|JSONField|NOT NULL
+  notes|TextField|NOT NULL
+  ordered_at|DateTimeField|NOT NULL
+---
+MODEL: EHRImage
+TABLE: ehr_images
+  image_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  image_type|CharField|NOT NULL
+  image_url|CharField|NOT NULL
+  title|CharField|NOT NULL
+  description|TextField|NOT NULL
+  hospital_name|CharField|NOT NULL
+  scan_date|DateField|NULL
+  uploaded_by|ForeignKey|FK to LoginCredentials, NULL
+  uploaded_at|DateTimeField|NOT NULL
+---
+MODEL: DoctorRegistration
+TABLE: doctor_registrations
+  doctor_id|UUIDField|Primary Key, NOT NULL
+  login_id|OneToOneField|Unique, FK to LoginCredentials, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  dept_id|ForeignKey|FK to Department, NULL
+  full_name|CharField|NOT NULL
+  specialization|CharField|NOT NULL
+  license_no|CharField|Unique, NOT NULL
+  experience_years|IntegerField|NOT NULL
+  consultation_fee|DecimalField|NOT NULL
+  profile_photo|CharField|NOT NULL
+  is_online|BooleanField|NOT NULL
+  approval_status|CharField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: DoctorSlot
+TABLE: doctor_slots
+  slot_id|UUIDField|Primary Key, NOT NULL
+  doctor_id|ForeignKey|FK to DoctorRegistration, NOT NULL
+  slot_date|DateField|NOT NULL
+  start_time|TimeField|NOT NULL
+  end_time|TimeField|NOT NULL
+  consult_type|CharField|NOT NULL
+  is_booked|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: Consultation
+TABLE: consultations
+  consultation_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  doctor_id|ForeignKey|FK to DoctorRegistration, NOT NULL
+  slot_id|ForeignKey|FK to DoctorSlot, NULL
+  jitsi_room_id|CharField|NOT NULL
+  status|CharField|NOT NULL
+  ai_suggestions|JSONField|NOT NULL
+  doctor_notes|TextField|NOT NULL
+  final_diagnosis|TextField|NOT NULL
+  to_emergency|BooleanField|NOT NULL
+  razorpay_order_id|CharField|NOT NULL
+  razorpay_payment_id|CharField|NOT NULL
+  razorpay_signature|CharField|NOT NULL
+  payment_status|CharField|NOT NULL
+  started_at|DateTimeField|NULL
+  ended_at|DateTimeField|NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: Prescription
+TABLE: prescriptions
+  prescription_id|UUIDField|Primary Key, NOT NULL
+  doctor_id|ForeignKey|FK to DoctorRegistration, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  consultation_id|ForeignKey|FK to Consultation, NULL
+  medicines|JSONField|NOT NULL
+  diagnosis|TextField|NOT NULL
+  instructions|TextField|NOT NULL
+  is_verified|BooleanField|NOT NULL
+  valid_until|DateField|NULL
+  pdf_url|CharField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: PharmacistRegistration
+TABLE: pharmacist_registrations
+  pharmacist_id|UUIDField|Primary Key, NOT NULL
+  login_id|OneToOneField|Unique, FK to LoginCredentials, NOT NULL
+  pharmacy_name|CharField|NOT NULL
+  license_no|CharField|Unique, NOT NULL
+  full_name|CharField|NOT NULL
+  address|TextField|NOT NULL
+  latitude|DecimalField|NULL
+  longitude|DecimalField|NULL
+  approval_status|CharField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: MedicineOrder
+TABLE: medicine_orders
+  med_order_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  pharmacist_id|ForeignKey|FK to PharmacistRegistration, NULL
+  prescription_id|ForeignKey|FK to Prescription, NULL
+  medicines|JSONField|NOT NULL
+  total_amount|DecimalField|NOT NULL
+  payment_status|CharField|NOT NULL
+  razorpay_order_id|CharField|NOT NULL
+  razorpay_payment_id|CharField|NOT NULL
+  razorpay_signature|CharField|NOT NULL
+  delivery_address|TextField|NOT NULL
+  order_status|CharField|NOT NULL
+  tracking_info|TextField|NOT NULL
+  prescription_url|CharField|NOT NULL
+  prescription_file|FileField|NULL
+  prescription_local_url|CharField|NOT NULL
+  prescription_verified|BooleanField|NOT NULL
+  prescription_rejection_reason|TextField|NOT NULL
+  requires_prescription|BooleanField|NOT NULL
+  payment_enabled|BooleanField|NOT NULL
+  delivery_otp|CharField|NOT NULL
+  otp_expiry|DateTimeField|NULL
+  otp_verified|BooleanField|NOT NULL
+  estimated_delivery_days|IntegerField|NOT NULL
+  dispatched_at|DateTimeField|NULL
+  delivered_at|DateTimeField|NULL
+  status_history|JSONField|NOT NULL
+  ordered_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: PharmacyInventory
+TABLE: pharmacy_inventory
+  inventory_id|UUIDField|Primary Key, NOT NULL
+  pharmacy_id|ForeignKey|FK to PharmacistRegistration, NOT NULL
+  medicine_name|CharField|NOT NULL
+  generic_name|CharField|NOT NULL
+  category|CharField|NOT NULL
+  description|TextField|NOT NULL
+  price_per_unit|DecimalField|NOT NULL
+  unit|CharField|NOT NULL
+  stock_quantity|IntegerField|NOT NULL
+  reorder_level|IntegerField|NOT NULL
+  requires_prescription|BooleanField|NOT NULL
+  medicine_image|FileField|NULL
+  manufacturer|CharField|NOT NULL
+  expiry_date|DateField|NULL
+  is_available|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: LabTechRegistration
+TABLE: lab_tech_registrations
+  lab_tech_id|UUIDField|Primary Key, NOT NULL
+  login_id|OneToOneField|Unique, FK to LoginCredentials, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  full_name|CharField|NOT NULL
+  qualification|CharField|NOT NULL
+  specialization|CharField|NOT NULL
+  phone|CharField|NOT NULL
+  approval_status|CharField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: LabOrder
+TABLE: lab_orders
+  order_id|UUIDField|Primary Key, NOT NULL
+  doctor_id|ForeignKey|FK to DoctorRegistration, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  lab_tech_id|ForeignKey|FK to LabTechRegistration, NULL
+  tests_ordered|JSONField|NOT NULL
+  priority|CharField|NOT NULL
+  status|CharField|NOT NULL
+  notes|TextField|NOT NULL
+  razorpay_order_id|CharField|NOT NULL
+  razorpay_payment_id|CharField|NOT NULL
+  razorpay_signature|CharField|NOT NULL
+  payment_status|CharField|NOT NULL
+  ordered_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: LabReport
+TABLE: lab_reports
+  report_id|UUIDField|Primary Key, NOT NULL
+  order_id|ForeignKey|FK to LabOrder, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  results|JSONField|NOT NULL
+  report_file_url|CharField|NOT NULL
+  abnormal_flags|JSONField|NOT NULL
+  ai_analysis|TextField|NOT NULL
+  saved_to_ehr|BooleanField|NOT NULL
+  uploaded_at|DateTimeField|NOT NULL
+---
+MODEL: AmbulanceDriverRegistration
+TABLE: ambulance_driver_registrations
+  driver_id|UUIDField|Primary Key, NOT NULL
+  login_id|OneToOneField|Unique, FK to LoginCredentials, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  full_name|CharField|NOT NULL
+  license_no|CharField|Unique, NOT NULL
+  phone|CharField|NOT NULL
+  is_available|BooleanField|NOT NULL
+  approval_status|CharField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: Ambulance
+TABLE: ambulances
+  ambulance_id|UUIDField|Primary Key, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  driver_id|ForeignKey|FK to AmbulanceDriverRegistration, NULL
+  vehicle_no|CharField|Unique, NOT NULL
+  ambulance_type|CharField|NOT NULL
+  equipment_list|JSONField|NOT NULL
+  is_available|BooleanField|NOT NULL
+  current_lat|DecimalField|NULL
+  current_lng|DecimalField|NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: EmergencyRequest
+TABLE: emergency_requests
+  emergency_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  triage_id|ForeignKey|FK to TriageSession, NULL
+  patient_lat|DecimalField|NOT NULL
+  patient_lng|DecimalField|NOT NULL
+  severity|CharField|NOT NULL
+  status|CharField|NOT NULL
+  assigned_hospital_id|ForeignKey|FK to HospitalRegistration, NULL
+  assigned_bed_id|ForeignKey|FK to Bed, NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: AmbulanceDispatch
+TABLE: ambulance_dispatch
+  dispatch_id|UUIDField|Primary Key, NOT NULL
+  emergency_id|ForeignKey|FK to EmergencyRequest, NOT NULL
+  ambulance_id|ForeignKey|FK to Ambulance, NOT NULL
+  dispatch_status|CharField|NOT NULL
+  eta_minutes|IntegerField|NULL
+  route_data|JSONField|NOT NULL
+  dispatched_at|DateTimeField|NOT NULL
+  arrived_at|DateTimeField|NULL
+  completed_at|DateTimeField|NULL
+---
+MODEL: VendorRegistration
+TABLE: vendor_registrations
+  vendor_id|UUIDField|Primary Key, NOT NULL
+  login_id|OneToOneField|Unique, FK to LoginCredentials, NOT NULL
+  company_name|CharField|NOT NULL
+  tax_id|CharField|Unique, NOT NULL
+  contact_name|CharField|NOT NULL
+  phone|CharField|NOT NULL
+  business_license_url|CharField|NOT NULL
+  certifications|JSONField|NOT NULL
+  approval_status|CharField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: EquipmentCatalog
+TABLE: equipment_catalog
+  product_id|UUIDField|Primary Key, NOT NULL
+  vendor_id|ForeignKey|FK to VendorRegistration, NOT NULL
+  product_name|CharField|NOT NULL
+  category|CharField|NOT NULL
+  specifications|JSONField|NOT NULL
+  price|DecimalField|NOT NULL
+  stock_qty|IntegerField|NOT NULL
+  image_url|CharField|NOT NULL
+  listed_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: EquipmentOrder
+TABLE: equipment_orders
+  eq_order_id|UUIDField|Primary Key, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  vendor_id|ForeignKey|FK to VendorRegistration, NOT NULL
+  product_id|ForeignKey|FK to EquipmentCatalog, NOT NULL
+  quantity|IntegerField|NOT NULL
+  total_price|DecimalField|NOT NULL
+  order_status|CharField|NOT NULL
+  razorpay_order_id|CharField|NOT NULL
+  razorpay_payment_id|CharField|NOT NULL
+  razorpay_signature|CharField|NOT NULL
+  payment_status|CharField|NOT NULL
+  tracking_info|TextField|NOT NULL
+  installed_at|DateTimeField|NULL
+  delivery_otp|CharField|NOT NULL
+  otp_expiry|DateTimeField|NULL
+  otp_verified|BooleanField|NOT NULL
+  estimated_delivery_days|IntegerField|NOT NULL
+  dispatched_at|DateTimeField|NULL
+  delivered_at|DateTimeField|NULL
+  delivery_notes|TextField|NOT NULL
+  status_history|JSONField|NOT NULL
+  ordered_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: TriageSession
+TABLE: triage_sessions
+  triage_id|UUIDField|Primary Key, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  symptoms_input|JSONField|NOT NULL
+  predicted_diseases|JSONField|NOT NULL
+  confidence_score|DecimalField|NULL
+  severity|CharField|NOT NULL
+  model_version|CharField|NOT NULL
+  emergency_triggered|BooleanField|NOT NULL
+  recommendation|TextField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: FLGlobalModel
+TABLE: fl_global_models
+  model_id|UUIDField|Primary Key, NOT NULL
+  version|CharField|Unique, NOT NULL
+  weights_file_url|CharField|NOT NULL
+  accuracy|DecimalField|NULL
+  hospitals_count|IntegerField|NOT NULL
+  aggregation_algo|CharField|NOT NULL
+  is_active|BooleanField|NOT NULL
+  privacy_epsilon|DecimalField|NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: FLRound
+TABLE: fl_rounds
+  round_id|UUIDField|Primary Key, NOT NULL
+  model_id|ForeignKey|FK to FLGlobalModel, NOT NULL
+  round_number|IntegerField|NOT NULL
+  status|CharField|NOT NULL
+  hospitals_invited|IntegerField|NOT NULL
+  hospitals_completed|IntegerField|NOT NULL
+  global_loss|DecimalField|NULL
+  started_at|DateTimeField|NULL
+  completed_at|DateTimeField|NULL
+  round_deadline|DateTimeField|NULL
+  min_hospitals_threshold|IntegerField|NOT NULL
+  auto_aggregated|BooleanField|NOT NULL
+  reminder_sent|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: FLHospitalWeight
+TABLE: fl_hospital_weights
+  weight_id|UUIDField|Primary Key, NOT NULL
+  round_id|ForeignKey|FK to FLRound, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  weights_file_url|CharField|NOT NULL
+  local_accuracy|DecimalField|NULL
+  local_loss|DecimalField|NULL
+  training_samples|IntegerField|NOT NULL
+  noise_added|BooleanField|NOT NULL
+  submitted_at|DateTimeField|NOT NULL
+---
+MODEL: EpidemicTrend
+TABLE: epidemic_trends
+  trend_id|UUIDField|Primary Key, NOT NULL
+  disease_name|CharField|NOT NULL
+  region|CharField|NOT NULL
+  case_count|IntegerField|NOT NULL
+  spike_detected|BooleanField|NOT NULL
+  heatmap_data|JSONField|NOT NULL
+  alert_level|CharField|NOT NULL
+  recorded_date|DateField|NOT NULL
+---

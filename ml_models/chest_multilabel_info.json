@@ -1,0 +1,39 @@
+{
+  "conditions": [
+    "Atelectasis",
+    "Cardiomegaly",
+    "Effusion",
+    "Infiltration",
+    "Mass",
+    "Nodule",
+    "Pneumonia",
+    "Pneumothorax",
+    "Consolidation",
+    "Edema",
+    "Emphysema",
+    "Fibrosis",
+    "Pleural_Thickening",
+    "Hernia"
+  ],
+  "num_conditions": 14,
+  "model_type": "chest_multilabel",
+  "input_size": 224,
+  "auc": 0.8004,
+  "threshold": 0.3,
+  "condition_descriptions": {
+    "Atelectasis": "Partial lung collapse",
+    "Cardiomegaly": "Enlarged heart",
+    "Effusion": "Fluid around lungs",
+    "Infiltration": "Lung infiltration",
+    "Mass": "Lung mass/growth",
+    "Nodule": "Small lung nodule",
+    "Pneumonia": "Lung infection",
+    "Pneumothorax": "Collapsed lung",
+    "Consolidation": "Lung consolidation",
+    "Edema": "Fluid in lungs",
+    "Emphysema": "Air sac damage",
+    "Fibrosis": "Lung scarring",
+    "Pleural_Thickening": "Pleural thickening",
+    "Hernia": "Diaphragm hernia"
+  }
+}

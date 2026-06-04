@@ -1,0 +1,3 @@
+@echo off
+echo Starting FederCare with Docker...
+docker-compose up --build

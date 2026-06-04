@@ -1,0 +1,46 @@
+from django.urls import path
+from .views import (
+    PharmacistDashboardView,
+    PendingOrderCountView,
+    ListOrdersView,
+    GetOrderDetailView,
+    UpdateOrderStatusView,
+    GenerateInvoiceView,
+    VerifyPrescriptionView,
+    MarkPrescriptionVerifiedView,
+    VerifyPaymentView,
+    VerifyMedicinePrescriptionView,
+    DispatchMedicineOrderView,
+    ResendMedicineOTPView,
+    PharmacyInventoryView,
+    UpdateInventoryView,
+    UploadMedicineImageView,
+    PharmacyCatalogView,
+    AllPharmaciesCatalogView,
+    StockAlertsView,
+    PharmacyMonthlyReportView,
+)
+
+urlpatterns = [
+    path('dashboard/', PharmacistDashboardView.as_view()),
+    path('orders/pending-count/', PendingOrderCountView.as_view()),
+    path('orders/', ListOrdersView.as_view()),
+    path('orders/<uuid:order_id>/', GetOrderDetailView.as_view()),
+    path('orders/<uuid:order_id>/status/', UpdateOrderStatusView.as_view()),
+    path('orders/<uuid:order_id>/invoice/', GenerateInvoiceView.as_view()),
+    path('orders/<uuid:order_id>/verify-prescription/', VerifyMedicinePrescriptionView.as_view()),
+    path('orders/<uuid:order_id>/dispatch/', DispatchMedicineOrderView.as_view()),
+    path('orders/<uuid:order_id>/resend-otp/', ResendMedicineOTPView.as_view()),
+    path('verify-prescription/<uuid:prescription_id>/', VerifyPrescriptionView.as_view()),
+    path('verify-prescription/<uuid:prescription_id>/mark/', MarkPrescriptionVerifiedView.as_view()),
+    path('verify-payment/', VerifyPaymentView.as_view()),
+
+    # ─── Inventory / medicine catalog ─────────────────────────────
+    path('inventory/', PharmacyInventoryView.as_view()),
+    path('inventory/<uuid:item_id>/', UpdateInventoryView.as_view()),
+    path('inventory/<uuid:item_id>/upload-image/', UploadMedicineImageView.as_view()),
+    path('catalog/<uuid:pharmacy_id>/', PharmacyCatalogView.as_view()),
+    path('all-catalog/', AllPharmaciesCatalogView.as_view()),
+    path('stock-alerts/', StockAlertsView.as_view()),
+    path('monthly-report/', PharmacyMonthlyReportView.as_view()),
+]

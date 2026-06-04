@@ -1,0 +1,38 @@
+from django.urls import path
+from .views import (
+    LabDashboardView,
+    ListLabOrdersView,
+    GetLabOrderDetailView,
+    UpdateLabOrderStatusView,
+    UploadLabReportView,
+    ListLabReportsView,
+    SaveReportToEHRView,
+    VerifyPaymentView,
+    VerifyPrescriptionView,
+    CriticalAlertsView,
+    TestCompletionStatsView,
+    LabSlotsView,
+    UpdateLabSlotView,
+    LabPrescriptionView,
+    LabMonthlyReportView,
+    MarkNoShowView,
+)
+
+urlpatterns = [
+    path('dashboard/', LabDashboardView.as_view()),
+    path('orders/', ListLabOrdersView.as_view()),
+    path('orders/<uuid:order_id>/', GetLabOrderDetailView.as_view()),
+    path('orders/<uuid:order_id>/status/', UpdateLabOrderStatusView.as_view()),
+    path('orders/<uuid:order_id>/upload-report/', UploadLabReportView.as_view()),
+    path('reports/', ListLabReportsView.as_view()),
+    path('reports/save-to-ehr/', SaveReportToEHRView.as_view()),
+    path('verify-payment/', VerifyPaymentView.as_view()),
+    path('verify-prescription/<uuid:order_id>/', VerifyPrescriptionView.as_view()),
+    path('critical-alerts/', CriticalAlertsView.as_view()),
+    path('completion-stats/', TestCompletionStatsView.as_view()),
+    path('slots/', LabSlotsView.as_view()),
+    path('slots/<uuid:slot_id>/update/', UpdateLabSlotView.as_view()),
+    path('prescription/<uuid:order_id>/', LabPrescriptionView.as_view()),
+    path('monthly-report/', LabMonthlyReportView.as_view()),
+    path('mark-no-show/<uuid:order_id>/', MarkNoShowView.as_view()),
+]

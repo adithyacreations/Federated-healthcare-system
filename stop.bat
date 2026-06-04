@@ -1,0 +1,3 @@
+@echo off
+echo Stopping FederCare...
+docker-compose down

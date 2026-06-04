@@ -1,0 +1,48 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+
+# Django
+db.sqlite3
+*.sqlite3
+media/
+staticfiles/
+
+# Environment
+.env
+backend/.env
+frontend/.env
+
+# Node
+node_modules/
+frontend/build/
+npm-debug.log
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Unwanted project folders:
+chest_xray/
+claude desgin/
+.claude/
+.postman/
+postman/
+
+# Large dataset files:
+ml_models/fl_weights/
+ml_models/datasets/
+ml_models/xray_training_history.png
+
+# Docs (optional - remove if want to keep):
+docs/
