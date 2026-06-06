@@ -37,12 +37,16 @@ def calculate_distance(lat1, lng1, lat2, lng2):
         return float('inf')
 
 
-def find_nearest_ambulance(patient_lat, patient_lng, exclude_ids=None):
-    """Return (ambulance, distance_km) for the closest available ambulance.
+def find_nearest_ambulance(patient_lat, patient_lng, exclude_ids=None, radius_km=10):
+    """Return (ambulance, distance_km) for the closest available ambulance
+    *within `radius_km` of the patient*.
 
     An ambulance's position is its live GPS if known, otherwise its hospital's
     GPS. `exclude_ids` skips ambulances already tried (e.g. rejected/timed out).
-    Returns (None, None) when no available ambulance can be located.
+    Only ambulances within `radius_km` are eligible — a far-away driver is no
+    use for an emergency, so anything beyond the radius is ignored (the patient
+    is then told to call 108). Returns (None, None) when no available ambulance
+    is within the radius.
     """
     from apps.emergency.models import Ambulance, AmbulanceDispatch
 
@@ -81,13 +85,18 @@ def find_nearest_ambulance(patient_lat, patient_lng, exclude_ids=None):
         )
         distance = calculate_distance(patient_lat, patient_lng, amb_lat, amb_lng)
         print(f'Ambulance {amb.vehicle_no}: {distance:.2f} km')
+        # Skip anything outside the response radius — a driver too far away is
+        # not a viable dispatch for an emergency.
+        if distance > radius_km:
+            continue
         if distance < min_distance:
             min_distance = distance
             nearest = amb
 
     if nearest is None:
-        print('No available ambulance found!')
+        print(f'No available ambulance within {radius_km} km!')
         return None, None
 
-    print(f'Nearest ambulance: {nearest.vehicle_no} at {min_distance:.2f} km')
+    print(f'Nearest ambulance: {nearest.vehicle_no} at {min_distance:.2f} km '
+          f'(within {radius_km} km)')
     return nearest, min_distance

@@ -464,6 +464,56 @@ def get_timeout_seconds(severity):
     return SEVERITY_TIMEOUTS.get(str(severity or '').lower(), 60)
 
 
+# Grace period (seconds) added on top of the severity timeout before an
+# un-accepted dispatch is treated as orphaned by the on-read sweep below.
+_STALE_DISPATCH_GRACE = 30
+
+
+def reap_stale_dispatches(driver=None):
+    """Lazily reject + free any un-accepted 'dispatched' dispatch that outlived
+    its accept window.
+
+    The auto-reassign timer is an in-memory threading.Timer (see
+    `_dispatch_timers`), so it does NOT survive a server restart / autoreload —
+    and an interrupted run or a patient closing the tab leaves the same orphan.
+    A dispatch stuck in 'dispatched' is still surfaced as "active" by
+    ActiveDispatchView / DriverDashboardView, so it shows a phantom patient card
+    on that driver's screen forever — and once a fresh SOS goes to another
+    driver, *two* drivers appear to hold the patient.
+
+    This on-read sweep is the durable backstop (mirrors the lab no-show sweep):
+    if a dispatch sat in 'dispatched' past its severity timeout + grace and
+    nobody accepted it, treat it as a no-response, mark it rejected, and free the
+    ambulance so it drops out of every "active" query. Scoped to `driver` when
+    given so a dashboard poll only sweeps its own rows. Returns the count swept.
+    """
+    from django.utils import timezone as dj_tz
+    from datetime import timedelta
+
+    qs = AmbulanceDispatch.objects.select_related(
+        'emergency_id', 'ambulance_id', 'ambulance_id__driver_id',
+    ).filter(dispatch_status='dispatched')
+    if driver is not None:
+        qs = qs.filter(ambulance_id__driver_id=driver)
+
+    now = dj_tz.now()
+    swept = 0
+    for dispatch in qs:
+        severity = dispatch.emergency_id.severity if dispatch.emergency_id else None
+        max_age = get_timeout_seconds(severity) + _STALE_DISPATCH_GRACE
+        if not dispatch.dispatched_at:
+            continue
+        if dispatch.dispatched_at <= now - timedelta(seconds=max_age):
+            dispatch.dispatch_status = 'rejected'
+            dispatch.save(update_fields=['dispatch_status'])
+            free_ambulance(dispatch)
+            cancel_dispatch_timer(dispatch.dispatch_id, 'orphaned — swept on read')
+            swept += 1
+            print(f'[SWEEP] Orphaned dispatch {dispatch.dispatch_id} '
+                  f'(> {max_age}s un-accepted) auto-rejected + ambulance freed')
+    return swept
+
+
 def assign_next_ambulance(emergency):
     """Reassign an emergency to the next-nearest ambulance, skipping any that
     already rejected/timed-out for this emergency. Returns the new dispatch, or
@@ -672,6 +722,10 @@ class DriverDashboardView(APIView):
         ambulance = get_ambulance(driver)
         today = date.today()
 
+        # Reap orphaned 'dispatched' rows so the dashboard's active-dispatch
+        # card reflects reality after a restart / interrupted run.
+        reap_stale_dispatches(driver)
+
         dispatches = AmbulanceDispatch.objects.filter(
             ambulance_id__driver_id=driver
         )
@@ -744,6 +798,10 @@ class ActiveDispatchView(APIView):
         driver = get_driver(request)
         if not driver:
             return err('Driver profile not found.', status_code=404)
+
+        # Drop any orphaned 'dispatched' rows (timer lost to a restart, etc.)
+        # before reading, so a phantom patient card never lingers on this driver.
+        reap_stale_dispatches(driver)
 
         dispatch = AmbulanceDispatch.objects.select_related(
             'emergency_id',
@@ -1081,6 +1139,11 @@ class UpdateDispatchStatusView(APIView):
                 except Exception as exc:  # noqa: BLE001
                     print(f'[BED ALERT] Arrival no-bed alert error: {exc}')
         elif new_status == 'completed':
+            # Strict trip order: a trip can only be completed once the driver has
+            # marked arrival at the destination — never straight from en_route.
+            # Guards against a direct API call (or a stale UI) skipping the step.
+            if dispatch.dispatch_status != 'arrived':
+                return err('Please mark the ambulance as arrived first.', status_code=400)
             # Driver finished the trip, but the ambulance stays UNAVAILABLE
             # until the receiving hospital acknowledges the patient arrival.
             dispatch.dispatch_status = 'pending_acknowledgment'
