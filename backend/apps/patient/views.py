@@ -703,6 +703,15 @@ class EmergencySOSView(APIView):
         p_lat = float(d['patient_lat'])
         p_lng = float(d['patient_lng'])
 
+        # Optional wider-radius retry: when nobody was free within the default
+        # 10 km the patient can re-dispatch with a larger search radius (e.g.
+        # 20 km). Clamp to a sane ceiling so a bad value can't scan the country.
+        try:
+            radius_km = float(request.data.get('radius_km', 10) or 10)
+        except (TypeError, ValueError):
+            radius_km = 10
+        radius_km = max(1, min(radius_km, 25))
+
         emergency = EmergencyRequest.objects.create(
             patient_id=patient,
             patient_lat=d['patient_lat'],
@@ -713,7 +722,7 @@ class EmergencySOSView(APIView):
 
         # Find nearest available ambulance (GPS of ambulance; fall back to hospital GPS)
         from apps.emergency.utils import find_nearest_ambulance
-        nearest_ambulance, min_distance = find_nearest_ambulance(p_lat, p_lng)
+        nearest_ambulance, min_distance = find_nearest_ambulance(p_lat, p_lng, radius_km=radius_km)
 
         if not nearest_ambulance:
             # No ambulance at all — flag the emergency so the patient's tracker
@@ -980,20 +989,28 @@ class TrackEmergencyView(APIView):
             amb = dispatch.ambulance_id
             drv = amb.driver_id
             data['rerouted'] = dispatch.rerouted
-            data.update({
-                'dispatch': {
-                    'id': str(dispatch.dispatch_id),
-                    'status': dispatch.dispatch_status,
-                    'eta_minutes': dispatch.eta_minutes,
-                    'dispatched_at': dispatch.dispatched_at.isoformat() if dispatch.dispatched_at else None,
-                    'accepted_at': dispatch.accepted_at.isoformat() if dispatch.accepted_at else None,
-                },
-                'vehicle_number': amb.vehicle_no,
-                'ambulance_current_lat': float(amb.current_lat) if amb.current_lat is not None else None,
-                'ambulance_current_lng': float(amb.current_lng) if amb.current_lng is not None else None,
-                'driver_name': drv.full_name if drv else None,
-                'driver_phone': drv.phone if drv else None,
-            })
+            # Always expose the dispatch lifecycle so the tracker can show
+            # "awaiting driver" while pending.
+            data['dispatch'] = {
+                'id': str(dispatch.dispatch_id),
+                'status': dispatch.dispatch_status,
+                'eta_minutes': dispatch.eta_minutes,
+                'dispatched_at': dispatch.dispatched_at.isoformat() if dispatch.dispatched_at else None,
+                'accepted_at': dispatch.accepted_at.isoformat() if dispatch.accepted_at else None,
+            }
+            # Only reveal the driver/ambulance identity once a driver has
+            # ACCEPTED — while still 'dispatched' (merely offered, not yet
+            # accepted) the patient should see "Assigning…", not a name that may
+            # change if this driver rejects and it reroutes to another.
+            ACCEPTED = ('en_route', 'arrived', 'pending_acknowledgment', 'completed')
+            if dispatch.dispatch_status in ACCEPTED:
+                data.update({
+                    'vehicle_number': amb.vehicle_no,
+                    'ambulance_current_lat': float(amb.current_lat) if amb.current_lat is not None else None,
+                    'ambulance_current_lng': float(amb.current_lng) if amb.current_lng is not None else None,
+                    'driver_name': drv.full_name if drv else None,
+                    'driver_phone': drv.phone if drv else None,
+                })
 
         return ok('Emergency status fetched', data)
 

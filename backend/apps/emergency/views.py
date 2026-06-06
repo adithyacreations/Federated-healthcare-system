@@ -844,6 +844,24 @@ class ActiveDispatchView(APIView):
         hospital = emergency.assigned_hospital_id
         bed = emergency.assigned_bed_id
 
+        # Distance + accept window, so a poll-driven popup (the backstop for a
+        # missed emergency_dispatch WS push) carries the same info the live event
+        # would have. Ambulance position is its live GPS, else its hospital's.
+        from .utils import calculate_distance
+        amb = dispatch.ambulance_id
+        amb_lat = amb.current_lat if amb.current_lat is not None else (
+            amb.hospital_id.latitude if amb.hospital_id else None
+        )
+        amb_lng = amb.current_lng if amb.current_lng is not None else (
+            amb.hospital_id.longitude if amb.hospital_id else None
+        )
+        distance_km = None
+        if emergency.patient_lat is not None and amb_lat is not None:
+            d_km = calculate_distance(
+                emergency.patient_lat, emergency.patient_lng, amb_lat, amb_lng,
+            )
+            distance_km = round(d_km, 2) if d_km != float('inf') else None
+
         return ok('Active dispatch retrieved.', {
             'id': str(dispatch.dispatch_id),
             'dispatch_id': str(dispatch.dispatch_id),
@@ -854,6 +872,8 @@ class ActiveDispatchView(APIView):
             'patient_lng': float(emergency.patient_lng) if emergency.patient_lng is not None else None,
             'severity': emergency.severity.upper(),
             'status': dispatch.dispatch_status,
+            'distance_km': distance_km,
+            'timeout_seconds': get_timeout_seconds(emergency.severity),
             'eta_minutes': dispatch.eta_minutes,
             'hospital_name': hospital.hospital_name if hospital else None,
             'assigned_hospital': {
