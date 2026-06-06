@@ -41,6 +41,9 @@ class AddDoctorSerializer(serializers.Serializer):
     )
     email = serializers.EmailField()
     phone = serializers.CharField(max_length=15, required=False, allow_blank=True)
+    # Optional link to one of the hospital's own Departments (validated against
+    # the requesting hospital in the view). Stored on DoctorRegistration.dept_id.
+    dept_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_email(self, value):
         from apps.auth_app.models import LoginCredentials

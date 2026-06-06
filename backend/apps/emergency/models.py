@@ -28,6 +28,7 @@ EMERGENCY_STATUS = [
     ('dispatched', 'Dispatched'),
     ('no_drivers', 'No Drivers Available'),
     ('completed', 'Completed'),
+    ('cancelled', 'Cancelled'),
 ]
 
 DISPATCH_STATUS = [
@@ -37,6 +38,22 @@ DISPATCH_STATUS = [
     ('pending_acknowledgment', 'Pending Acknowledgment'),
     ('completed', 'Completed'),
     ('rejected', 'Rejected'),
+    ('cancelled', 'Cancelled'),
+]
+
+CANCELLED_BY = [
+    ('patient', 'Patient'),
+    ('driver', 'Driver'),
+    ('admin', 'Admin'),
+    ('system', 'System'),
+]
+
+DRIVER_REPORT_TYPE = [
+    ('patient_not_found', 'Patient Not Found'),
+    ('patient_left', 'Patient Already Left'),
+    ('fake_emergency', 'Fake Emergency'),
+    ('wrong_location', 'Wrong Location'),
+    ('other', 'Other'),
 ]
 
 
@@ -99,6 +116,15 @@ class EmergencyRequest(models.Model):
     assigned_bed_id = models.ForeignKey(
         Bed, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='emergency_requests'
+    )
+    # ── SOS safety / cancellation tracking ────────────────────────────────
+    cancelled_by = models.CharField(max_length=20, choices=CANCELLED_BY, null=True, blank=True)
+    cancellation_reason = models.CharField(max_length=200, null=True, blank=True)
+    patient_safe = models.BooleanField(default=False)
+    false_alarm_count = models.IntegerField(default=0)
+    driver_report = models.TextField(null=True, blank=True)
+    driver_report_type = models.CharField(
+        max_length=50, choices=DRIVER_REPORT_TYPE, null=True, blank=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

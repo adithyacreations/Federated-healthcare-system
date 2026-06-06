@@ -54,7 +54,16 @@ def find_nearest_ambulance(patient_lat, patient_lng, exclude_ids=None):
         dispatch_status__in=ACTIVE_DISPATCH_STATUSES,
     ).values_list('ambulance_id', flat=True)
 
-    ambulances = Ambulance.objects.filter(is_available=True).exclude(
+    # Eligible only if the ambulance is free AND its driver and owning hospital
+    # are both active (not admin-suspended) and approved — a suspended driver or
+    # hospital must never receive an emergency dispatch.
+    ambulances = Ambulance.objects.filter(
+        is_available=True,
+        driver_id__login_id__is_active=True,
+        driver_id__approval_status='approved',
+        hospital_id__login_id__is_active=True,
+        hospital_id__approval_status='approved',
+    ).exclude(
         ambulance_id__in=list(busy_ids),
     ).select_related('hospital_id', 'driver_id', 'driver_id__login_id')
     if exclude_ids:

@@ -2,6 +2,8 @@ import csv
 import io
 import os
 import pickle
+import random
+import string
 
 from decimal import Decimal
 from datetime import date, datetime
@@ -15,7 +17,7 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from apps.auth_app.models import LoginCredentials
 from apps.auth_app.permissions import IsHospitalAdmin
@@ -142,8 +144,38 @@ def get_hospital(request):
     return request.user.hospital_profile
 
 
-def make_temp_password(prefix, full_name):
-    return f"{prefix}{full_name[:4]}"
+def generate_temp_password(length=10):
+    """Strong random temporary password.
+
+    Guarantees at least one uppercase, one lowercase and one digit so it also
+    satisfies the first-login password policy (the new-password check rejects
+    reusing this value anyway). Replaces the old predictable "Doctor@John" scheme.
+    """
+    pool = string.ascii_letters + string.digits
+    chars = [
+        random.choice(string.ascii_uppercase),
+        random.choice(string.ascii_lowercase),
+        random.choice(string.digits),
+    ] + random.choices(pool, k=max(0, length - 3))
+    random.shuffle(chars)
+    return ''.join(chars)
+
+
+def email_staff_credentials(login, full_name, role, hospital, temp_password):
+    """Flag the account for a forced password change, store the temp password,
+    and email the new staff member their credentials. Returns True if the email
+    was sent (so the UI can offer a "share manually" fallback if it failed)."""
+    login.force_password_change = True
+    login.temp_password = temp_password
+    login.save(update_fields=['force_password_change', 'temp_password', 'updated_at'])
+    try:
+        from email_utils import send_staff_welcome_email
+        return send_staff_welcome_email(
+            login.email, full_name, role, hospital.hospital_name, temp_password,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f'[STAFF] welcome email error: {e}')
+        return False
 
 
 # ─── Serializers (dict helpers) ───────────────────────────────────────────────
@@ -171,21 +203,30 @@ def serialize_dept(d):
         'dept_id': str(d.dept_id),
         'dept_name': d.dept_name,
         'description': d.description,
+        'department_photo': d.department_photo or None,
         'created_at': d.created_at.isoformat(),
     }
 
 
 def serialize_bed(b):
+    # Dynamic emergency-lock countdown so the UI never shows a stale "X days".
+    locked = b.emergency_id_id is not None
+    min_days = b.minimum_lock_days or 3
+    days_locked = (timezone.now() - b.emergency_locked_at).days if b.emergency_locked_at else 0
+    days_remaining = max(0, min_days - days_locked) if b.emergency_locked_at else min_days
     return {
         'bed_id': str(b.bed_id),
         'bed_type': b.bed_type,
         'ward_name': b.ward_name,
         'status': b.status,
-        'reserved_for_emergency': b.emergency_id_id is not None,
-        'is_emergency_locked': b.emergency_id_id is not None,
+        'reserved_for_emergency': locked,
+        'is_emergency_locked': locked,
         'emergency_id': str(b.emergency_id_id) if b.emergency_id_id else None,
         'emergency_locked_at': b.emergency_locked_at.isoformat() if b.emergency_locked_at else None,
-        'minimum_lock_days': b.minimum_lock_days,
+        'minimum_lock_days': min_days,
+        'days_locked': days_locked,
+        'days_remaining': days_remaining,
+        'can_unlock': locked and days_locked >= min_days,
         'updated_at': b.updated_at.isoformat(),
     }
 
@@ -218,6 +259,7 @@ def serialize_doctor(d):
         'dept_name': d.dept_id.dept_name if d.dept_id else None,
         'is_online': d.is_online,
         'approval_status': d.approval_status,
+        'is_active': d.login_id.is_active,
         'email': d.login_id.email,
         'created_at': d.created_at.isoformat(),
     }
@@ -246,17 +288,24 @@ class HospitalDashboardView(APIView):
         month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         hosp_consults = Consultation.objects.filter(doctor_id__hospital_id=hospital)
 
-        todays_consultations = hosp_consults.filter(slot_id__slot_date=today).count()
-        monthly_consultations = hosp_consults.filter(created_at__gte=month_start).count()
-
-        # Active patients = patients with a consultation today + active emergencies.
-        active_consultations = hosp_consults.filter(
-            slot_id__slot_date=today, status__in=['scheduled', 'ongoing'],
+        # Real (non-cancelled) consultations only — a cancelled booking is not a
+        # patient being served.
+        live_statuses = ['scheduled', 'ongoing', 'completed']
+        todays_qs = hosp_consults.filter(slot_id__slot_date=today, status__in=live_statuses)
+        todays_consultations = todays_qs.count()
+        monthly_consultations = hosp_consults.filter(
+            created_at__gte=month_start, status__in=live_statuses,
         ).count()
+
+        # Active patients = DISTINCT patients with a consultation today +
+        # patients currently inbound on an active emergency. (Counting distinct
+        # patients, not consultation rows, was the bug — two slots for the same
+        # patient previously inflated the count.)
+        active_today = todays_qs.values('patient_id').distinct().count()
         active_emergency = EmergencyRequest.objects.filter(
             assigned_hospital_id=hospital, status='dispatched',
         ).count()
-        active_patients = active_consultations + active_emergency
+        active_patients = active_today + active_emergency
 
         # Available doctors = hospital doctors who have toggled themselves ONLINE
         # (live availability), out of all active doctors.
@@ -276,9 +325,11 @@ class HospitalDashboardView(APIView):
             'active_patients': active_patients,
             'active_emergency': active_emergency,
             'todays_consultations': todays_consultations,
+            'consultations_today': todays_consultations,  # alias for clarity
             'monthly_consultations': monthly_consultations,
             'total_beds': beds.count(),
             'available_beds': beds.filter(status='available').count(),
+            'occupied_beds': beds.filter(status='occupied').count(),
             'icu_available': beds.filter(bed_type='icu', status='available').count(),
             'total_inventory_items': hospital.inventory.count(),
             'low_stock_items': hospital.inventory.filter(quantity__lte=F('reorder_level')).count(),
@@ -301,7 +352,15 @@ class AddDoctorView(APIView):
 
         d = serializer.validated_data
         hospital = get_hospital(request)
-        temp_password = make_temp_password('Doctor@', d['full_name'])
+
+        # Optional department — must be one of THIS hospital's own departments.
+        dept = None
+        if d.get('dept_id'):
+            dept = Department.objects.filter(dept_id=d['dept_id'], hospital_id=hospital).first()
+            if not dept:
+                return err('Selected department does not belong to your hospital.')
+
+        temp_password = generate_temp_password()
 
         login = LoginCredentials.objects.create(
             email=d['email'],
@@ -314,6 +373,7 @@ class AddDoctorView(APIView):
         doctor = DoctorRegistration.objects.create(
             login_id=login,
             hospital_id=hospital,
+            dept_id=dept,
             full_name=d['full_name'],
             specialization=d['specialization'],
             license_no=d['license_no'],
@@ -321,6 +381,9 @@ class AddDoctorView(APIView):
             consultation_fee=d.get('consultation_fee', 0),
             approval_status='approved',
         )
+
+        # Force a password change on first login + email the credentials.
+        email_sent = email_staff_credentials(login, d['full_name'], 'doctor', hospital, temp_password)
 
         send_notification(
             login,
@@ -347,6 +410,7 @@ class AddDoctorView(APIView):
             'full_name': doctor.full_name,
             'login_email': login.email,
             'temp_password': temp_password,
+            'email_sent': email_sent,
         }, status=201)
 
 
@@ -364,7 +428,7 @@ class AddLabTechView(APIView):
 
         d = serializer.validated_data
         hospital = get_hospital(request)
-        temp_password = make_temp_password('Lab@', d['full_name'])
+        temp_password = generate_temp_password()
 
         login = LoginCredentials.objects.create(
             email=d['email'],
@@ -384,6 +448,8 @@ class AddLabTechView(APIView):
             approval_status='approved',
         )
 
+        email_sent = email_staff_credentials(login, d['full_name'], 'lab_tech', hospital, temp_password)
+
         send_notification(
             login,
             'Welcome to FederCare',
@@ -401,6 +467,7 @@ class AddLabTechView(APIView):
             'full_name': lab_tech.full_name,
             'login_email': login.email,
             'temp_password': temp_password,
+            'email_sent': email_sent,
         }, status=201)
 
 
@@ -418,7 +485,7 @@ class AddDriverView(APIView):
 
         d = serializer.validated_data
         hospital = get_hospital(request)
-        temp_password = make_temp_password('Driver@', d['full_name'])
+        temp_password = generate_temp_password()
 
         login = LoginCredentials.objects.create(
             email=d['email'],
@@ -444,6 +511,8 @@ class AddDriverView(APIView):
             ambulance_type=d.get('ambulance_type', 'basic'),
         )
 
+        email_sent = email_staff_credentials(login, d['full_name'], 'driver', hospital, temp_password)
+
         send_notification(
             login,
             'Welcome to FederCare',
@@ -462,6 +531,7 @@ class AddDriverView(APIView):
             'login_email': login.email,
             'temp_password': temp_password,
             'vehicle_no': d['vehicle_no'],
+            'email_sent': email_sent,
         }, status=201)
 
 
@@ -472,10 +542,339 @@ class ListDoctorsView(APIView):
 
     def get(self, request):
         hospital = get_hospital(request)
+        # Include suspended staff too (is_active=False) so the UI can show a
+        # SUSPENDED badge and a Resume button — only the active filter is dropped.
         doctors = (hospital.doctors
                    .select_related('login_id', 'dept_id')
                    .order_by('full_name'))
         return ok('Doctors fetched', [serialize_doctor(d) for d in doctors])
+
+
+class UpdateDoctorView(APIView):
+    """Edit a hospital's own doctor — name, specialization, license, experience
+    and department (dept_id). Also used by the inline "set department" fix for
+    doctors created before department selection existed."""
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def put(self, request, doctor_id):
+        from apps.doctor.models import DoctorRegistration
+
+        hospital = get_hospital(request)
+        try:
+            doctor = DoctorRegistration.objects.get(doctor_id=doctor_id, hospital_id=hospital)
+        except DoctorRegistration.DoesNotExist:
+            return err('Doctor not found', status=404)
+
+        updated = []
+
+        full_name = (request.data.get('full_name') or '').strip()
+        if full_name:
+            doctor.full_name = full_name
+            updated.append('full_name')
+
+        specialization = (request.data.get('specialization') or '').strip()
+        if specialization:
+            doctor.specialization = specialization
+            updated.append('specialization')
+
+        license_no = (request.data.get('license_no') or '').strip()
+        if license_no and license_no != doctor.license_no:
+            if DoctorRegistration.objects.filter(license_no=license_no).exclude(pk=doctor.pk).exists():
+                return err('License number already in use by another doctor.')
+            doctor.license_no = license_no
+            updated.append('license_no')
+
+        if 'experience_years' in request.data:
+            try:
+                doctor.experience_years = int(request.data.get('experience_years') or 0)
+                updated.append('experience_years')
+            except (ValueError, TypeError):
+                return err('Experience must be a number.')
+
+        dept_id = request.data.get('dept_id')
+        if dept_id:
+            dept = Department.objects.filter(dept_id=dept_id, hospital_id=hospital).first()
+            if not dept:
+                return err('Selected department does not belong to your hospital.')
+            doctor.dept_id = dept
+            updated.append('dept_id')
+
+        if not updated:
+            return err('Nothing to update')
+
+        doctor.save(update_fields=updated + ['updated_at'])
+        log_audit(
+            request.user, 'doctor_updated', module='hospital',
+            entity_type='DoctorRegistration', entity_id=doctor.doctor_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+        return ok('Doctor updated successfully!', serialize_doctor(doctor))
+
+
+class UpdateLabTechView(APIView):
+    """Edit a hospital's own lab technician — name, phone, qualification,
+    specialization."""
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def put(self, request, lab_tech_id):
+        from apps.lab.models import LabTechRegistration
+
+        hospital = get_hospital(request)
+        try:
+            lab_tech = LabTechRegistration.objects.get(lab_tech_id=lab_tech_id, hospital_id=hospital)
+        except LabTechRegistration.DoesNotExist:
+            return err('Lab technician not found', status=404)
+
+        updated = []
+        for field in ('full_name', 'phone', 'qualification', 'specialization'):
+            if field in request.data:
+                setattr(lab_tech, field, (request.data.get(field) or '').strip())
+                updated.append(field)
+
+        if not updated:
+            return err('Nothing to update')
+
+        lab_tech.save(update_fields=updated + ['updated_at'])
+        log_audit(
+            request.user, 'lab_tech_updated', module='hospital',
+            entity_type='LabTechRegistration', entity_id=lab_tech.lab_tech_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+        return ok('Lab technician updated successfully!', {
+            'lab_tech_id': str(lab_tech.lab_tech_id),
+            'full_name': lab_tech.full_name,
+            'phone': lab_tech.phone,
+            'qualification': lab_tech.qualification,
+            'specialization': lab_tech.specialization,
+        })
+
+
+class UpdateDriverView(APIView):
+    """Edit a hospital's own ambulance driver — name, phone, license, and the
+    linked ambulance's vehicle number."""
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def put(self, request, driver_id):
+        from apps.emergency.models import AmbulanceDriverRegistration, Ambulance
+
+        hospital = get_hospital(request)
+        try:
+            driver = AmbulanceDriverRegistration.objects.get(driver_id=driver_id, hospital_id=hospital)
+        except AmbulanceDriverRegistration.DoesNotExist:
+            return err('Driver not found', status=404)
+
+        updated = []
+
+        full_name = (request.data.get('full_name') or '').strip()
+        if full_name:
+            driver.full_name = full_name
+            updated.append('full_name')
+
+        if 'phone' in request.data:
+            driver.phone = (request.data.get('phone') or '').strip()
+            updated.append('phone')
+
+        license_no = (request.data.get('license_no') or '').strip()
+        if license_no and license_no != driver.license_no:
+            if AmbulanceDriverRegistration.objects.filter(license_no=license_no).exclude(pk=driver.pk).exists():
+                return err('License number already in use by another driver.')
+            driver.license_no = license_no
+            updated.append('license_no')
+
+        if updated:
+            driver.save(update_fields=updated + ['updated_at'])
+
+        # Vehicle number lives on the linked Ambulance, not the driver.
+        vehicle_no = (request.data.get('vehicle_no') or '').strip()
+        if vehicle_no:
+            amb = driver.ambulance.first()
+            if amb and vehicle_no != amb.vehicle_no:
+                if Ambulance.objects.filter(vehicle_no=vehicle_no).exclude(pk=amb.pk).exists():
+                    return err('Vehicle number already in use by another ambulance.')
+                amb.vehicle_no = vehicle_no
+                amb.save(update_fields=['vehicle_no'])
+            elif not amb:
+                Ambulance.objects.create(hospital_id=hospital, driver_id=driver, vehicle_no=vehicle_no)
+
+        if not updated and not vehicle_no:
+            return err('Nothing to update')
+
+        log_audit(
+            request.user, 'driver_updated', module='hospital',
+            entity_type='AmbulanceDriverRegistration', entity_id=driver.driver_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+        return ok('Driver updated successfully!', {
+            'driver_id': str(driver.driver_id),
+            'full_name': driver.full_name,
+            'phone': driver.phone,
+            'license_no': driver.license_no,
+        })
+
+
+class DeleteStaffView(APIView):
+    """Deactivate a hospital staff member (doctor / lab_tech / driver) and email
+    them a role-specific account-deactivation notice. The account is deactivated
+    (not hard-deleted) so it can be restored by support if needed."""
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def delete(self, request, role, staff_id):
+        hospital = get_hospital(request)
+
+        if role == 'doctor':
+            from apps.doctor.models import DoctorRegistration
+            staff = DoctorRegistration.objects.filter(doctor_id=staff_id, hospital_id=hospital).first()
+        elif role == 'lab_tech':
+            from apps.lab.models import LabTechRegistration
+            staff = LabTechRegistration.objects.filter(lab_tech_id=staff_id, hospital_id=hospital).first()
+        elif role == 'driver':
+            from apps.emergency.models import AmbulanceDriverRegistration
+            staff = AmbulanceDriverRegistration.objects.filter(driver_id=staff_id, hospital_id=hospital).first()
+        else:
+            return err('Invalid role.', status=400)
+
+        if not staff:
+            return err('Staff member not found.', status=404)
+
+        full_name = staff.full_name
+        email = staff.login_id.email
+
+        # Deactivate the central login (blocks sign-in) — reversible by support.
+        staff.login_id.is_active = False
+        staff.login_id.save(update_fields=['is_active', 'updated_at'])
+
+        hospital_email = getattr(hospital.login_id, 'email', 'federcaresupport@gmail.com')
+        try:
+            from email_utils import send_staff_termination_email
+            email_sent = send_staff_termination_email(
+                email, full_name, role, hospital.hospital_name, hospital_email,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f'[STAFF] termination email error: {e}')
+            email_sent = False
+
+        log_audit(
+            request.user, f'{role}_removed', module='hospital',
+            entity_type=staff.__class__.__name__, entity_id=staff.pk,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return ok(
+            f'{full_name} has been removed from {hospital.hospital_name}!',
+            {'email_sent': email_sent},
+        )
+
+
+class StaffActionView(APIView):
+    """Suspend, terminate or resume a hospital staff member (doctor / lab_tech /
+    driver). Suspend/terminate deactivate the central login (blocking sign-in);
+    resume reactivates it. A role-specific email is sent for every action."""
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def post(self, request, role, staff_id):
+        action = request.data.get('action')
+        if action not in ('suspend', 'terminate', 'resume'):
+            return err('Invalid action!')
+
+        hospital = get_hospital(request)
+
+        if role == 'doctor':
+            from apps.doctor.models import DoctorRegistration
+            staff = DoctorRegistration.objects.filter(doctor_id=staff_id, hospital_id=hospital).first()
+        elif role == 'lab_tech':
+            from apps.lab.models import LabTechRegistration
+            staff = LabTechRegistration.objects.filter(lab_tech_id=staff_id, hospital_id=hospital).first()
+        elif role == 'driver':
+            from apps.emergency.models import AmbulanceDriverRegistration
+            staff = AmbulanceDriverRegistration.objects.filter(driver_id=staff_id, hospital_id=hospital).first()
+        else:
+            return err('Invalid role.', status=400)
+
+        if not staff:
+            return err('Staff member not found.', status=404)
+
+        full_name = staff.full_name
+        email = staff.login_id.email
+
+        # suspend / terminate block sign-in; resume restores it.
+        staff.login_id.is_active = (action == 'resume')
+        staff.login_id.save(update_fields=['is_active', 'updated_at'])
+
+        hospital_email = getattr(hospital.login_id, 'email', 'federcaresupport@gmail.com')
+
+        if action == 'resume':
+            email_sent = self._send_resume_email(email, full_name, role, hospital, hospital_email)
+            action_msg = 'reactivated'
+        else:
+            try:
+                from email_utils import send_staff_action_email
+                email_sent = send_staff_action_email(
+                    email, full_name, role, action, hospital.hospital_name, hospital_email,
+                )
+            except Exception as e:  # noqa: BLE001
+                print(f'[STAFF] action email error: {e}')
+                email_sent = False
+            action_msg = 'suspended' if action == 'suspend' else 'terminated'
+
+        log_audit(
+            request.user, f'{role}_{action}', module='hospital',
+            entity_type=staff.__class__.__name__, entity_id=staff.pk,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return ok(
+            f'{full_name} has been {action_msg}!',
+            {'email_sent': email_sent, 'action': action, 'is_active': staff.login_id.is_active},
+        )
+
+    @staticmethod
+    def _send_resume_email(email, full_name, role, hospital, hospital_email):
+        """Welcome-back email sent when a suspended staff member is reactivated."""
+        from email_utils import send_email, clean_name_for_email
+
+        cleaned_name = clean_name_for_email(f'Dr. {full_name}' if role == 'doctor' else full_name)
+        role_display = {
+            'doctor': 'Doctor', 'lab_tech': 'Lab Technician',
+            'pharmacist': 'Pharmacist', 'driver': 'Ambulance Driver',
+        }.get(role, role.replace('_', ' ').title())
+        icon = {'doctor': '👨‍⚕️', 'lab_tech': '🔬', 'pharmacist': '💊', 'driver': '🚑'}.get(role, '👤')
+
+        try:
+            send_email(
+                to_email=email,
+                subject=f'Welcome Back to FederCare — {hospital.hospital_name}',
+                html_content=f"""
+                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                    <div style="background:#22C55E;padding:30px;text-align:center;border-radius:12px 12px 0 0;">
+                        <p style="font-size:48px;margin:0 0 8px;">{icon}</p>
+                        <h1 style="color:white;margin:0;font-size:22px;font-weight:800;">Account Reactivated!</h1>
+                        <p style="color:rgba(255,255,255,0.8);margin:8px 0 0;font-size:14px;">FederCare Health Network</p>
+                    </div>
+                    <div style="background:#FAF7F2;padding:32px;border-radius:0 0 12px 12px;">
+                        <p style="color:#333;font-size:16px;margin:0 0 16px;">Dear <b>{cleaned_name}</b>,</p>
+                        <div style="background:white;border-radius:12px;padding:20px;border-left:4px solid #22C55E;margin:0 0 20px;">
+                            <p style="color:#16A34A;font-weight:700;margin:0 0 8px;">✅ Great News!</p>
+                            <p style="color:#666;font-size:14px;line-height:1.7;margin:0;">
+                                Your account as <b>{role_display}</b> at <b>{hospital.hospital_name}</b>
+                                has been <b style="color:#22C55E;">reactivated</b>. You can now login to
+                                FederCare and resume your duties!
+                            </p>
+                        </div>
+                        <div style="background:white;border-radius:12px;padding:16px;text-align:center;margin:0 0 20px;">
+                            <p style="color:#333;font-weight:700;margin:0 0 8px;font-size:14px;">🏥 {hospital.hospital_name}</p>
+                            <p style="color:#9CA3AF;font-size:12px;margin:0;">Contact: {hospital_email}</p>
+                        </div>
+                        <p style="color:#9CA3AF;font-size:12px;text-align:center;margin:0;">
+                            FederCare: AI Health Network<br>federcaresupport@gmail.com
+                        </p>
+                    </div>
+                </div>
+                """,
+            )
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f'[EMAIL] Resume error: {e}')
+            return False
 
 
 # ─── Bed Management ───────────────────────────────────────────────────────────
@@ -601,6 +1000,38 @@ class UnlockEmergencyBedView(APIView):
             ip_address=request.META.get('REMOTE_ADDR'),
         )
         return ok('Bed unlocked and available again!', serialize_bed(bed))
+
+
+def bed_display_label(bed):
+    """Friendly label for a bed in selectors (model has no bed_number column —
+    build one from ward + type, falling back to a short id)."""
+    parts = []
+    if bed.ward_name:
+        parts.append(bed.ward_name)
+    parts.append((bed.bed_type or 'Bed').upper())
+    parts.append(f'#{str(bed.bed_id)[:6]}')
+    return ' · '.join(parts)
+
+
+class AvailableBedsView(APIView):
+    """Real-time list of free beds at the admin's hospital — powers the
+    emergency dashboard bed selector."""
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def get(self, request):
+        hospital = get_hospital(request)
+        beds = Bed.objects.filter(
+            hospital_id=hospital, status='available',
+        ).order_by('bed_type', 'ward_name')
+        return ok('Available beds fetched', {
+            'available_count': beds.count(),
+            'beds': [{
+                'bed_id': str(b.bed_id),
+                'bed_number': bed_display_label(b),
+                'ward': b.ward_name or '',
+                'bed_type': b.bed_type or '',
+            } for b in beds],
+        })
 
 
 # ─── Inventory Management ─────────────────────────────────────────────────────
@@ -901,6 +1332,7 @@ class ListLabTechsView(APIView):
     def get(self, request):
         from apps.lab.models import LabTechRegistration
         hospital = get_hospital(request)
+        # Include suspended techs so the UI can offer Resume + a SUSPENDED badge.
         lab_techs = (hospital.lab_technicians
                      .select_related('login_id')
                      .order_by('full_name'))
@@ -913,6 +1345,7 @@ class ListLabTechsView(APIView):
                 'phone': lt.phone,
                 'email': lt.login_id.email,
                 'approval_status': lt.approval_status,
+                'is_active': lt.login_id.is_active,
                 'created_at': lt.created_at.isoformat(),
             }
             for lt in lab_techs
@@ -924,6 +1357,7 @@ class ListDriversView(APIView):
 
     def get(self, request):
         hospital = get_hospital(request)
+        # Include suspended drivers so the UI can offer Resume + a SUSPENDED badge.
         drivers = (hospital.drivers
                    .select_related('login_id')
                    .prefetch_related('ambulance')
@@ -939,6 +1373,7 @@ class ListDriversView(APIView):
                 'email': dr.login_id.email,
                 'is_available': dr.is_available,
                 'approval_status': dr.approval_status,
+                'is_active': dr.login_id.is_active,
                 'vehicle_no': ambulance.vehicle_no if ambulance else '',
                 'ambulance_type': ambulance.ambulance_type if ambulance else '',
                 'created_at': dr.created_at.isoformat(),
@@ -1177,16 +1612,31 @@ class ListDepartmentsView(APIView):
 
 class AddDepartmentView(APIView):
     permission_classes = [IsAuthenticated, IsHospitalAdmin]
+    parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
         hospital = get_hospital(request)
         dept_name = request.data.get('dept_name', '').strip()
         if not dept_name:
             return err('dept_name is required')
+
+        # Optional department photo → saved to local media, stored as a URL.
+        photo_url = ''
+        photo = request.FILES.get('department_photo')
+        if photo:
+            try:
+                from utils import save_upload_locally
+                photo_url = save_upload_locally(
+                    photo, subdir='departments', request=request, prefix='dept',
+                )
+            except Exception as e:  # noqa: BLE001
+                print(f'[Department] photo upload error: {e}')
+
         dept = Department.objects.create(
             hospital_id=hospital,
             dept_name=dept_name,
             description=request.data.get('description', ''),
+            department_photo=photo_url,
         )
         log_audit(
             request.user, 'department_added', module='hospital',
@@ -1220,7 +1670,9 @@ def serialize_patient_full(p):
         'blood_group': p.blood_group,
         'symptoms': p.symptoms,
         'diagnosis': p.diagnosis,
+        'medications': p.medications,
         'notes': p.notes,
+        'source': p.source,
         'visit_date': p.visit_date.isoformat(),
         'created_at': p.created_at.isoformat(),
     }
@@ -1439,6 +1891,7 @@ class ImportPatientsCSVView(APIView):
                     symptoms=valid_symptoms,
                     diagnosis=diagnosis,
                     notes=notes,
+                    source='import',
                 )
                 results['success'].append(f'{full_name} ({diagnosis})')
 
@@ -1460,6 +1913,185 @@ class ImportPatientsCSVView(APIView):
                 'error_list': results['errors'],
             },
         )
+
+
+class ParseCSVHeadersView(APIView):
+    """Read ONLY the header row + a small preview of an uploaded CSV so the
+    frontend can build a smart column-mapper for custom hospital formats.
+    Does not import anything."""
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        csv_file = request.FILES.get('file')
+        if not csv_file:
+            return err('No file uploaded!')
+
+        try:
+            raw = csv_file.read()
+            try:
+                content = raw.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                content = raw.decode('latin-1')
+
+            reader = csv.reader(io.StringIO(content))
+            rows = list(reader)
+            if not rows:
+                return err('CSV file is empty!')
+
+            headers = [h.strip() for h in rows[0] if h.strip()]
+            # Skip fully-empty rows (template files pad with blank lines).
+            data_rows = [r for r in rows[1:] if any((c or '').strip() for c in r)]
+
+            return ok('CSV parsed', {
+                'headers': headers,
+                'preview_rows': data_rows[:3],
+                'total_rows': len(data_rows),
+                'filename': csv_file.name,
+            })
+        except Exception as e:  # noqa: BLE001
+            return err(f'Cannot read file: {e}', status=400)
+
+
+class ImportMappedCSVView(APIView):
+    """Import offline patient records from a custom-format CSV using a
+    user-supplied column mapping. Records are stored as HospitalPatient rows
+    (source='import') for FL training / prediction only — NO login is created.
+    Diagnosis + symptoms are normalised to the known vocab so the data stays
+    usable by the FL export."""
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+    parser_classes = [MultiPartParser]
+
+    DATE_FORMATS = ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d']
+    VALID_BLOOD_GROUPS = {'A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'}
+
+    def post(self, request):
+        import json
+        import re
+        from datetime import datetime
+
+        hospital = get_hospital(request)
+        csv_file = request.FILES.get('file')
+        if not csv_file:
+            return err('No file!')
+
+        try:
+            mapping = json.loads(request.data.get('mapping', '{}'))
+        except (ValueError, TypeError):
+            return err('Invalid column mapping!')
+
+        # full_name is the only required mapping.
+        if not mapping.get('full_name') or mapping.get('full_name') == 'skip':
+            return err('Please map the Full Name column!')
+
+        def cell(row, field):
+            src = mapping.get(field)
+            if not src or src == 'skip':
+                return ''
+            return (row.get(src) or '').strip()
+
+        try:
+            raw = csv_file.read()
+            try:
+                content = raw.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                content = raw.decode('latin-1')
+            reader = csv.DictReader(io.StringIO(content))
+
+            success_count = 0
+            error_count = 0
+            error_rows = []
+            batch = []
+            BATCH_SIZE = 100
+
+            for row_num, row in enumerate(reader, start=2):
+                try:
+                    full_name = cell(row, 'full_name')[:120]
+                    if not full_name:
+                        continue  # silently skip blank rows
+
+                    record = {
+                        'hospital_id': hospital,
+                        'added_by': request.user,
+                        'source': 'import',
+                        'full_name': full_name,
+                    }
+
+                    age_raw = cell(row, 'age')
+                    if age_raw:
+                        try:
+                            age = int(float(age_raw))
+                            if 0 < age < 150:
+                                record['age'] = age
+                        except (ValueError, TypeError):
+                            pass
+
+                    gender_raw = cell(row, 'gender').lower()
+                    if gender_raw:
+                        if gender_raw.startswith('m'):
+                            record['gender'] = 'male'
+                        elif gender_raw.startswith('f'):
+                            record['gender'] = 'female'
+                        else:
+                            record['gender'] = 'other'
+
+                    bg = cell(row, 'blood_group').upper().replace(' ', '')
+                    if bg in self.VALID_BLOOD_GROUPS:
+                        record['blood_group'] = bg
+
+                    diag_raw = cell(row, 'primary_diagnosis')
+                    if diag_raw:
+                        canonical, found = find_closest_disease(diag_raw)
+                        record['diagnosis'] = (canonical if found else diag_raw)[:200]
+
+                    sym_raw = cell(row, 'symptoms')
+                    if sym_raw:
+                        symptoms = []
+                        for token in re.split(r'[,;|]', sym_raw):
+                            norm = normalize_symptom(token)
+                            if norm and norm in VALID_SYMPTOMS and norm not in symptoms:
+                                symptoms.append(norm)
+                        record['symptoms'] = symptoms
+
+                    meds = cell(row, 'medications')
+                    if meds:
+                        record['medications'] = meds[:1000]
+
+                    visit_raw = cell(row, 'visit_date')
+                    if visit_raw:
+                        for fmt in self.DATE_FORMATS:
+                            try:
+                                record['visit_date'] = datetime.strptime(visit_raw, fmt).date()
+                                break
+                            except ValueError:
+                                continue
+
+                    batch.append(HospitalPatient(**record))
+                    success_count += 1
+
+                    if len(batch) >= BATCH_SIZE:
+                        HospitalPatient.objects.bulk_create(batch, ignore_conflicts=True)
+                        batch = []
+
+                except Exception as e:  # noqa: BLE001
+                    error_count += 1
+                    if len(error_rows) < 20:
+                        error_rows.append({'row': row_num, 'error': str(e)})
+
+            if batch:
+                HospitalPatient.objects.bulk_create(batch, ignore_conflicts=True)
+
+            log_audit(
+                request.user, f'Imported {success_count} patients via mapped CSV',
+                module='hospital',
+            )
+            return ok(f'Successfully imported {success_count} patient records!', {
+                'imported': success_count,
+                'errors': error_count,
+                'error_rows': error_rows,
+            })
+        except Exception as e:  # noqa: BLE001
+            return err(f'Import failed: {e}', status=500)
 
 
 class DownloadCSVTemplateView(APIView):
@@ -1548,6 +2180,7 @@ class GenerateDemoPatientsView(APIView):
                 symptoms=symptoms,
                 diagnosis=disease,
                 notes='Auto-generated demo patient',
+                source='demo',
             )
             created.append({'name': name, 'diagnosis': disease, 'age': age})
 

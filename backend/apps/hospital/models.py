@@ -41,6 +41,13 @@ GENDER_CHOICES = [
     ('other', 'Other'),
 ]
 
+# Where an offline patient record came from (all are login-less FL training data).
+PATIENT_SOURCE = [
+    ('manual', 'Manually Added'),
+    ('import', 'CSV Import'),
+    ('demo', 'Demo Generated'),
+]
+
 EQUIPMENT_CONDITION = [
     ('good', 'Good'),
     ('fair', 'Fair'),
@@ -81,6 +88,9 @@ class Department(models.Model):
     hospital_id = models.ForeignKey(HospitalRegistration, on_delete=models.CASCADE, related_name='departments')
     dept_name = models.CharField(max_length=150)
     description = models.TextField(blank=True)
+    # Local media URL (saved via save_upload_locally) — matches the rest of the
+    # app's image handling; blank means the UI shows a 🏥 placeholder.
+    department_photo = models.CharField(max_length=500, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -213,13 +223,17 @@ class HospitalPatient(models.Model):
     hospital_id = models.ForeignKey(HospitalRegistration, on_delete=models.CASCADE, related_name='hospital_patients')
     added_by = models.ForeignKey(LoginCredentials, on_delete=models.SET_NULL, null=True)
     full_name = models.CharField(max_length=120)
-    age = models.IntegerField()
-    gender = models.CharField(max_length=10, choices=GENDER_CHOICES)
+    age = models.IntegerField(null=True, blank=True)
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True)
     blood_group = models.CharField(max_length=5, blank=True)
     symptoms = models.JSONField(default=list)
-    diagnosis = models.CharField(max_length=200)
-    visit_date = models.DateField(auto_now_add=True)
+    diagnosis = models.CharField(max_length=200, blank=True)
+    medications = models.TextField(blank=True, default='')
+    # Settable so CSV imports can carry the real visit date; defaults to today
+    # for manually-added / demo records (was previously auto_now_add).
+    visit_date = models.DateField(default=date.today)
     notes = models.TextField(blank=True)
+    source = models.CharField(max_length=20, choices=PATIENT_SOURCE, default='manual')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

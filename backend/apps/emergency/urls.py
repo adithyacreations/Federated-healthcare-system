@@ -14,6 +14,9 @@ from .views import (
     IncomingPatientsView,
     MarkBedReadyView,
     AcknowledgePatientView,
+    CancelSOSView,
+    ImSafeView,
+    DriverReportView,
 )
 
 urlpatterns = [
@@ -31,4 +34,8 @@ urlpatterns = [
     path('incoming-patients/', IncomingPatientsView.as_view()),
     path('dispatch/<uuid:dispatch_id>/bed-ready/', MarkBedReadyView.as_view()),
     path('dispatch/<uuid:dispatch_id>/acknowledge/', AcknowledgePatientView.as_view()),
+    # SOS safety: patient cancel / I'm-safe, driver incident report
+    path('<uuid:emergency_id>/cancel/', CancelSOSView.as_view()),
+    path('<uuid:emergency_id>/im-safe/', ImSafeView.as_view()),
+    path('<uuid:emergency_id>/driver-report/', DriverReportView.as_view()),
 ]

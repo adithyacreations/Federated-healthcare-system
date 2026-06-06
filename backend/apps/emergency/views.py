@@ -1,10 +1,11 @@
+import threading
 from datetime import date, datetime, timezone
 
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.auth_app.permissions import IsDriver, IsHospitalAdmin
+from apps.auth_app.permissions import IsDriver, IsHospitalAdmin, IsPatient
 from utils import log_audit, send_notification
 from .models import (
     AmbulanceDriverRegistration,
@@ -20,6 +21,47 @@ from .serializers import (
     UpdateDispatchStatusSerializer,
     UpdateGPSSerializer,
 )
+
+
+# ─── Dispatch timeout-timer registry ────────────────────────────────────────
+# Each un-accepted dispatch gets a threading.Timer that auto-reassigns it after
+# the severity timeout. We keep a handle to every live timer (keyed by dispatch
+# id) so it can be cancelled the instant the dispatch is resolved — driver
+# accepts, patient cancels, or the trip completes — instead of waking up later
+# just to bail. Guarded by a lock since timers fire on their own threads.
+_dispatch_timers = {}
+_dispatch_timers_lock = threading.Lock()
+
+
+def _register_dispatch_timer(dispatch_id, timer):
+    with _dispatch_timers_lock:
+        _dispatch_timers[str(dispatch_id)] = timer
+
+
+def cancel_dispatch_timer(dispatch_id, reason=''):
+    """Cancel + forget the pending timeout timer for one dispatch (if any)."""
+    key = str(dispatch_id)
+    with _dispatch_timers_lock:
+        timer = _dispatch_timers.pop(key, None)
+    if timer is not None:
+        try:
+            timer.cancel()
+        except Exception:  # noqa: BLE001
+            pass
+        print(f'[TIMER] Cancelled timer for dispatch {key}'
+              f'{f" — {reason}" if reason else ""}')
+        return True
+    print(f'[TIMER] No live timer for dispatch {key}')
+    return False
+
+
+def cancel_emergency_timers(emergency, reason=''):
+    """Cancel the timeout timers of every dispatch belonging to `emergency` —
+    used on patient cancel / I'm-safe / driver report so no stale timer reroutes."""
+    for d_id in AmbulanceDispatch.objects.filter(
+        emergency_id=emergency,
+    ).values_list('dispatch_id', flat=True):
+        cancel_dispatch_timer(d_id, reason)
 
 
 def ok(message, data=None, status_code=200):
@@ -80,9 +122,12 @@ def find_nearest_hospital_with_beds(patient_lat, patient_lng, exclude_hospital_i
 
     exclude_hospital_ids = exclude_hospital_ids or []
     results = []
+    # Only approved AND active (not admin-suspended) hospitals may receive a
+    # rerouted emergency patient.
     hospitals = HospitalRegistration.objects.filter(
         approval_status='approved',
-    ).exclude(hospital_id__in=exclude_hospital_ids)
+        login_id__is_active=True,
+    ).select_related('login_id').exclude(hospital_id__in=exclude_hospital_ids)
 
     for hospital in hospitals:
         bed_count = Bed.objects.filter(hospital_id=hospital, status='available').count()
@@ -93,6 +138,110 @@ def find_nearest_hospital_with_beds(patient_lat, patient_lng, exclude_hospital_i
 
     results.sort(key=lambda x: x['distance'])
     return results
+
+
+# A dispatch in any of these states means a driver has ALREADY accepted and is
+# actively handling (or has delivered) the patient — so the emergency must never
+# be re-dispatched to another driver, even if EmergencyRequest.status still reads
+# 'dispatched' (it only flips to 'completed' on hospital acknowledgment).
+ACCEPTED_DISPATCH_STATUSES = ('en_route', 'arrived', 'pending_acknowledgment', 'completed')
+
+
+def should_reroute(emergency, dispatch=None):
+    """Single source of truth for "may this emergency still be (re)dispatched?".
+
+    Returns False once the patient has cancelled / been marked safe, the trip has
+    ended, OR a driver has already accepted it — so no timeout, rejection, or
+    bed-monitor path can ever send a phantom request to a second driver after the
+    emergency is already being handled or is done.
+
+    Everything is re-read fresh from the DB so a background thread holding a stale
+    in-memory copy can't slip past the guard. The optional `dispatch` is the one
+    that just failed (rejected/timed-out) — passing it lets us also rule out a
+    dispatch that completed in the meantime.
+    """
+    if not emergency:
+        return False
+    try:
+        emergency.refresh_from_db()
+    except EmergencyRequest.DoesNotExist:
+        return False
+
+    # ── Emergency-level terminal states ──
+    if emergency.status in ('cancelled', 'completed', 'resolved', 'no_drivers'):
+        print(f'[REROUTE] STOP: emergency status={emergency.status}')
+        return False
+    if getattr(emergency, 'cancelled_by', None):
+        print(f'[REROUTE] STOP: cancelled_by={emergency.cancelled_by}')
+        return False
+    if getattr(emergency, 'patient_safe', False):
+        print('[REROUTE] STOP: patient_safe=True')
+        return False
+
+    # ── The just-failed dispatch must not itself have completed/cancelled ──
+    if dispatch is not None:
+        try:
+            dispatch.refresh_from_db()
+            if dispatch.dispatch_status in ('completed', 'cancelled'):
+                print(f'[REROUTE] STOP: dispatch={dispatch.dispatch_status}')
+                return False
+            if dispatch.completed_at:
+                print('[REROUTE] STOP: dispatch completed_at is set')
+                return False
+        except AmbulanceDispatch.DoesNotExist:
+            pass
+
+    # ── A driver is already on it (accepted → delivered) ──
+    # This is the key loop-stopper: once any dispatch for this emergency is
+    # en_route/arrived/pending_acknowledgment/completed, no other driver may be
+    # rerouted — closes the window where emergency.status still reads 'dispatched'
+    # during an active accepted trip or pending hospital acknowledgment.
+    if AmbulanceDispatch.objects.filter(
+        emergency_id=emergency,
+        dispatch_status__in=ACCEPTED_DISPATCH_STATUSES,
+    ).exists():
+        print('[REROUTE] STOP: an accepted/active dispatch already exists')
+        return False
+
+    print('[REROUTE] OK to reroute.')
+    return True
+
+
+def emergency_ended(emergency):
+    """True once the emergency is cancelled / completed / patient-safe.
+
+    Used by the bed monitor, which legitimately re-routes the *hospital* for an
+    already-accepted trip (same driver, new destination) — so it must NOT use
+    should_reroute()'s "an accepted dispatch exists" guard, only the terminal
+    checks. Re-reads fresh from the DB."""
+    if not emergency:
+        return True
+    try:
+        emergency.refresh_from_db()
+    except EmergencyRequest.DoesNotExist:
+        return True
+    if emergency.status in ('cancelled', 'completed', 'resolved'):
+        return True
+    if getattr(emergency, 'cancelled_by', None):
+        return True
+    if getattr(emergency, 'patient_safe', False):
+        return True
+    return False
+
+
+def count_available_beds(hospital):
+    """How many beds are free right now at `hospital`. Used both at dispatch and
+    again when the ambulance arrives, so the driver/hospital can react if the
+    last free bed was taken mid-trip. (Bed has only a `status` field — no
+    `is_available` — so 'available' is the single source of truth.)"""
+    if not hospital:
+        return 0
+    try:
+        from apps.hospital.models import Bed
+        return Bed.objects.filter(hospital_id=hospital, status='available').count()
+    except Exception as exc:  # noqa: BLE001
+        print(f'[BEDS] Count error: {exc}')
+        return 0
 
 
 def get_preferred_bed_types(severity):
@@ -190,6 +339,13 @@ def release_bed_reservation(bed):
 
 def _reroute_emergency_bed(dispatch, emergency):
     """Reserve a bed at the next-nearest hospital and update the destination."""
+    # A bed reroute keeps the SAME (already-accepted) driver and only changes the
+    # destination hospital — so it uses emergency_ended() (terminal checks only),
+    # NOT should_reroute() which would block any trip a driver has accepted.
+    if emergency_ended(emergency):
+        print('[BED] Emergency ended — skipping bed reroute.')
+        return
+
     excluded = []
     if emergency.assigned_hospital_id:
         excluded.append(emergency.assigned_hospital_id.hospital_id)
@@ -314,6 +470,14 @@ def assign_next_ambulance(emergency):
     None when no ambulance is left (patient is told to call 108)."""
     from .utils import find_nearest_ambulance
 
+    # Never reassign an emergency the patient already cancelled (or that has
+    # otherwise ended). should_reroute() re-reads fresh from the DB so a timeout
+    # thread holding a stale in-memory copy can't resurrect a dead emergency by
+    # dispatching to a new driver (the "phantom re-dispatch").
+    if not should_reroute(emergency):
+        print('[REROUTE] Emergency not active — no reassignment.')
+        return None
+
     tried_ids = list(
         AmbulanceDispatch.objects.filter(
             emergency_id=emergency, dispatch_status='rejected',
@@ -395,12 +559,23 @@ def schedule_dispatch_timeout(dispatch_id, seconds=None):
 
     def _timeout():
         from django.db import connection
+        # This timer has now fired — drop its registry handle so a later cancel
+        # is a harmless no-op.
+        with _dispatch_timers_lock:
+            _dispatch_timers.pop(str(dispatch_id), None)
         try:
             dispatch = AmbulanceDispatch.objects.select_related(
                 'emergency_id', 'ambulance_id', 'ambulance_id__driver_id',
             ).get(dispatch_id=dispatch_id)
             print(f'[EMERGENCY] Auto-reject triggered for dispatch {dispatch_id}')
             print(f'[EMERGENCY] Dispatch status: {dispatch.dispatch_status}')
+            # If the patient cancelled, a driver already accepted, or the trip
+            # otherwise ended while this timer was pending, stand down — do NOT
+            # auto-reject + reroute, or we'd dispatch a new driver to a trip
+            # that's already handled.
+            if not should_reroute(dispatch.emergency_id, dispatch):
+                print('[EMERGENCY] Emergency not reroutable — aborting auto-reject/reroute.')
+                return
             # Still 'dispatched' means the driver never accepted (accept moves
             # it to 'en_route'). Treat as a no-response and move on.
             if dispatch.dispatch_status != 'dispatched':
@@ -409,6 +584,13 @@ def schedule_dispatch_timeout(dispatch_id, seconds=None):
             dispatch.dispatch_status = 'rejected'
             dispatch.save(update_fields=['dispatch_status'])
             free_ambulance(dispatch)
+            # Dismiss the timed-out driver's popup so they don't keep seeing an
+            # emergency that's now being offered to someone else.
+            push_dispatch_cancelled(
+                dispatch,
+                'Response time expired — this emergency was reassigned to another driver.',
+                reason='timeout',
+            )
             print('[EMERGENCY] Looking for next driver…')
             assign_next_ambulance(dispatch.emergency_id)
         except AmbulanceDispatch.DoesNotExist:
@@ -433,6 +615,10 @@ def schedule_dispatch_timeout(dispatch_id, seconds=None):
     timer = threading.Timer(float(seconds), _timeout)
     timer.daemon = True
     timer.start()
+    # Store the handle so the timer can be cancelled the moment the dispatch is
+    # accepted / cancelled / completed (instead of waking up later to bail).
+    _register_dispatch_timer(dispatch_id, timer)
+    print(f'[TIMER] Started for dispatch {dispatch_id}')
 
 
 def ws_broadcast(group_name, message_type, payload):
@@ -446,6 +632,31 @@ def ws_broadcast(group_name, message_type, payload):
         })
     except Exception:
         pass
+
+
+def push_dispatch_cancelled(dispatch, message='Emergency handled by another driver.',
+                            reason='reassigned'):
+    """Tell a dispatch's driver to dismiss their incoming-request popup because
+    the dispatch is no longer theirs — it timed out and was reassigned, or
+    another driver accepted the same emergency. Sent to the driver's per-user
+    `emergency_<login_id>` channel (the same one the dispatch alert arrives on)."""
+    try:
+        driver = dispatch.ambulance_id.driver_id if dispatch.ambulance_id else None
+        if not driver or not driver.login_id:
+            return
+        ws_broadcast(
+            f'emergency_{driver.login_id.login_id}', 'dispatch_cancelled',
+            {'data': {
+                'dispatch_id': str(dispatch.dispatch_id),
+                'emergency_id': str(dispatch.emergency_id_id),
+                'message': message,
+                'reason': reason,
+                'action': 'remove',
+            }},
+        )
+        print(f'[DISPATCH] Asked driver to dismiss popup (dispatch {dispatch.dispatch_id}, {reason})')
+    except Exception as exc:  # noqa: BLE001
+        print(f'[DISPATCH] dispatch_cancelled push error: {exc}')
 
 
 # ─── Driver Views ─────────────────────────────────────────────────────────────
@@ -546,9 +757,28 @@ class ActiveDispatchView(APIView):
         ).first()
 
         if not dispatch:
+            # If the driver's most recent dispatch was just cancelled (patient
+            # cancelled / marked safe / driver report), surface that so the UI
+            # can show a "cancelled" screen — and so a mid-trip refresh doesn't
+            # leave the driver stuck on a stale active dispatch.
+            from django.utils import timezone as dj_tz
+            from datetime import timedelta
+
+            recent = AmbulanceDispatch.objects.select_related('emergency_id').filter(
+                ambulance_id__driver_id=driver, dispatch_status='cancelled',
+            ).order_by('-dispatched_at').first()
+            em = recent.emergency_id if recent else None
+            if em and em.status == 'cancelled' and em.updated_at >= dj_tz.now() - timedelta(minutes=3):
+                return Response({
+                    'success': True,
+                    'cancelled': True,
+                    'patient_safe': em.patient_safe,
+                    'message': em.cancellation_reason or 'Emergency cancelled by patient',
+                    'data': None,
+                })
             # Explicit null so the frontend `dispatch ? …` check is falsy.
             return Response(
-                {'success': True, 'message': 'No active dispatch.', 'data': None}
+                {'success': True, 'message': 'No active dispatch.', 'data': None, 'cancelled': False}
             )
 
         emergency = dispatch.emergency_id
@@ -580,6 +810,12 @@ class ActiveDispatchView(APIView):
             ),
             'rerouted': dispatch.rerouted,
             'reroute_count': dispatch.reroute_count,
+            'dispatch_status': dispatch.dispatch_status,
+            'emergency_status': emergency.status,
+            'bed_ready': dispatch.bed_ready,
+            'bed_ready_at': dispatch.bed_ready_at.isoformat() if dispatch.bed_ready_at else None,
+            'bed_ward': (bed.ward_name or '') if bed else '',
+            'bed_type': (bed.bed_type or '') if bed else '',
         })
 
 
@@ -596,6 +832,8 @@ class AcceptDispatchView(APIView):
         if not driver:
             return err('Driver profile not found.', status_code=404)
 
+        from django.db import transaction
+
         related = (
             'emergency_id',
             'emergency_id__patient_id',
@@ -603,26 +841,70 @@ class AcceptDispatchView(APIView):
             'emergency_id__assigned_hospital_id',
             'ambulance_id',
         )
-        try:
-            dispatch = AmbulanceDispatch.objects.select_related(*related).get(
-                dispatch_id=dispatch_id,
-                ambulance_id__driver_id=driver,
-            )
-        except AmbulanceDispatch.DoesNotExist:
-            dispatch = AmbulanceDispatch.objects.select_related(*related).filter(
-                ambulance_id__driver_id=driver,
-                dispatch_status__in=['dispatched', 'en_route', 'arrived'],
+
+        # Resolve which dispatch this accept refers to (fall back to the driver's
+        # latest live dispatch if the id is stale), then lock + validate + claim
+        # it atomically so two drivers can't both win the same emergency.
+        with transaction.atomic():
+            locked = AmbulanceDispatch.objects.select_for_update().filter(
+                dispatch_id=dispatch_id, ambulance_id__driver_id=driver,
             ).first()
-            if not dispatch:
+            if not locked:
+                locked = AmbulanceDispatch.objects.select_for_update().filter(
+                    ambulance_id__driver_id=driver,
+                    dispatch_status__in=['dispatched', 'en_route', 'arrived'],
+                ).order_by('-dispatched_at').first()
+            if not locked:
                 return err('No active dispatch found.', status_code=404)
 
-        # Anchor the patient's ETA countdown to the acceptance moment (set once).
-        if dispatch.dispatch_status == 'dispatched':
-            dispatch.dispatch_status = 'en_route'
-            if not dispatch.accepted_at:
-                dispatch.accepted_at = datetime.now(tz=timezone.utc)
-            dispatch.save(update_fields=['dispatch_status', 'accepted_at'])
+            # Stale-acceptance guard: a dispatch that was reassigned (rejected),
+            # cancelled, or completed can NOT be accepted. Only a still-pending
+            # 'dispatched' one (or one this same driver already moved past, for
+            # idempotent re-taps) is acceptable.
+            if locked.dispatch_status not in ('dispatched', 'en_route', 'arrived'):
+                return err(
+                    'This emergency has already been handled by another driver.',
+                    status_code=409,
+                )
 
+            first_accept = locked.dispatch_status == 'dispatched'
+            if first_accept:
+                locked.dispatch_status = 'en_route'
+                if not locked.accepted_at:
+                    locked.accepted_at = datetime.now(tz=timezone.utc)
+                locked.save(update_fields=['dispatch_status', 'accepted_at'])
+
+                # Driver accepted → kill this dispatch's auto-reassign timer so it
+                # can never fire and offer the emergency to the next driver.
+                cancel_dispatch_timer(locked.dispatch_id, 'driver accepted')
+
+                # Claim the emergency: cancel every OTHER live dispatch for it and
+                # tell those drivers to drop their popup. (Normally none exist —
+                # this closes the reassign-window race where a stale dispatch is
+                # still showing on another driver's screen.)
+                others = AmbulanceDispatch.objects.select_for_update().select_related(
+                    'ambulance_id', 'ambulance_id__driver_id',
+                    'ambulance_id__driver_id__login_id',
+                ).filter(
+                    emergency_id=locked.emergency_id,
+                    dispatch_status__in=['dispatched', 'pending_acknowledgment'],
+                ).exclude(dispatch_id=locked.dispatch_id)
+                cancelled_count = 0
+                for other in others:
+                    other.dispatch_status = 'cancelled'
+                    other.save(update_fields=['dispatch_status'])
+                    free_ambulance(other)
+                    cancel_dispatch_timer(other.dispatch_id, 'superseded by accept')
+                    push_dispatch_cancelled(other)
+                    cancelled_count += 1
+                if cancelled_count:
+                    print(f'[ACCEPT] Cancelled {cancelled_count} other dispatch(es) '
+                          f'for emergency {locked.emergency_id_id}')
+
+        # Reload with related rows for the response/notifications.
+        dispatch = AmbulanceDispatch.objects.select_related(*related).get(
+            dispatch_id=locked.dispatch_id,
+        )
         emergency = dispatch.emergency_id
         patient = emergency.patient_id
         ambulance = dispatch.ambulance_id
@@ -694,10 +976,20 @@ class RejectDispatchView(APIView):
         dispatch.dispatch_status = 'rejected'
         dispatch.save(update_fields=['dispatch_status'])
 
+        # Driver rejected this one → cancel its timer (reassignment below starts
+        # a fresh timer for the next driver).
+        cancel_dispatch_timer(dispatch.dispatch_id, 'driver rejected')
+
         # Free this ambulance + driver so they remain eligible for others.
         free_ambulance(dispatch)
 
         emergency = dispatch.emergency_id
+
+        # If the patient already cancelled, or another driver already accepted
+        # this emergency, a reject here must NOT trigger a reroute.
+        if not should_reroute(emergency, dispatch):
+            return ok('Dispatch rejected. Emergency no longer reroutable — no reassignment.')
+
         send_notification(
             emergency.patient_id.login_id,
             '🔄 Reassigning Ambulance…',
@@ -729,6 +1021,9 @@ class UpdateDispatchStatusView(APIView):
             dispatch = AmbulanceDispatch.objects.select_related(
                 'emergency_id',
                 'emergency_id__patient_id',
+                'emergency_id__assigned_hospital_id',
+                'emergency_id__assigned_hospital_id__login_id',
+                'emergency_id__assigned_bed_id',
                 'ambulance_id',
                 'ambulance_id__driver_id',
             ).get(
@@ -752,9 +1047,39 @@ class UpdateDispatchStatusView(APIView):
         ambulance = dispatch.ambulance_id
         emergency = dispatch.emergency_id
 
+        # Bug-1: real-time bed status at the destination hospital, recomputed at
+        # the moment the driver arrives. Surfaced to the driver UI so they know
+        # whether to wait / contact the hospital if the last bed was taken.
+        beds_available = None
+        bed_warning = False
+
         if new_status == 'arrived':
             dispatch.dispatch_status = new_status
             dispatch.arrived_at = now
+
+            hospital = emergency.assigned_hospital_id
+            beds_available = count_available_beds(hospital)
+            # Only a problem if this patient does NOT already hold a reserved bed
+            # AND nothing else is free — then the hospital genuinely can't take
+            # them right now.
+            has_reserved_bed = emergency.assigned_bed_id is not None
+            bed_warning = (not has_reserved_bed) and beds_available == 0
+
+            if bed_warning and hospital and hospital.login_id:
+                # Re-alert the hospital that an ambulance is on its doorstep with
+                # no bed to receive the patient.
+                try:
+                    send_notification(
+                        hospital.login_id,
+                        '🚨 Ambulance ARRIVED — No Beds!',
+                        f'Ambulance {ambulance.vehicle_no} has arrived with '
+                        f'{emergency.patient_id.full_name} but NO beds are available. '
+                        f'Please make arrangements immediately.',
+                        notif_type='emergency',
+                        related_id=str(emergency.emergency_id),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f'[BED ALERT] Arrival no-bed alert error: {exc}')
         elif new_status == 'completed':
             # Driver finished the trip, but the ambulance stays UNAVAILABLE
             # until the receiving hospital acknowledges the patient arrival.
@@ -809,7 +1134,11 @@ class UpdateDispatchStatusView(APIView):
             entity_type='AmbulanceDispatch',
             entity_id=str(dispatch_id),
         )
-        return ok('Dispatch status updated.', DispatchSerializer(dispatch).data)
+        data = DispatchSerializer(dispatch).data
+        if beds_available is not None:
+            data['beds_available'] = beds_available
+            data['bed_warning'] = bed_warning
+        return ok('Dispatch status updated.', data)
 
 
 class UpdateGPSView(APIView):
@@ -975,8 +1304,26 @@ class DriverTripStatsView(APIView):
             except Exception:
                 pass
 
+        # Recent trips list INCLUDES cancelled dispatches (completed-only counts
+        # above stay as performance metrics). Driver "patient not found" reports
+        # are surfaced as their own status for the history filter tabs.
+        STATUS_DISPLAY = {
+            'completed': '✅ Completed',
+            'cancelled': '❌ Cancelled by Patient',
+            'patient_not_found': '👤 Patient Not Found',
+        }
+        history_qs = AmbulanceDispatch.objects.select_related(
+            'emergency_id',
+            'emergency_id__patient_id',
+            'emergency_id__assigned_hospital_id',
+            'ambulance_id__hospital_id',
+        ).filter(
+            ambulance_id=ambulance,
+            dispatch_status__in=['completed', 'cancelled'],
+        ).order_by('-dispatched_at')[:20]
+
         recent_trips = []
-        for d in all_dispatches.order_by('-dispatched_at')[:5]:
+        for d in history_qs:
             try:
                 emergency = d.emergency_id
                 hospital = (
@@ -984,6 +1331,11 @@ class DriverTripStatsView(APIView):
                     if emergency.assigned_hospital_id
                     else ambulance.hospital_id.hospital_name
                 )
+                disp_status = d.dispatch_status
+                if (disp_status == 'cancelled' and emergency
+                        and emergency.cancelled_by == 'driver'
+                        and emergency.driver_report_type == 'patient_not_found'):
+                    disp_status = 'patient_not_found'
                 recent_trips.append({
                     'dispatch_id': str(d.dispatch_id),
                     'patient_name': emergency.patient_id.full_name,
@@ -993,6 +1345,10 @@ class DriverTripStatsView(APIView):
                     'time': d.dispatched_at.strftime('%I:%M %p'),
                     'distance_km': float(getattr(d, 'distance_km', 0) or 0),
                     'completed_at': str(d.completed_at) if d.completed_at else '',
+                    'status': disp_status,
+                    'status_display': STATUS_DISPLAY.get(disp_status, disp_status),
+                    'cancellation_reason': (emergency.cancellation_reason if emergency else None),
+                    'patient_safe': (emergency.patient_safe if emergency else False),
                 })
             except Exception as e:
                 print(f'Trip data error: {e}')
@@ -1127,15 +1483,29 @@ class IncomingPatientsView(APIView):
 
 
 class MarkBedReadyView(APIView):
-    """Hospital admin signals the reserved bed is prepared — notifies the driver
-    that the hospital is ready to receive the patient. (Notify-only: it does not
-    change the bed reservation, which stays locked until acknowledgment.)"""
+    """Hospital admin confirms a bed is prepared for an incoming emergency, then
+    notifies the driver.
+
+    Validated + logical:
+      * If a bed is already reserved for this emergency (the usual flow, where a
+        bed is auto-reserved at SOS) → just confirm it ready.
+      * If NO bed is reserved yet (e.g. the SOS no-beds fallback), the admin must
+        pass `bed_id` for a bed that is actually `available` at their hospital —
+        which is then reserved + linked to the emergency.
+      * If no `bed_id` and beds are free → ask the admin to pick one.
+      * If no `bed_id` and zero beds free → tell them to free one first.
+    """
     permission_classes = [IsAuthenticated, IsHospitalAdmin]
 
     def post(self, request, dispatch_id):
+        from django.utils import timezone as dj_tz
+        from apps.hospital.models import Bed
+        from apps.hospital.views import get_hospital, bed_display_label
+
         try:
             dispatch = AmbulanceDispatch.objects.select_related(
                 'emergency_id', 'emergency_id__assigned_hospital_id',
+                'emergency_id__assigned_bed_id', 'emergency_id__patient_id',
                 'ambulance_id', 'ambulance_id__driver_id',
                 'ambulance_id__driver_id__login_id',
             ).get(dispatch_id=dispatch_id)
@@ -1143,40 +1513,100 @@ class MarkBedReadyView(APIView):
             return err('Dispatch not found.', status_code=404)
 
         emergency = dispatch.emergency_id
+        hospital = get_hospital(request)  # the admin's own hospital owns the beds
+        bed_id = request.data.get('bed_id')
+        existing_bed = emergency.assigned_bed_id
+        bed = existing_bed
+
+        # ── Explicit bed selection (covers the no-bed fallback or a re-pick) ──
+        if bed_id and (not existing_bed or str(existing_bed.bed_id) != str(bed_id)):
+            try:
+                chosen = Bed.objects.get(bed_id=bed_id, hospital_id=hospital)
+            except Bed.DoesNotExist:
+                return err('Bed not found at your hospital.', status_code=404)
+            if chosen.status != 'available':
+                return Response({
+                    'success': False,
+                    'message': 'This bed is not available! Please select an available bed.',
+                    'available_beds': count_available_beds(hospital),
+                }, status=400)
+            # Release any previously-reserved bed before switching.
+            if existing_bed and str(existing_bed.bed_id) != str(chosen.bed_id):
+                release_bed_reservation(existing_bed)
+            chosen.status = 'reserved'
+            chosen.reserved_for = emergency.patient_id
+            chosen.emergency_id = emergency
+            chosen.reserved_at = dj_tz.now()
+            chosen.emergency_locked_at = dj_tz.now()
+            chosen.save(update_fields=[
+                'status', 'reserved_for', 'emergency_id', 'reserved_at',
+                'emergency_locked_at', 'updated_at',
+            ])
+            emergency.assigned_bed_id = chosen
+            if not emergency.assigned_hospital_id:
+                emergency.assigned_hospital_id = hospital
+            emergency.save(update_fields=['assigned_bed_id', 'assigned_hospital_id', 'updated_at'])
+            bed = chosen
+
+        # ── No bed_id AND none reserved yet → guide the admin ──
+        elif not existing_bed:
+            available = count_available_beds(hospital)
+            if available > 0:
+                return Response({
+                    'success': False,
+                    'message': 'Please select a specific bed to prepare.',
+                    'available_beds': available,
+                    'requires_bed_selection': True,
+                }, status=400)
+            return Response({
+                'success': False,
+                'message': 'No beds available! Please free a bed first from Bed Management.',
+                'available_beds': 0,
+                'no_beds': True,
+            }, status=400)
+
         hospital_name = (
             emergency.assigned_hospital_id.hospital_name
-            if emergency.assigned_hospital_id else 'the hospital'
+            if emergency.assigned_hospital_id else hospital.hospital_name
         )
 
         # Persist the ready state so it survives page navigation/remounts.
-        from django.utils import timezone as dj_tz
         if not dispatch.bed_ready:
             dispatch.bed_ready = True
             dispatch.bed_ready_at = dj_tz.now()
             dispatch.save(update_fields=['bed_ready', 'bed_ready_at'])
 
+        bed_label = bed_display_label(bed) if bed else 'ready'
         driver = dispatch.ambulance_id.driver_id if dispatch.ambulance_id else None
         if driver:
             send_notification(
-                driver.login_id, '🏥 Hospital Ready!',
-                f'{hospital_name} is prepared and ready to receive the patient.',
+                driver.login_id, '🛏️ Bed Ready!',
+                f'{hospital_name} has prepared {bed_label} for your patient.',
                 notif_type='emergency', related_id=str(dispatch.dispatch_id),
             )
-            ws_broadcast(
-                f'emergency_{driver.login_id.login_id}', 'hospital_ready',
-                {'data': {
-                    'dispatch_id': str(dispatch.dispatch_id),
-                    'hospital_name': hospital_name,
-                    'message': f'{hospital_name} is prepared and ready!',
-                }},
-            )
+            bed_payload = {
+                'dispatch_id': str(dispatch.dispatch_id),
+                'hospital_name': hospital_name,
+                'bed_number': bed_label,
+                'ward': (bed.ward_name or '') if bed else '',
+                'bed_type': (bed.bed_type or '') if bed else '',
+                'message': f'{hospital_name} prepared {bed_label} for the patient.',
+            }
+            # New richer `bed_ready` event (driver shows a bed banner); keep the
+            # older `hospital_ready` event for backward compatibility.
+            ws_broadcast(f'emergency_{driver.login_id.login_id}', 'bed_ready', {'data': bed_payload})
+            ws_broadcast(f'emergency_{driver.login_id.login_id}', 'hospital_ready', {'data': bed_payload})
 
         log_audit(
             login_id=request.user, action='Hospital marked bed ready',
             module='emergency', entity_type='AmbulanceDispatch',
             entity_id=str(dispatch_id),
         )
-        return ok('Hospital marked as ready. Driver notified.')
+        return ok('Bed prepared. Driver notified.', {
+            'bed_number': bed_label,
+            'bed_ready': True,
+            'bed_ready_at': dispatch.bed_ready_at.isoformat() if dispatch.bed_ready_at else None,
+        })
 
 
 class AcknowledgePatientView(APIView):
@@ -1211,6 +1641,9 @@ class AcknowledgePatientView(APIView):
         if not dispatch.completed_at:
             dispatch.completed_at = datetime.now(tz=timezone.utc)
         dispatch.save(update_fields=['dispatch_status', 'completed_at'])
+
+        # Belt-and-suspenders: drop any lingering timer for this trip.
+        cancel_dispatch_timer(dispatch.dispatch_id, 'trip complete')
 
         emergency = dispatch.emergency_id
         emergency.status = 'completed'
@@ -1282,3 +1715,265 @@ class AcknowledgePatientView(APIView):
                 'completed_at': str(dispatch.completed_at),
             },
         })
+
+
+# ─── SOS Safety: Cancel / I'm Safe / Driver Report ────────────────────────────
+
+def _cancel_active_dispatches(emergency, message):
+    """End an emergency's in-flight dispatches: mark them cancelled, free each
+    ambulance + driver, release the reserved bed, and push a cancel event to
+    every assigned driver (notification + WebSocket)."""
+    release_bed_reservation(emergency.assigned_bed_id)
+
+    # Kill every pending auto-reassign timer for this emergency first, so none
+    # can fire mid-teardown and dispatch a fresh driver to a cancelled SOS.
+    cancel_emergency_timers(emergency, 'emergency cancelled')
+
+    dispatches = AmbulanceDispatch.objects.select_related(
+        'ambulance_id', 'ambulance_id__driver_id', 'ambulance_id__driver_id__login_id',
+    ).filter(
+        emergency_id=emergency,
+        dispatch_status__in=['dispatched', 'en_route', 'arrived', 'pending_acknowledgment'],
+    )
+    for dispatch in dispatches:
+        dispatch.dispatch_status = 'cancelled'
+        dispatch.save(update_fields=['dispatch_status'])
+        free_ambulance(dispatch)
+
+        driver = dispatch.ambulance_id.driver_id if dispatch.ambulance_id else None
+        if driver and driver.login_id:
+            send_notification(
+                driver.login_id, '✅ Emergency Cancelled', message,
+                notif_type='emergency', related_id=str(emergency.emergency_id),
+            )
+            ws_broadcast(
+                f'emergency_{driver.login_id.login_id}', 'emergency_cancelled',
+                {'data': {
+                    'emergency_id': str(emergency.emergency_id),
+                    'message': message,
+                    'patient_safe': True,
+                }},
+            )
+
+
+def check_false_alarms(patient, increment=False):
+    """Count a patient's cancelled SOS alerts in the last 30 days. Warn (email +
+    notification) at 3, suspend the account at 5. `increment` adds one for a
+    driver-confirmed fake/not-found report that isn't itself a patient cancel."""
+    from datetime import timedelta
+    from django.utils import timezone as dj_tz
+
+    month_ago = dj_tz.now() - timedelta(days=30)
+    false_alarms = EmergencyRequest.objects.filter(
+        patient_id=patient,
+        status='cancelled',
+        cancelled_by='patient',
+        created_at__gte=month_ago,
+    ).count()
+    if increment:
+        false_alarms += 1
+
+    if false_alarms == 3:
+        try:
+            send_notification(
+                patient.login_id, '⚠️ Emergency SOS Warning',
+                f'You have triggered {false_alarms} false emergencies this month. '
+                'Repeated false alarms may result in account suspension.',
+                notif_type='emergency',
+            )
+            from email_utils import send_email
+            send_email(
+                to_email=patient.login_id.email,
+                subject='FederCare — Emergency SOS Warning',
+                html_content=f"""
+                <div style="font-family:Arial;max-width:600px;margin:0 auto;">
+                    <div style="background:#F97316;padding:24px;text-align:center;border-radius:12px 12px 0 0;">
+                        <h1 style="color:white;margin:0;font-size:20px;">⚠️ Emergency SOS Warning</h1>
+                    </div>
+                    <div style="background:#FAF7F2;padding:28px;border-radius:0 0 12px 12px;">
+                        <p style="color:#333;font-size:15px;">Dear <b>{patient.full_name}</b>,</p>
+                        <div style="background:white;border-radius:12px;padding:16px;border-left:4px solid #F97316;margin:0 0 16px;">
+                            <p style="color:#666;font-size:14px;line-height:1.6;margin:0;">
+                                You have triggered <b style="color:#F97316;">{false_alarms} false emergency alerts</b>
+                                this month. Emergency services are reserved for real emergencies.
+                                <br><br>
+                                Continued false alarms may result in your account being <b>suspended</b>.
+                            </p>
+                        </div>
+                        <p style="color:#9CA3AF;font-size:12px;text-align:center;">FederCare Health Network</p>
+                    </div>
+                </div>
+                """,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f'[WARN] false-alarm warn error: {exc}')
+
+    if false_alarms >= 5:
+        try:
+            login = patient.login_id
+            login.is_active = False
+            login.save(update_fields=['is_active', 'updated_at'])
+            send_notification(
+                login, '🚫 Account Suspended',
+                'Your account has been suspended due to repeated false emergency alerts. '
+                'Please contact support if you believe this is an error.',
+                notif_type='emergency',
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f'[SUSPEND] false-alarm suspend error: {exc}')
+
+
+class CancelSOSView(APIView):
+    """Patient cancels their own emergency (with a reason). Frees the ambulance,
+    releases the reserved bed, notifies the driver, and runs the false-alarm
+    check so abuse is tracked."""
+    permission_classes = [IsAuthenticated, IsPatient]
+
+    def post(self, request, emergency_id):
+        reason = (request.data.get('reason') or 'Patient cancelled').strip()
+        try:
+            emergency = EmergencyRequest.objects.select_related(
+                'patient_id', 'patient_id__login_id', 'assigned_bed_id',
+            ).get(emergency_id=emergency_id, patient_id__login_id=request.user)
+        except EmergencyRequest.DoesNotExist:
+            return err('Emergency not found!', status_code=404)
+
+        if emergency.status in ('completed', 'cancelled'):
+            return err('Cannot cancel this emergency!', status_code=400)
+
+        emergency.status = 'cancelled'
+        emergency.cancelled_by = 'patient'
+        emergency.cancellation_reason = reason[:200]
+        emergency.patient_safe = True
+        emergency.save(update_fields=[
+            'status', 'cancelled_by', 'cancellation_reason', 'patient_safe', 'updated_at',
+        ])
+
+        _cancel_active_dispatches(
+            emergency, f'Emergency cancelled by patient. Reason: {reason}',
+        )
+        check_false_alarms(emergency.patient_id)
+
+        log_audit(
+            login_id=request.user, action='Patient cancelled emergency',
+            module='emergency', entity_type='EmergencyRequest',
+            entity_id=str(emergency.emergency_id),
+        )
+        return ok('Emergency cancelled. Stay safe!')
+
+
+class ImSafeView(APIView):
+    """Patient marks themselves safe during an active emergency (e.g. they got
+    another vehicle). Same teardown as cancel, with a reassuring driver message."""
+    permission_classes = [IsAuthenticated, IsPatient]
+
+    def post(self, request, emergency_id):
+        try:
+            emergency = EmergencyRequest.objects.select_related(
+                'patient_id', 'patient_id__login_id', 'assigned_bed_id',
+            ).get(emergency_id=emergency_id, patient_id__login_id=request.user)
+        except EmergencyRequest.DoesNotExist:
+            return err('Emergency not found!', status_code=404)
+
+        if emergency.status in ('completed', 'cancelled'):
+            return err('Cannot cancel this emergency!', status_code=400)
+
+        emergency.status = 'cancelled'
+        emergency.cancelled_by = 'patient'
+        emergency.cancellation_reason = 'Patient is safe - got another vehicle'
+        emergency.patient_safe = True
+        emergency.save(update_fields=[
+            'status', 'cancelled_by', 'cancellation_reason', 'patient_safe', 'updated_at',
+        ])
+
+        _cancel_active_dispatches(
+            emergency, '✅ Patient is safe! They got another vehicle. You can return.',
+        )
+        check_false_alarms(emergency.patient_id)
+
+        log_audit(
+            login_id=request.user, action='Patient marked safe (emergency cancelled)',
+            module='emergency', entity_type='EmergencyRequest',
+            entity_id=str(emergency.emergency_id),
+        )
+        return ok('Glad you are safe! Emergency cancelled.')
+
+
+class DriverReportView(APIView):
+    """Assigned driver reports an incident at the scene (patient not found /
+    already left / fake / wrong location). Closes the emergency, frees the
+    ambulance, alerts super admins, and penalises fake/not-found via the
+    false-alarm counter."""
+    permission_classes = [IsAuthenticated, IsDriver]
+
+    def post(self, request, emergency_id):
+        report_type = request.data.get('report_type')
+        description = (request.data.get('description') or '').strip()
+        valid_types = [c[0] for c in EmergencyRequest._meta.get_field('driver_report_type').choices]
+        if report_type not in valid_types:
+            return err('Invalid report type!', status_code=400)
+
+        driver = get_driver(request)
+        if not driver:
+            return err('Driver profile not found.', status_code=404)
+
+        try:
+            emergency = EmergencyRequest.objects.select_related(
+                'patient_id', 'patient_id__login_id', 'assigned_bed_id',
+            ).get(emergency_id=emergency_id)
+        except EmergencyRequest.DoesNotExist:
+            return err('Emergency not found!', status_code=404)
+
+        # Only a driver actually assigned to this emergency may report on it.
+        if not AmbulanceDispatch.objects.filter(
+            emergency_id=emergency, ambulance_id__driver_id=driver,
+        ).exists():
+            return err('You are not assigned to this emergency.', status_code=403)
+
+        emergency.driver_report = description
+        emergency.driver_report_type = report_type
+        emergency.status = 'cancelled'
+        emergency.cancelled_by = 'driver'
+        emergency.cancellation_reason = report_type
+        emergency.save(update_fields=[
+            'driver_report', 'driver_report_type', 'status',
+            'cancelled_by', 'cancellation_reason', 'updated_at',
+        ])
+
+        _cancel_active_dispatches(
+            emergency, f'Emergency closed — driver report: {report_type.replace("_", " ")}.',
+        )
+
+        # Fake / patient-not-found counts against the patient's SOS abuse score.
+        if report_type in ('fake_emergency', 'patient_not_found'):
+            check_false_alarms(emergency.patient_id, increment=True)
+
+        # Notify super admins of the incident.
+        try:
+            from apps.auth_app.models import LoginCredentials
+            for admin in LoginCredentials.objects.filter(role='super_admin', is_active=True):
+                send_notification(
+                    admin, '⚠️ Emergency Incident Report',
+                    f'Driver reported "{report_type.replace("_", " ")}" for emergency '
+                    f'#{str(emergency.emergency_id)[:8]}.',
+                    notif_type='emergency', related_id=str(emergency.emergency_id),
+                )
+        except Exception as exc:  # noqa: BLE001
+            print(f'[REPORT] admin notify error: {exc}')
+
+        try:
+            send_notification(
+                emergency.patient_id.login_id, '🚑 Emergency Closed',
+                'The responding driver reported they could not complete this emergency. '
+                'If this was a mistake, please trigger SOS again or call 108.',
+                notif_type='emergency', related_id=str(emergency.emergency_id),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        log_audit(
+            login_id=request.user, action=f'Driver report: {report_type}',
+            module='emergency', entity_type='EmergencyRequest',
+            entity_id=str(emergency.emergency_id),
+        )
+        return ok('Report submitted successfully!')

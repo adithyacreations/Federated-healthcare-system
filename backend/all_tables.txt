@@ -2,10 +2,13 @@ MODEL: LoginCredentials
 TABLE: login_credentials
   login_id|UUIDField|Primary Key, NOT NULL
   email|CharField|Unique, NOT NULL
+  phone_number|CharField|NOT NULL
   password_hash|CharField|NOT NULL
   role|CharField|NOT NULL
   is_active|BooleanField|NOT NULL
   is_approved|BooleanField|NOT NULL
+  force_password_change|BooleanField|NOT NULL
+  temp_password|CharField|NULL
   last_login|DateTimeField|NULL
   login_attempts|IntegerField|NOT NULL
   created_at|DateTimeField|NOT NULL
@@ -65,6 +68,33 @@ TABLE: notifications
   related_id|UUIDField|NULL
   created_at|DateTimeField|NOT NULL
 ---
+MODEL: Developer
+TABLE: developers
+  developer_id|UUIDField|Primary Key, NOT NULL
+  name|CharField|NOT NULL
+  role|CharField|NOT NULL
+  department|CharField|NULL
+  college|CharField|NOT NULL
+  photo|FileField|NULL
+  github_url|CharField|NULL
+  linkedin_url|CharField|NULL
+  email|CharField|NULL
+  order|IntegerField|NOT NULL
+  is_active|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: ProjectFeature
+TABLE: project_features
+  feature_id|UUIDField|Primary Key, NOT NULL
+  title|CharField|NOT NULL
+  description|TextField|NULL
+  photo|FileField|NULL
+  icon|CharField|NULL
+  category|CharField|NULL
+  order|IntegerField|NOT NULL
+  is_active|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+---
 MODEL: HospitalRegistration
 TABLE: hospital_registrations
   hospital_id|UUIDField|Primary Key, NOT NULL
@@ -91,6 +121,7 @@ TABLE: departments
   hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
   dept_name|CharField|NOT NULL
   description|TextField|NOT NULL
+  department_photo|CharField|NOT NULL
   created_at|DateTimeField|NOT NULL
 ---
 MODEL: Bed
@@ -101,8 +132,11 @@ TABLE: beds
   ward_name|CharField|NOT NULL
   status|CharField|NOT NULL
   reserved_for|ForeignKey|FK to PatientRegistration, NULL
+  emergency_id|ForeignKey|FK to EmergencyRequest, NULL
   reserved_at|DateTimeField|NULL
   admitted_at|DateTimeField|NULL
+  emergency_locked_at|DateTimeField|NULL
+  minimum_lock_days|IntegerField|NOT NULL
   updated_at|DateTimeField|NOT NULL
 ---
 MODEL: HospitalInventory
@@ -114,8 +148,26 @@ TABLE: hospital_inventory
   quantity|IntegerField|NOT NULL
   unit|CharField|NOT NULL
   reorder_level|IntegerField|NOT NULL
+  condition|CharField|NOT NULL
+  image_url|CharField|NOT NULL
   last_restocked|DateTimeField|NULL
   maintenance_due|DateField|NULL
+---
+MODEL: EquipmentStockMovement
+TABLE: equipment_stock_movements
+  movement_id|UUIDField|Primary Key, NOT NULL
+  equipment_id|ForeignKey|FK to HospitalInventory, NOT NULL
+  movement_type|CharField|NOT NULL
+  quantity|IntegerField|NOT NULL
+  reason|CharField|NOT NULL
+  vendor_name|CharField|NULL
+  invoice_number|CharField|NULL
+  notes|TextField|NULL
+  performed_by|ForeignKey|FK to LoginCredentials, NULL
+  stock_before|IntegerField|NOT NULL
+  stock_after|IntegerField|NOT NULL
+  movement_date|DateField|NOT NULL
+  created_at|DateTimeField|NOT NULL
 ---
 MODEL: HospitalPatient
 TABLE: hospital_patients
@@ -123,13 +175,15 @@ TABLE: hospital_patients
   hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
   added_by|ForeignKey|FK to LoginCredentials, NULL
   full_name|CharField|NOT NULL
-  age|IntegerField|NOT NULL
+  age|IntegerField|NULL
   gender|CharField|NOT NULL
   blood_group|CharField|NOT NULL
   symptoms|JSONField|NOT NULL
   diagnosis|CharField|NOT NULL
+  medications|TextField|NOT NULL
   visit_date|DateField|NOT NULL
   notes|TextField|NOT NULL
+  source|CharField|NOT NULL
   created_at|DateTimeField|NOT NULL
 ---
 MODEL: PatientRegistration
@@ -147,6 +201,7 @@ TABLE: patient_registrations
   emergency_contact|CharField|NOT NULL
   qr_code_url|CharField|NOT NULL
   lifestyle_data|JSONField|NOT NULL
+  reminder_enabled|BooleanField|NOT NULL
   created_at|DateTimeField|NOT NULL
   updated_at|DateTimeField|NOT NULL
 ---
@@ -180,6 +235,7 @@ TABLE: ehr_consent_log
   access_type|CharField|NOT NULL
   data_shared|JSONField|NOT NULL
   consent_given|BooleanField|NOT NULL
+  short_code|CharField|NOT NULL
   expires_at|DateTimeField|NULL
   accessed_at|DateTimeField|NOT NULL
 ---
@@ -198,7 +254,8 @@ TABLE: risk_assessments
 MODEL: Complaint
 TABLE: patient_complaints
   complaint_id|UUIDField|Primary Key, NOT NULL
-  patient_id|ForeignKey|FK to PatientRegistration, NOT NULL
+  patient_id|ForeignKey|FK to PatientRegistration, NULL
+  filed_by_hospital|ForeignKey|FK to HospitalRegistration, NULL
   complaint_type|CharField|NOT NULL
   doctor_id|ForeignKey|FK to DoctorRegistration, NULL
   hospital_id|ForeignKey|FK to HospitalRegistration, NULL
@@ -207,6 +264,10 @@ TABLE: patient_complaints
   description|TextField|NOT NULL
   status|CharField|NOT NULL
   admin_response|TextField|NOT NULL
+  admin_replied|BooleanField|NOT NULL
+  hospital_response|TextField|NOT NULL
+  hospital_replied|BooleanField|NOT NULL
+  patient_followup|TextField|NOT NULL
   created_at|DateTimeField|NOT NULL
   updated_at|DateTimeField|NOT NULL
 ---
@@ -229,6 +290,15 @@ TABLE: lab_test_orders
   report_results|JSONField|NOT NULL
   abnormal_flags|JSONField|NOT NULL
   notes|TextField|NOT NULL
+  prescription_required|BooleanField|NOT NULL
+  prescription_verified|BooleanField|NOT NULL
+  prescription_image|CharField|NOT NULL
+  prescription_status|CharField|NOT NULL
+  slot_id|ForeignKey|FK to LabSlot, NULL
+  reminder_sent|BooleanField|NOT NULL
+  reminder_30min_sent|BooleanField|NOT NULL
+  no_show_at|DateTimeField|NULL
+  no_show_marked_by|CharField|NOT NULL
   ordered_at|DateTimeField|NOT NULL
 ---
 MODEL: EHRImage
@@ -279,6 +349,7 @@ TABLE: consultations
   doctor_id|ForeignKey|FK to DoctorRegistration, NOT NULL
   slot_id|ForeignKey|FK to DoctorSlot, NULL
   jitsi_room_id|CharField|NOT NULL
+  consult_mode|CharField|NOT NULL
   status|CharField|NOT NULL
   ai_suggestions|JSONField|NOT NULL
   doctor_notes|TextField|NOT NULL
@@ -305,6 +376,16 @@ TABLE: prescriptions
   valid_until|DateField|NULL
   pdf_url|CharField|NOT NULL
   created_at|DateTimeField|NOT NULL
+---
+MODEL: ConsultationChat
+TABLE: consultation_chats
+  chat_id|UUIDField|Primary Key, NOT NULL
+  consultation_id|ForeignKey|FK to Consultation, NOT NULL
+  sender_type|CharField|NOT NULL
+  sender_name|CharField|NOT NULL
+  message|TextField|NOT NULL
+  sent_at|DateTimeField|NOT NULL
+  is_read|BooleanField|NOT NULL
 ---
 MODEL: PharmacistRegistration
 TABLE: pharmacist_registrations
@@ -333,6 +414,7 @@ TABLE: medicine_orders
   razorpay_payment_id|CharField|NOT NULL
   razorpay_signature|CharField|NOT NULL
   delivery_address|TextField|NOT NULL
+  delivery_phone|CharField|NOT NULL
   order_status|CharField|NOT NULL
   tracking_info|TextField|NOT NULL
   prescription_url|CharField|NOT NULL
@@ -349,6 +431,9 @@ TABLE: medicine_orders
   dispatched_at|DateTimeField|NULL
   delivered_at|DateTimeField|NULL
   status_history|JSONField|NOT NULL
+  stock_reserved|BooleanField|NOT NULL
+  reserved_at|DateTimeField|NULL
+  reservation_expires_at|DateTimeField|NULL
   ordered_at|DateTimeField|NOT NULL
   updated_at|DateTimeField|NOT NULL
 ---
@@ -363,6 +448,7 @@ TABLE: pharmacy_inventory
   price_per_unit|DecimalField|NOT NULL
   unit|CharField|NOT NULL
   stock_quantity|IntegerField|NOT NULL
+  reserved_quantity|PositiveIntegerField|NOT NULL
   reorder_level|IntegerField|NOT NULL
   requires_prescription|BooleanField|NOT NULL
   medicine_image|FileField|NULL
@@ -414,6 +500,46 @@ TABLE: lab_reports
   saved_to_ehr|BooleanField|NOT NULL
   uploaded_at|DateTimeField|NOT NULL
 ---
+MODEL: HospitalLabConfig
+TABLE: hospital_lab_configs
+  config_id|UUIDField|Primary Key, NOT NULL
+  hospital_id|OneToOneField|Unique, FK to HospitalRegistration, NOT NULL
+  working_days|JSONField|NOT NULL
+  start_time|TimeField|NOT NULL
+  end_time|TimeField|NOT NULL
+  slot_duration_minutes|IntegerField|NOT NULL
+  max_patients_per_slot|IntegerField|NOT NULL
+  lunch_break_start|TimeField|NULL
+  lunch_break_end|TimeField|NULL
+  is_active|BooleanField|NOT NULL
+  advance_booking_days|IntegerField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
+MODEL: LabSlot
+TABLE: lab_slots
+  slot_id|UUIDField|Primary Key, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  slot_date|DateField|NOT NULL
+  start_time|TimeField|NOT NULL
+  end_time|TimeField|NOT NULL
+  max_patients|IntegerField|NOT NULL
+  booked_count|IntegerField|NOT NULL
+  is_blocked|BooleanField|NOT NULL
+  block_reason|CharField|NULL
+  created_at|DateTimeField|NOT NULL
+---
+MODEL: LabTestSlotRule
+TABLE: lab_test_slot_rules
+  rule_id|UUIDField|Primary Key, NOT NULL
+  test_name_keyword|CharField|NOT NULL
+  time_restriction|CharField|NOT NULL
+  allowed_start|TimeField|NULL
+  allowed_end|TimeField|NULL
+  requires_fasting|BooleanField|NOT NULL
+  fasting_hours|IntegerField|NOT NULL
+  preparation_note|CharField|NULL
+---
 MODEL: AmbulanceDriverRegistration
 TABLE: ambulance_driver_registrations
   driver_id|UUIDField|Primary Key, NOT NULL
@@ -451,6 +577,12 @@ TABLE: emergency_requests
   status|CharField|NOT NULL
   assigned_hospital_id|ForeignKey|FK to HospitalRegistration, NULL
   assigned_bed_id|ForeignKey|FK to Bed, NULL
+  cancelled_by|CharField|NULL
+  cancellation_reason|CharField|NULL
+  patient_safe|BooleanField|NOT NULL
+  false_alarm_count|IntegerField|NOT NULL
+  driver_report|TextField|NULL
+  driver_report_type|CharField|NULL
   created_at|DateTimeField|NOT NULL
   updated_at|DateTimeField|NOT NULL
 ---
@@ -463,8 +595,13 @@ TABLE: ambulance_dispatch
   eta_minutes|IntegerField|NULL
   route_data|JSONField|NOT NULL
   dispatched_at|DateTimeField|NOT NULL
+  accepted_at|DateTimeField|NULL
   arrived_at|DateTimeField|NULL
   completed_at|DateTimeField|NULL
+  rerouted|BooleanField|NOT NULL
+  reroute_count|IntegerField|NOT NULL
+  bed_ready|BooleanField|NOT NULL
+  bed_ready_at|DateTimeField|NULL
 ---
 MODEL: VendorRegistration
 TABLE: vendor_registrations
@@ -518,6 +655,25 @@ TABLE: equipment_orders
   status_history|JSONField|NOT NULL
   ordered_at|DateTimeField|NOT NULL
   updated_at|DateTimeField|NOT NULL
+---
+MODEL: VendorHospitalChat
+TABLE: vendor_hospital_chats
+  chat_id|UUIDField|Primary Key, NOT NULL
+  vendor_id|ForeignKey|FK to VendorRegistration, NOT NULL
+  hospital_id|ForeignKey|FK to HospitalRegistration, NOT NULL
+  order_id|ForeignKey|FK to EquipmentOrder, NULL
+  created_at|DateTimeField|NOT NULL
+  last_message_at|DateTimeField|NULL
+---
+MODEL: VendorChatMessage
+TABLE: vendor_chat_messages
+  message_id|UUIDField|Primary Key, NOT NULL
+  chat_id|ForeignKey|FK to VendorHospitalChat, NOT NULL
+  sender_type|CharField|NOT NULL
+  sender_login|ForeignKey|FK to LoginCredentials, NOT NULL
+  message|TextField|NOT NULL
+  is_read|BooleanField|NOT NULL
+  sent_at|DateTimeField|NOT NULL
 ---
 MODEL: TriageSession
 TABLE: triage_sessions
@@ -583,4 +739,8 @@ TABLE: epidemic_trends
   heatmap_data|JSONField|NOT NULL
   alert_level|CharField|NOT NULL
   recorded_date|DateField|NOT NULL
+  is_resolved|BooleanField|NOT NULL
+  resolved_at|DateTimeField|NULL
+  resolved_by|ForeignKey|FK to LoginCredentials, NULL
+  resolution_note|TextField|NOT NULL
 ---

@@ -761,9 +761,11 @@ class EmergencySOSView(APIView):
             driver.is_available = False
             driver.save(update_fields=['is_available'])
 
-        # Find nearest hospital with an available bed
+        # Find nearest hospital with an available bed — only approved AND active
+        # (not admin-suspended) hospitals are eligible to receive the patient.
         hospitals_with_beds = HospitalRegistration.objects.filter(
             approval_status='approved',
+            login_id__is_active=True,
             beds__status='available',
         ).distinct()
 
@@ -779,6 +781,7 @@ class EmergencySOSView(APIView):
                 nearest_hospital = hosp
 
         reserved_bed = None
+        no_beds_warning = False
         if nearest_hospital:
             from apps.emergency.views import reserve_bed_for_emergency
             reserved_bed = reserve_bed_for_emergency(nearest_hospital, emergency)
@@ -789,6 +792,41 @@ class EmergencySOSView(APIView):
                 emergency.save(
                     update_fields=['assigned_hospital_id', 'assigned_bed_id', 'status']
                 )
+
+        # Bug-1 fallback: no approved+active hospital currently has a free bed.
+        # Still route the patient to the nearest hospital (no bed reserved) and
+        # alert it to prepare one immediately — never leave an SOS with no
+        # destination.
+        if not nearest_hospital:
+            fallback_hospital = None
+            min_fb_dist = float('inf')
+            for hosp in HospitalRegistration.objects.filter(
+                approval_status='approved', login_id__is_active=True,
+            ):
+                if not hosp.latitude or not hosp.longitude:
+                    continue
+                dist = haversine(p_lat, p_lng, float(hosp.latitude), float(hosp.longitude))
+                if dist < min_fb_dist:
+                    min_fb_dist = dist
+                    fallback_hospital = hosp
+
+            if fallback_hospital:
+                nearest_hospital = fallback_hospital
+                no_beds_warning = True
+                emergency.assigned_hospital_id = fallback_hospital
+                emergency.status = 'dispatched'
+                emergency.save(update_fields=['assigned_hospital_id', 'status'])
+                try:
+                    send_notification(
+                        fallback_hospital.login_id,
+                        '🚨 Incoming Emergency — No Beds!',
+                        f'Ambulance dispatched for {patient.full_name} '
+                        f'({d["severity"].upper()}) but NO beds are free. '
+                        f'Please prepare a bed immediately. Patient ETA: ~{eta_minutes} min.',
+                        notif_type='emergency', related_id=str(emergency.emergency_id),
+                    )
+                except Exception as exc:
+                    print(f'[BED ALERT] No-bed dispatch alert error: {exc}')
 
         # Real-time bed monitor: if the reserved bed gets taken mid-trip,
         # auto-reroute to the next-nearest hospital with a free bed.
@@ -878,6 +916,12 @@ class EmergencySOSView(APIView):
             'status': emergency.status,
             'assigned_hospital_name': nearest_hospital.hospital_name if nearest_hospital else None,
             'assigned_bed_type': reserved_bed.bed_type if reserved_bed else None,
+            'no_beds_warning': no_beds_warning,
+            'warning': (
+                'No beds currently available at the nearest hospital. '
+                'The hospital has been alerted to prepare a bed.'
+                if no_beds_warning else None
+            ),
         }, status=201)
 
 
@@ -907,6 +951,9 @@ class TrackEmergencyView(APIView):
             'emergency_id': str(emergency.emergency_id),
             'status': emergency.status,
             'no_drivers': emergency.status == 'no_drivers',
+            'cancelled': emergency.status == 'cancelled',
+            'patient_safe': emergency.patient_safe,
+            'cancelled_by': emergency.cancelled_by,
             'severity': emergency.severity.upper(),
             'patient_lat': float(emergency.patient_lat) if emergency.patient_lat is not None else None,
             'patient_lng': float(emergency.patient_lng) if emergency.patient_lng is not None else None,

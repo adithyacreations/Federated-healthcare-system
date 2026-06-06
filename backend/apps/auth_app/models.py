@@ -36,6 +36,16 @@ class LoginCredentials(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     is_active = models.BooleanField(default=False)
     is_approved = models.BooleanField(default=False)
+    # Set when an account is created with a temporary password (e.g. staff added
+    # by a hospital admin). The user is forced to set a new password on first login.
+    force_password_change = models.BooleanField(
+        default=False,
+        help_text='Force user to change password on next login',
+    )
+    temp_password = models.CharField(
+        max_length=100, null=True, blank=True,
+        help_text='Temporary password (cleared after the user sets their own)',
+    )
     last_login = models.DateTimeField(null=True, blank=True)
     login_attempts = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)

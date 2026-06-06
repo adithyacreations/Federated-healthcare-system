@@ -10,6 +10,7 @@ from apps.auth_app.views import (
     FeatureListView,
     AdminDeveloperView,
     AdminFeatureView,
+    PlatformActionView,
 )
 
 urlpatterns = [
@@ -22,6 +23,7 @@ urlpatterns = [
     path('api/admin/developers/<uuid:developer_id>/', AdminDeveloperView.as_view()),
     path('api/admin/features/', AdminFeatureView.as_view()),
     path('api/admin/features/<uuid:feature_id>/', AdminFeatureView.as_view()),
+    path('api/admin/platform/<str:entity_type>/<uuid:login_id>/action/', PlatformActionView.as_view()),
 
     # App APIs
     path('api/auth/', include('apps.auth_app.urls')),

@@ -230,6 +230,7 @@ class LoginView(APIView):
             'refresh_token': refresh_token,
             'role': user.role,
             'login_id': str(user.login_id),
+            'force_password_change': user.force_password_change,
             'profile': get_profile(user),
         })
 
@@ -844,6 +845,100 @@ class AllUsersView(APIView):
         })
 
 
+# ─── Super Admin: Platform Suspend / Terminate ─────────────────────────────────
+
+class PlatformActionView(APIView):
+    """Super-admin suspend/terminate of a platform account (hospital / vendor /
+    patient). Keyed by the central login_id (the identifier the users directory
+    exposes). Both actions deactivate the login; a role-specific email is sent."""
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+
+    def post(self, request, entity_type, login_id):
+        action = request.data.get('action')
+        if action not in ('suspend', 'terminate', 'resume'):
+            return err('Invalid action!')
+
+        try:
+            login = LoginCredentials.objects.get(login_id=login_id)
+        except LoginCredentials.DoesNotExist:
+            return err('Account not found!', status=404)
+
+        if entity_type == 'hospital':
+            prof = getattr(login, 'hospital_profile', None)
+            entity_name = prof.hospital_name if prof else login.email
+        elif entity_type == 'vendor':
+            prof = getattr(login, 'vendor_profile', None)
+            entity_name = (getattr(prof, 'company_name', None) if prof else None) or login.email
+        elif entity_type == 'patient':
+            prof = getattr(login, 'patient_profile', None)
+            entity_name = (getattr(prof, 'full_name', None) if prof else None) or login.email
+        else:
+            return err('Invalid entity type!')
+
+        # suspend / terminate block sign-in; resume restores it.
+        login.is_active = (action == 'resume')
+        login.save(update_fields=['is_active', 'updated_at'])
+
+        if action == 'resume':
+            email_sent = self._send_resume_email(login.email, entity_name, entity_type)
+        else:
+            try:
+                from email_utils import send_platform_action_email
+                email_sent = send_platform_action_email(login.email, entity_name, entity_type, action)
+            except Exception as e:  # noqa: BLE001
+                print(f'[PLATFORM] action email error: {e}')
+                email_sent = False
+
+        log_audit(
+            request.user, f'{entity_type}_{action}', module='auth',
+            entity_type='LoginCredentials', entity_id=login.login_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        action_msg = {'suspend': 'suspended', 'terminate': 'terminated', 'resume': 'reactivated'}[action]
+        return ok(
+            f'{entity_name} has been {action_msg}!',
+            {'email_sent': email_sent, 'action': action, 'is_active': login.is_active},
+        )
+
+    @staticmethod
+    def _send_resume_email(email, entity_name, entity_type):
+        """Welcome-back email when a platform account is reactivated."""
+        from email_utils import send_email, clean_name_for_email
+
+        type_icons = {'hospital': '🏥', 'vendor': '🏪', 'patient': '👤'}
+        try:
+            send_email(
+                to_email=email,
+                subject='FederCare — Account Reactivated',
+                html_content=f"""
+                <div style="font-family:Arial;max-width:600px;margin:0 auto;">
+                    <div style="background:#22C55E;padding:30px;text-align:center;border-radius:12px 12px 0 0;">
+                        <p style="font-size:48px;margin:0 0 8px;">{type_icons.get(entity_type, '👤')}</p>
+                        <h1 style="color:white;margin:0;font-size:22px;font-weight:800;">Account Reactivated!</h1>
+                    </div>
+                    <div style="background:#FAF7F2;padding:32px;border-radius:0 0 12px 12px;">
+                        <p style="color:#333;font-size:16px;margin:0 0 16px;">Dear <b>{clean_name_for_email(entity_name)}</b>,</p>
+                        <div style="background:white;border-radius:12px;padding:20px;border-left:4px solid #22C55E;margin:0 0 20px;">
+                            <p style="color:#666;font-size:14px;line-height:1.7;margin:0;">
+                                Your account on <b>FederCare Health Network</b> has been
+                                <b style="color:#22C55E;">reactivated</b> by the system administrator.
+                                You can now login and access the platform!
+                            </p>
+                        </div>
+                        <p style="color:#9CA3AF;font-size:12px;text-align:center;margin:0;">
+                            FederCare: AI Health Network<br>federcaresupport@gmail.com
+                        </p>
+                    </div>
+                </div>
+                """,
+            )
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f'[EMAIL] Resume error: {e}')
+            return False
+
+
 # ─── Role Permissions ─────────────────────────────────────────────────────────
 
 class RolePermissionsView(APIView):
@@ -1063,6 +1158,54 @@ class ChangePasswordView(APIView):
         send_password_change_email(login.email, full_name)
 
         return ok('Password changed successfully')
+
+
+# ─── First-Login Forced Password Change ───────────────────────────────────────
+
+class ChangeFirstPasswordView(APIView):
+    """Used by staff created with a temporary password. The user is authenticated
+    with their temp password (force_password_change=True) and must set a real one
+    before they can use the app. No current-password prompt — the temp password
+    they just logged in with is the proof of identity."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        import re
+        from django.contrib.auth.hashers import check_password
+
+        login = request.user
+        new_password = (request.data.get('new_password') or '').strip()
+        confirm_password = (request.data.get('confirm_password') or '').strip()
+
+        if not new_password:
+            return err('New password is required!')
+        if new_password != confirm_password:
+            return err('Passwords do not match!')
+        if len(new_password) < 8:
+            return err('Password must be at least 8 characters!')
+        if not re.search(r'[A-Z]', new_password):
+            return err('Password must contain an uppercase letter!')
+        if not re.search(r'[0-9]', new_password):
+            return err('Password must contain a number!')
+
+        # Don't let them "change" to the same temporary password.
+        if check_password(new_password, login.password_hash):
+            return err('New password cannot be the same as the temporary password!')
+
+        login.password_hash = make_password(new_password)
+        login.force_password_change = False
+        login.temp_password = None
+        login.save(update_fields=[
+            'password_hash', 'force_password_change', 'temp_password', 'updated_at',
+        ])
+
+        log_audit(
+            login, 'first_password_set', module='auth',
+            entity_type='LoginCredentials', entity_id=login.login_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return ok('Password changed successfully! Please log in again.')
 
 
 # ─── Password Reset via OTP ───────────────────────────────────────────────────

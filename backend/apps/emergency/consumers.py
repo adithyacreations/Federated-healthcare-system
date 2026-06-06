@@ -361,6 +361,34 @@ class EmergencyConsumer(AsyncWebsocketConsumer):
             'timestamp': _now_iso(),
         }))
 
+    async def bed_ready(self, event):
+        # Pushed when the hospital prepares a specific bed — carries bed number
+        # and ward so the driver UI can show a bed-ready banner.
+        await self.send(text_data=json.dumps({
+            'type': 'bed_ready',
+            'data': event['data'],
+            'timestamp': _now_iso(),
+        }))
+
+    async def emergency_cancelled(self, event):
+        # Pushed when the patient cancels / marks themselves safe — the driver
+        # can stand down and return.
+        await self.send(text_data=json.dumps({
+            'type': 'emergency_cancelled',
+            'data': event['data'],
+            'timestamp': _now_iso(),
+        }))
+
+    async def dispatch_cancelled(self, event):
+        # Pushed when THIS driver's pending dispatch is superseded — it timed out
+        # and was reassigned, or another driver accepted the same emergency. The
+        # driver's incoming-request popup should be dismissed immediately.
+        await self.send(text_data=json.dumps({
+            'type': 'dispatch_cancelled',
+            'data': event['data'],
+            'timestamp': _now_iso(),
+        }))
+
 
 class ConsultationChatConsumer(AsyncWebsocketConsumer):
     """Live chat for a video consultation. Doctor and patient join the same

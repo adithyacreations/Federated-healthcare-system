@@ -66,6 +66,19 @@ def send_email(to_email, subject, html_content):
     _send(to_email, subject, html_content)
 
 
+def clean_name_for_email(name):
+    """Collapse a duplicated honorific (e.g. "Dr. Dr. Rajesh" → "Dr. Rajesh").
+
+    Doctor names are sometimes stored WITH a "Dr." prefix; code that also
+    prepends "Dr." then produces "Dr. Dr.". Wrap such composed names in this
+    helper. It only dedupes an existing repeated prefix — it never adds one.
+    """
+    import re
+    if not name:
+        return name
+    return re.sub(r'^(Dr\.?\s*){2,}', 'Dr. ', name.strip(), flags=re.IGNORECASE).strip()
+
+
 def send_welcome_email(to_email, full_name, role):
     role_display = role.replace('_', ' ').title()
     body = f"""
@@ -85,6 +98,291 @@ def send_welcome_email(to_email, full_name, role):
     """
     html = _base_layout(_BRAND, "Welcome to FederCare!", body)
     _send(to_email, "Welcome to FederCare!", html)
+
+
+def send_staff_welcome_email(to_email, full_name, role, hospital_name, temp_password):
+    """Welcome email for staff created by a hospital admin — shows the temporary
+    password the user must change on first login. Returns True if sent, else False
+    so the caller can surface an "email failed — share manually" fallback.
+    """
+    role_display = {
+        'doctor': 'Doctor',
+        'lab_tech': 'Lab Technician',
+        'pharmacist': 'Pharmacist',
+        'driver': 'Ambulance Driver',
+    }.get(role, role.replace('_', ' ').title())
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;">
+      <div style="background:#F97316;padding:30px;text-align:center;border-radius:12px 12px 0 0;">
+        <h1 style="color:white;margin:0;font-size:24px;font-weight:800;">&#127973; Welcome to FederCare!</h1>
+      </div>
+      <div style="background:#FAF7F2;padding:30px;border-radius:0 0 12px 12px;">
+        <p style="color:#333;font-size:16px;margin:0 0 16px;">Dear <b>{full_name}</b>,</p>
+        <p style="color:#666;font-size:14px;margin:0 0 20px;line-height:1.6;">
+          You have been added to <b>{hospital_name}</b> on FederCare Health Network as a <b>{role_display}</b>.
+        </p>
+
+        <div style="background:white;border-radius:12px;padding:20px;border:2px solid #F97316;margin:0 0 20px;">
+          <p style="font-weight:800;color:#F97316;margin:0 0 12px;font-size:14px;">&#128273; Your Login Credentials</p>
+          <div style="background:#F9FAFB;border-radius:8px;padding:12px;margin:0 0 10px;">
+            <p style="margin:0;font-size:12px;color:#9CA3AF;">Email Address</p>
+            <p style="margin:4px 0 0;font-size:16px;font-weight:700;color:#000;">{to_email}</p>
+          </div>
+          <div style="background:#FFF7ED;border-radius:8px;padding:12px;border:1px dashed #F97316;">
+            <p style="margin:0;font-size:12px;color:#9CA3AF;">Temporary Password</p>
+            <p style="margin:4px 0 0;font-size:22px;font-weight:900;color:#F97316;letter-spacing:3px;font-family:monospace;">{temp_password}</p>
+          </div>
+        </div>
+
+        <div style="background:white;border-radius:12px;padding:20px;margin:0 0 20px;">
+          <p style="font-weight:700;color:#333;margin:0 0 12px;font-size:14px;">&#128203; Getting Started:</p>
+          <ol style="margin:0;padding-left:20px;color:#666;font-size:14px;line-height:2;">
+            <li>Open the FederCare platform and click <b>Sign In</b></li>
+            <li>Enter your email and the temporary password above</li>
+            <li>You will be asked to <b style="color:#F97316;">create a new password</b></li>
+            <li>Sign in again with your new password &#127881;</li>
+          </ol>
+        </div>
+
+        <div style="background:#FEF2F2;border-radius:8px;padding:12px 16px;border-left:4px solid #EF4444;margin:0 0 20px;">
+          <p style="margin:0;color:#EF4444;font-size:13px;font-weight:600;">&#9888;&#65039; Security Notice</p>
+          <p style="margin:4px 0 0;color:#666;font-size:12px;">
+            This is a temporary password. You MUST change it on your first login. Do not share this email with anyone.
+          </p>
+        </div>
+
+        <div style="text-align:center;padding:16px;background:white;border-radius:12px;">
+          <p style="margin:0 0 4px;font-weight:700;color:#333;">&#127973; {hospital_name}</p>
+          <p style="margin:0;color:#9CA3AF;font-size:12px;">Role: {role_display}</p>
+        </div>
+
+        <p style="text-align:center;color:#9CA3AF;font-size:11px;margin:20px 0 0;">
+          FederCare: AI Health Network<br>federcaresupport@gmail.com
+        </p>
+      </div>
+    </div>
+    """
+
+    try:
+        send_mail(
+            subject='Welcome to FederCare — Your Login Credentials',
+            message=(
+                f'Welcome to FederCare, {full_name}! You have been added to {hospital_name} '
+                f'as a {role_display}. Login email: {to_email}. Temporary password: {temp_password}. '
+                f'You must change it on first login.'
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[to_email],
+            html_message=html,
+            fail_silently=False,
+        )
+        print(f"[email_utils] Staff welcome email sent to {to_email}")
+        return True
+    except Exception as e:
+        print(f"[email_utils] Failed to send staff welcome email to {to_email}: {e}")
+        return False
+
+
+def send_staff_termination_email(to_email, full_name, role, hospital_name, hospital_email):
+    """Role-specific account-deactivation notice sent when a hospital admin
+    removes a staff member. Returns True if sent, else False."""
+    role_display = {
+        'doctor': 'Doctor', 'lab_tech': 'Lab Technician', 'driver': 'Ambulance Driver',
+    }.get(role, role.replace('_', ' ').title())
+
+    specifics = {
+        'doctor': {
+            'greeting': clean_name_for_email(f'Dr. {full_name}'), 'role_desc': 'as a Doctor', 'icon': '&#128104;&#8205;&#9877;&#65039;',
+            'message': 'Your medical services have been greatly valued by our patients and staff.',
+        },
+        'lab_tech': {
+            'greeting': full_name, 'role_desc': 'as a Lab Technician', 'icon': '&#128300;',
+            'message': 'Your dedication to accurate and timely lab results has been commendable.',
+        },
+        'driver': {
+            'greeting': full_name, 'role_desc': 'as an Ambulance Driver', 'icon': '&#128657;',
+            'message': 'Your commitment to patient safety during emergencies has been invaluable.',
+        },
+    }.get(role, {
+        'greeting': full_name, 'role_desc': f'as {role_display}', 'icon': '&#128100;',
+        'message': 'Your contributions have been appreciated.',
+    })
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+      <div style="background:#1a1a2e;padding:30px;text-align:center;border-radius:12px 12px 0 0;">
+        <p style="font-size:40px;margin:0 0 8px;">{specifics['icon']}</p>
+        <h1 style="color:white;margin:0;font-size:22px;font-weight:800;">Account Deactivation Notice</h1>
+        <p style="color:rgba(255,255,255,0.7);margin:8px 0 0;font-size:14px;">FederCare Health Network</p>
+      </div>
+      <div style="background:#FAF7F2;padding:32px;border-radius:0 0 12px 12px;">
+        <p style="color:#333;font-size:16px;margin:0 0 16px;">Dear <b>{specifics['greeting']}</b>,</p>
+        <p style="color:#666;font-size:14px;line-height:1.7;margin:0 0 20px;">
+          We regret to inform you that your account <b>{specifics['role_desc']}</b> at
+          <b>{hospital_name}</b> on FederCare Health Network has been
+          <b style="color:#EF4444;">deactivated</b>.
+        </p>
+        <div style="background:white;border-radius:12px;padding:20px;border-left:4px solid #F97316;margin:0 0 20px;">
+          <p style="color:#F97316;font-weight:700;margin:0 0 8px;font-size:14px;">&#128591; Thank You</p>
+          <p style="color:#666;font-size:13px;line-height:1.6;margin:0;">
+            {specifics['message']} We sincerely appreciate your service and wish you the very best in your future endeavours.
+          </p>
+        </div>
+        <div style="background:white;border-radius:12px;padding:20px;margin:0 0 20px;">
+          <p style="color:#333;font-weight:700;margin:0 0 12px;font-size:14px;">&#10067; Was This Unexpected?</p>
+          <p style="color:#666;font-size:13px;line-height:1.6;margin:0 0 12px;">
+            If this was done at your own request, please consider this your confirmation. If you were
+            <b>not expecting this</b>, please contact {hospital_name} directly:
+          </p>
+          <div style="background:#F9FAFB;border-radius:8px;padding:12px;text-align:center;">
+            <p style="margin:0;font-size:14px;font-weight:700;color:#F97316;">&#128231; {hospital_email}</p>
+          </div>
+        </div>
+        <p style="color:#9CA3AF;font-size:12px;text-align:center;margin:0;">
+          FederCare: AI Health Network<br>federcaresupport@gmail.com
+        </p>
+      </div>
+    </div>
+    """
+
+    try:
+        send_mail(
+            subject=f'FederCare — Account Deactivation Notice from {hospital_name}',
+            message=(
+                f'Dear {specifics["greeting"]}, your account {specifics["role_desc"]} at '
+                f'{hospital_name} on FederCare has been deactivated. If unexpected, contact {hospital_email}.'
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[to_email],
+            html_message=html,
+            fail_silently=False,
+        )
+        print(f"[email_utils] Termination email sent to {to_email}")
+        return True
+    except Exception as e:
+        print(f"[email_utils] Failed to send termination email to {to_email}: {e}")
+        return False
+
+
+def send_staff_action_email(email, full_name, role, action, hospital_name, hospital_email):
+    """Suspend / terminate notice for a hospital staff member. Role-specific icon
+    and message. Returns True if sent."""
+    cleaned_name = clean_name_for_email(f'Dr. {full_name}' if role == 'doctor' else full_name)
+
+    role_display = {
+        'doctor': 'Doctor', 'lab_tech': 'Lab Technician',
+        'pharmacist': 'Pharmacist', 'driver': 'Ambulance Driver',
+    }.get(role, role.replace('_', ' ').title())
+    icon = {'doctor': '&#128104;&#8205;&#9877;&#65039;', 'lab_tech': '&#128300;',
+            'pharmacist': '&#128138;', 'driver': '&#128657;'}.get(role, '&#128100;')
+    role_msg = {
+        'doctor': 'Your medical services have been greatly valued.',
+        'lab_tech': 'Your dedication to accurate lab results has been commendable.',
+        'pharmacist': 'Your commitment to patient medication safety has been appreciated.',
+        'driver': 'Your service in patient emergency transport has been invaluable.',
+    }.get(role, 'Your contributions have been appreciated.')
+
+    if action == 'suspend':
+        header_color, header_title = '#F97316', 'Account Suspended'
+        action_message = (f'Your account <b>{role_display}</b> at <b>{hospital_name}</b> on FederCare '
+                          f'has been <b style="color:#F97316;">temporarily suspended</b>.')
+        next_steps = ('Your account has been temporarily suspended. You will not be able to log in '
+                      'until it is reactivated. For more information please contact '
+                      f'{hospital_name} directly at:')
+        subject = f'FederCare — Account Suspended at {hospital_name}'
+    else:
+        header_color, header_title = '#EF4444', 'Employment Terminated'
+        action_message = (f'Your employment as <b>{role_display}</b> at <b>{hospital_name}</b> on FederCare '
+                          f'has been <b style="color:#EF4444;">terminated</b>.')
+        next_steps = (f'{role_msg}<br><br>We wish you all the best in your future endeavours. '
+                      f'If you believe this was done in error please contact {hospital_name} at:')
+        subject = f'FederCare — Employment Terminated at {hospital_name}'
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+      <div style="background:{header_color};padding:30px;text-align:center;border-radius:12px 12px 0 0;">
+        <p style="font-size:48px;margin:0 0 8px;">{icon}</p>
+        <h1 style="color:white;margin:0;font-size:22px;font-weight:800;">{header_title}</h1>
+        <p style="color:rgba(255,255,255,0.8);margin:8px 0 0;font-size:14px;">FederCare Health Network</p>
+      </div>
+      <div style="background:#FAF7F2;padding:32px;border-radius:0 0 12px 12px;">
+        <p style="color:#333;font-size:16px;margin:0 0 16px;">Dear <b>{cleaned_name}</b>,</p>
+        <div style="background:white;border-radius:12px;padding:20px;border-left:4px solid {header_color};margin:0 0 20px;">
+          <p style="color:#666;font-size:14px;line-height:1.7;margin:0;">{action_message}</p>
+        </div>
+        <div style="background:white;border-radius:12px;padding:20px;margin:0 0 20px;">
+          <p style="color:#333;font-weight:700;margin:0 0 10px;font-size:14px;">&#128203; What This Means:</p>
+          <p style="color:#666;font-size:13px;line-height:1.7;margin:0 0 12px;">{next_steps}</p>
+          <div style="background:#F9FAFB;border-radius:8px;padding:12px;text-align:center;">
+            <p style="margin:0;font-size:14px;font-weight:700;color:{header_color};">&#128231; {hospital_email}</p>
+          </div>
+        </div>
+        <p style="color:#9CA3AF;font-size:12px;text-align:center;margin:0;">
+          FederCare: AI Health Network<br>federcaresupport@gmail.com
+        </p>
+      </div>
+    </div>
+    """
+    try:
+        send_mail(subject=subject, message=f'Dear {cleaned_name}, {action_message}',
+                  from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[email],
+                  html_message=html, fail_silently=False)
+        return True
+    except Exception as e:
+        print(f'[EMAIL] Staff action error: {e}')
+        return False
+
+
+def send_platform_action_email(email, entity_name, entity_type, action):
+    """Super-admin suspend / terminate notice for a hospital / vendor / patient
+    account. Returns True if sent."""
+    cleaned_name = clean_name_for_email(entity_name)
+    type_display = {'hospital': 'Hospital', 'vendor': 'Vendor', 'patient': 'Patient'}.get(
+        entity_type, entity_type.title())
+    icon = {'hospital': '&#127973;', 'vendor': '&#127978;', 'patient': '&#128100;'}.get(entity_type, '&#128100;')
+
+    if action == 'suspend':
+        header_color, subject, title = '#F97316', 'FederCare — Account Suspended', 'Account Suspended'
+        message = (f'Your <b>{type_display}</b> account on FederCare Health Network has been '
+                   f'<b style="color:#F97316;">temporarily suspended</b> by the system administrator.'
+                   '<br><br>You will not be able to access the platform until your account is reactivated.'
+                   '<br><br>For more information please contact:<br>'
+                   '<b style="color:#F97316;">federcaresupport@gmail.com</b>')
+    else:
+        header_color, subject, title = '#EF4444', 'FederCare — Account Terminated', 'Account Terminated'
+        message = (f'Your <b>{type_display}</b> account on FederCare Health Network has been '
+                   f'<b style="color:#EF4444;">permanently terminated</b> by the system administrator.'
+                   f'<br><br>You are no longer authorized to operate as a {type_display} on FederCare.'
+                   '<br><br>If you believe this was done in error please contact:<br>'
+                   '<b style="color:#EF4444;">federcaresupport@gmail.com</b>')
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+      <div style="background:{header_color};padding:30px;text-align:center;border-radius:12px 12px 0 0;">
+        <p style="font-size:48px;margin:0 0 8px;">{icon}</p>
+        <h1 style="color:white;margin:0;font-size:22px;font-weight:800;">{title}</h1>
+        <p style="color:rgba(255,255,255,0.8);margin:8px 0 0;font-size:14px;">FederCare Health Network</p>
+      </div>
+      <div style="background:#FAF7F2;padding:32px;border-radius:0 0 12px 12px;">
+        <p style="color:#333;font-size:16px;margin:0 0 16px;">Dear <b>{cleaned_name}</b>,</p>
+        <div style="background:white;border-radius:12px;padding:20px;border-left:4px solid {header_color};margin:0 0 20px;">
+          <p style="color:#666;font-size:14px;line-height:1.7;margin:0;">{message}</p>
+        </div>
+        <p style="color:#9CA3AF;font-size:12px;text-align:center;margin:0;">
+          FederCare: AI Health Network<br>federcaresupport@gmail.com
+        </p>
+      </div>
+    </div>
+    """
+    try:
+        send_mail(subject=subject, message=f'Dear {cleaned_name}, your {type_display} account was {action}d.',
+                  from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[email],
+                  html_message=html, fail_silently=False)
+        return True
+    except Exception as e:
+        print(f'[EMAIL] Platform action error: {e}')
+        return False
 
 
 def send_approval_email(to_email, full_name, entity_type, status):
@@ -217,7 +515,7 @@ def send_appointment_confirmation(to_email, patient_name, doctor_name, doctor_sp
     <table style="width:100%;border-collapse:collapse;background:#f8faff;border-radius:8px;overflow:hidden;margin-bottom:28px;">
       <tr>
         <td style="padding:12px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Doctor</td>
-        <td style="padding:12px 16px;font-size:14px;font-weight:bold;color:{_BRAND};border-bottom:1px solid #e5e7eb;">Dr. {doctor_name}</td>
+        <td style="padding:12px 16px;font-size:14px;font-weight:bold;color:{_BRAND};border-bottom:1px solid #e5e7eb;">{clean_name_for_email(f'Dr. {doctor_name}')}</td>
       </tr>
       <tr style="background:#eef2ff;">
         <td style="padding:12px 16px;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Specialization</td>
@@ -473,7 +771,7 @@ def send_prescription_email(to_email, patient_name, doctor_name, medicines, pdf_
     body = f"""
     <h2 style="color:{_BRAND};margin:0 0 12px;">New Prescription</h2>
     <p style="color:#374151;font-size:15px;margin:0 0 20px;">
-      Hi <strong>{patient_name}</strong>, Dr. <strong>{doctor_name}</strong> has issued you
+      Hi <strong>{patient_name}</strong>, <strong>{clean_name_for_email(f'Dr. {doctor_name}')}</strong> has issued you
       a prescription.
     </p>
     <table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden;margin-bottom:28px;">
@@ -490,8 +788,9 @@ def send_prescription_email(to_email, patient_name, doctor_name, medicines, pdf_
       Contact your doctor if you experience any adverse effects.
     </p>
     """
-    html = _base_layout(_BRAND, f"Prescription from Dr. {doctor_name}", body)
-    _send(to_email, f"Prescription from Dr. {doctor_name}", html)
+    rx_title = f"Prescription from {clean_name_for_email(f'Dr. {doctor_name}')}"
+    html = _base_layout(_BRAND, rx_title, body)
+    _send(to_email, rx_title, html)
 
 
 _ORANGE = '#F97316'
