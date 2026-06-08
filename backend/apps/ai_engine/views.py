@@ -10,9 +10,9 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 
-from apps.auth_app.permissions import IsPatient, IsDoctor, IsSuperAdmin
-from apps.patient.models import PatientRegistration, RiskAssessment
-from apps.doctor.models import Consultation
+from ..auth_app.permissions import IsPatient, IsDoctor, IsSuperAdmin
+from ..patient.models import PatientRegistration, RiskAssessment
+from ..doctor.models import Consultation
 from utils import log_audit, send_notification
 
 from .models import TriageSession
@@ -953,8 +953,8 @@ class GeminiHealthSummaryView(APIView):
 
     def post(self, request):
         from datetime import date
-        from apps.patient.models import EHRRecord, Allergy, LabTestOrder
-        from apps.doctor.models import Prescription
+        from ..patient.models import EHRRecord, Allergy, LabTestOrder
+        from ..doctor.models import Prescription
 
         # Resolve the patient — either from the posted patient_id or the
         # logged-in user's own profile.
