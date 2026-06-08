@@ -4,9 +4,18 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { FiPhone, FiNavigation, FiClock, FiTruck } from 'react-icons/fi';
+import toast from 'react-hot-toast';
 import DashboardLayout from '../../components/common/DashboardLayout';
 import RouteLine from '../../components/common/RouteLine';
 import useApi from '../../hooks/useApi';
+import API from '../../api/axios';
+
+const CANCEL_REASONS = [
+  { reason: 'Got another vehicle', icon: '🚗', desc: 'Another vehicle is taking me' },
+  { reason: 'I am safe now', icon: '✅', desc: 'The situation is resolved' },
+  { reason: 'Accidental trigger', icon: '👆', desc: 'I pressed SOS by mistake' },
+  { reason: 'Emergency resolved', icon: '🏥', desc: 'Help arrived from elsewhere' },
+];
 
 // Fix Leaflet icon paths
 delete L.Icon.Default.prototype._getIconUrl;
@@ -114,7 +123,78 @@ const EmergencyTracker = () => {
   const [ambulancePos, setAmbulancePos] = useState(null);
   const [eta, setEta] = useState(null);
   const [routeInfo, setRouteInfo] = useState(null);
+  const [showCancelOptions, setShowCancelOptions] = useState(false);
+  const [acting, setActing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const wsRef = useRef(null);
+
+  // If the emergency is already cancelled/gone (400/404), still leave the
+  // tracker so the patient is never stuck on an active screen.
+  const leaveIfResolved = (e) => {
+    const s = e?.response?.status;
+    if (s === 400 || s === 404) {
+      navigate('/patient/emergency');
+      return true;
+    }
+    return false;
+  };
+
+  const handleImSafe = async () => {
+    setActing(true);
+    try {
+      await API.post(`/api/emergency/${emergency_id}/im-safe/`);
+      toast.success('Glad you are safe! 😊');
+      navigate('/patient/emergency');
+    } catch (e) {
+      if (!leaveIfResolved(e)) toast.error(e?.response?.data?.message || 'Failed to cancel!');
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const handleCancelWithReason = async (reason) => {
+    setActing(true);
+    try {
+      await API.post(`/api/emergency/${emergency_id}/cancel/`, { reason });
+      toast.success('Emergency cancelled. Stay safe!');
+      setShowCancelOptions(false);
+      navigate('/patient/emergency');
+    } catch (e) {
+      if (!leaveIfResolved(e)) toast.error(e?.response?.data?.message || 'Failed to cancel!');
+    } finally {
+      setActing(false);
+    }
+  };
+
+  // Re-dispatch a fresh SOS from the no-driver screen. `radiusKm` lets the
+  // patient widen the search (e.g. 20 km) when nobody was free within 10 km.
+  // The old request is already 'no_drivers', so this creates a new emergency
+  // at the same location/severity and moves the tracker to it.
+  const handleRetry = async (radiusKm = 10) => {
+    if (!emergency?.patient_lat || !emergency?.patient_lng) {
+      navigate('/patient/emergency');
+      return;
+    }
+    setRetrying(true);
+    try {
+      const { data } = await API.post('/api/patient/emergency/', {
+        patient_lat: Number(emergency.patient_lat).toFixed(6),
+        patient_lng: Number(emergency.patient_lng).toFixed(6),
+        severity: String(emergency.severity || 'high').toLowerCase(),
+        radius_km: radiusKm,
+      });
+      const id = data?.data?.emergency_id;
+      if (id) {
+        navigate(`/patient/emergency-tracker/${id}`);
+      } else {
+        toast.error('Still no drivers available — please call 108.');
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Retry failed — please call 108.');
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   // Poll status every 5s so the patient sees updates without refreshing.
   const { data: emergency, loading } = useApi(
@@ -286,6 +366,29 @@ const EmergencyTracker = () => {
         </div>
       </div>
 
+      {/* Safety controls — only while the emergency is still active */}
+      {emergency && !['completed', 'cancelled', 'no_drivers'].includes(emergency.status) && (
+        <div className="card mb-6 text-center">
+          <p className="text-sm font-semibold text-gray-600 mb-3">Are you still in danger?</p>
+          <button
+            onClick={handleImSafe}
+            disabled={acting}
+            className="w-full py-4 rounded-2xl font-extrabold text-white text-base mb-2.5 disabled:opacity-60"
+            style={{ backgroundColor: '#22C55E' }}
+          >
+            ✅ I'm Safe — Cancel Emergency
+          </button>
+          <button
+            onClick={() => setShowCancelOptions(true)}
+            disabled={acting}
+            className="w-full py-3 rounded-2xl font-semibold text-gray-600 bg-white disabled:opacity-60"
+            style={{ border: '1.5px solid #E5E5E5' }}
+          >
+            Cancel with Reason
+          </button>
+        </div>
+      )}
+
       {/* Full Map */}
       <div className="card">
         <h2 className="text-lg font-semibold text-primary mb-4 flex items-center gap-2">
@@ -337,6 +440,68 @@ const EmergencyTracker = () => {
         </div>
       </div>
 
+      {/* Cancel-with-reason bottom sheet */}
+      {showCancelOptions && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-end justify-center"
+          onClick={() => setShowCancelOptions(false)}
+        >
+          <div
+            className="bg-white w-full max-w-lg p-6"
+            style={{ borderRadius: '20px 20px 0 0' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-extrabold text-center mb-4">Why are you cancelling?</h3>
+            {CANCEL_REASONS.map((opt) => (
+              <button
+                key={opt.reason}
+                onClick={() => handleCancelWithReason(opt.reason)}
+                disabled={acting}
+                className="w-full flex items-center gap-3 text-left p-3.5 mb-2 rounded-xl bg-gray-50 disabled:opacity-60"
+                style={{ border: '1px solid #E5E5E5' }}
+              >
+                <span style={{ fontSize: '24px' }}>{opt.icon}</span>
+                <div>
+                  <p className="font-bold text-sm text-black m-0">{opt.reason}</p>
+                  <p className="text-xs text-gray-400 m-0">{opt.desc}</p>
+                </div>
+              </button>
+            ))}
+            <button
+              onClick={() => setShowCancelOptions(false)}
+              className="w-full p-3 mt-1 rounded-xl text-gray-600 font-semibold bg-white"
+              style={{ border: '1px solid #E5E5E5' }}
+            >
+              Keep Emergency Active
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Cancelled / patient-safe confirmation (e.g. after a driver report) */}
+      {emergency?.status === 'cancelled' && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center shadow-2xl">
+            <div className="text-6xl mb-4">{emergency?.patient_safe ? '💚' : 'ℹ️'}</div>
+            <h3 className="font-bold text-xl text-black mb-2">
+              {emergency?.cancelled_by === 'driver' ? 'Emergency Closed' : 'Emergency Cancelled'}
+            </h3>
+            <p className="text-gray-500 text-sm mb-6">
+              {emergency?.cancelled_by === 'driver'
+                ? 'The responding driver closed this emergency. If this was a mistake, trigger SOS again or call 108.'
+                : 'Your emergency has been cancelled. Stay safe! 💚'}
+            </p>
+            <button
+              onClick={() => navigate('/patient/emergency')}
+              className="block w-full py-3 rounded-full font-bold text-white"
+              style={{ backgroundColor: '#F97316' }}
+            >
+              Back to Emergency
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* No ambulance available — call emergency services */}
       {noDrivers && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
@@ -359,11 +524,28 @@ const EmergencyTracker = () => {
               📞 Call 112 (National Emergency)
             </a>
             <button
-              onClick={() => navigate('/patient/emergency')}
-              className="text-sm underline"
-              style={{ color: '#F97316' }}
+              onClick={() => handleRetry(10)}
+              disabled={retrying}
+              className="block w-full py-3.5 rounded-2xl font-bold text-white disabled:opacity-60 mb-2.5"
+              style={{ backgroundColor: '#F97316' }}
             >
-              Try Again
+              {retrying ? '⏳ Searching…' : '🔄 Try Again'}
+            </button>
+            <button
+              onClick={() => handleRetry(20)}
+              disabled={retrying}
+              className="block w-full py-3 rounded-2xl font-semibold text-gray-600 bg-white disabled:opacity-60"
+              style={{ border: '1px solid #E5E5E5' }}
+            >
+              🔍 Search in wider area (20 km)
+            </button>
+            <button
+              onClick={() => navigate('/patient/emergency')}
+              disabled={retrying}
+              className="block w-full py-3 mt-2.5 rounded-2xl font-semibold text-gray-600 bg-white disabled:opacity-60 flex items-center justify-center gap-1.5"
+              style={{ border: '1.5px solid #E5E5E5' }}
+            >
+              ← Go Back
             </button>
           </div>
         </div>

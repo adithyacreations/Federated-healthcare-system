@@ -9,7 +9,6 @@ import EpidemicPage from './EpidemicPage';
 import ResolvedAlertsPage from './ResolvedAlertsPage';
 import EpidemicHistoryPage from './EpidemicHistoryPage';
 import ComplaintsManagePage from './ComplaintsManagePage';
-import WebsiteManagementPage from './WebsiteManagementPage';
 
 const SuperAdminRouter = () => (
   <Routes>
@@ -21,7 +20,6 @@ const SuperAdminRouter = () => (
     <Route path="epidemic/resolved" element={<ResolvedAlertsPage />} />
     <Route path="epidemic/history" element={<EpidemicHistoryPage />} />
     <Route path="complaints" element={<ComplaintsManagePage />} />
-    <Route path="website" element={<WebsiteManagementPage />} />
     <Route path="audit-logs" element={<AuditLogsPage />} />
     <Route path="settings" element={<SettingsPage />} />
     <Route path="*" element={<Navigate to="/admin" replace />} />

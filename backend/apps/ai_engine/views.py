@@ -890,9 +890,24 @@ INSTRUCTIONS:
 
 
 def _extract_gemini_text(data):
-    """Pull the generated text out of a Gemini generateContent response."""
+    """Pull the generated text out of a Gemini generateContent response.
+
+    Gemini 2.5 models may include a 'thought' part before the real answer.
+    We iterate over every part and concatenate only those that carry actual
+    text (i.e. parts where 'thought' is not True).
+    """
     try:
-        return data['candidates'][0]['content']['parts'][0]['text']
+        parts = data['candidates'][0]['content']['parts']
+        # Concatenate all non-thought text parts
+        texts = []
+        for part in parts:
+            # Skip thinking/reasoning parts — they are internal chain-of-thought
+            if part.get('thought'):
+                continue
+            text = part.get('text', '')
+            if text:
+                texts.append(text)
+        return '\n'.join(texts) if texts else ''
     except (KeyError, IndexError, TypeError):
         return ''
 
@@ -928,24 +943,163 @@ def _call_gemini(payload):
 
 
 class GeminiHealthSummaryView(APIView):
-    """Proxy for the patient EHR 'AI Health Summary' (single-prompt)."""
+    """Generate a comprehensive AI health summary for a patient.
+
+    Accepts an optional frontend prompt but always enriches it with
+    server-side patient data (EHR records, prescriptions, allergies,
+    lab tests) so the Gemini model has full medical context.
+    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        prompt = (request.data.get('prompt') or '').strip()
-        if not prompt:
-            return err('Prompt is required!', status_code=400)
+        from datetime import date
+        from apps.patient.models import EHRRecord, Allergy, LabTestOrder
+        from apps.doctor.models import Prescription
+
+        # Resolve the patient — either from the posted patient_id or the
+        # logged-in user's own profile.
+        patient = None
+        patient_id = request.data.get('patient_id')
+        if patient_id:
+            try:
+                patient = PatientRegistration.objects.get(patient_id=patient_id)
+            except PatientRegistration.DoesNotExist:
+                pass
+        if patient is None:
+            patient = _get_patient(request.user)
+        if patient is None:
+            return err('Patient profile not found.', status_code=404)
+
+        # ── Build rich patient context ────────────────────────────────
+        def calculate_age(dob):
+            today = date.today()
+            return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+        patient_data = {
+            'name': patient.full_name,
+            'age': str(calculate_age(patient.dob)) if patient.dob else 'Unknown',
+            'gender': patient.gender or 'Not specified',
+            'blood_group': patient.blood_group or 'Not specified',
+            'bmi': str(patient.bmi) if patient.bmi else 'Unknown',
+            'height': str(patient.height_cm) if patient.height_cm else 'Unknown',
+            'weight': str(patient.weight_kg) if patient.weight_kg else 'Unknown',
+        }
+
+        # Recent EHR records → diagnoses
+        ehr_records = EHRRecord.objects.filter(
+            patient_id=patient
+        ).order_by('-recorded_at')[:10]
+        diagnoses = [
+            r.content for r in ehr_records
+            if r.record_type == 'diagnosis' and r.content
+        ][:5]
+
+        # Recent prescriptions → medicines list
+        prescriptions = Prescription.objects.filter(
+            patient_id=patient
+        ).order_by('-created_at')[:5]
+        medicines_list = []
+        for p in prescriptions:
+            if p.medicines:
+                try:
+                    meds = p.medicines
+                    if isinstance(meds, list):
+                        for m in meds:
+                            if isinstance(m, dict):
+                                medicines_list.append(m.get('name', str(m)))
+                            else:
+                                medicines_list.append(str(m))
+                except Exception:
+                    pass
+
+        # Allergies
+        allergies = list(
+            Allergy.objects.filter(patient_id=patient)
+            .values_list('allergen', flat=True)
+        )
+
+        # Recent completed lab tests
+        lab_orders = LabTestOrder.objects.filter(
+            patient_id=patient,
+            status='completed',
+        ).order_by('-ordered_at')[:5]
+        lab_count = lab_orders.count()
+
+        # ── Build comprehensive prompt ────────────────────────────────
+        # Use the frontend prompt as a base if provided, but always
+        # append the server-side medical data to ensure completeness.
+        frontend_prompt = (request.data.get('prompt') or '').strip()
+
+        # Pre-format lists outside the f-string (backslashes aren't
+        # allowed inside f-string expressions in Python 3.11).
+        diagnoses_text = '\n'.join('- ' + d for d in diagnoses) if diagnoses else 'No diagnoses recorded'
+        medicines_text = ', '.join(medicines_list) if medicines_list else 'No medications recorded'
+        allergies_text = ', '.join(allergies) if allergies else 'No allergies recorded'
+        extra_context = ('ADDITIONAL CONTEXT FROM PATIENT RECORDS:\n' + frontend_prompt) if frontend_prompt else ''
+
+        prompt = f"""You are a medical AI assistant for FederCare Health Network.
+Generate a comprehensive, detailed health summary for this patient.
+
+PATIENT INFORMATION:
+Name: {patient_data['name']}
+Age: {patient_data['age']} years
+Gender: {patient_data['gender']}
+Blood Group: {patient_data['blood_group']}
+Height: {patient_data['height']} cm
+Weight: {patient_data['weight']} kg
+BMI: {patient_data['bmi']}
+
+MEDICAL HISTORY:
+Recent Diagnoses:
+{diagnoses_text}
+
+Current Medications:
+{medicines_text}
+
+Known Allergies:
+{allergies_text}
+
+Recent Lab Tests: {lab_count} completed test(s)
+
+{extra_context}
+
+Please provide a detailed health summary with these sections:
+🌟 Overall Health Status
+📋 Recent Health Activity
+💡 Key Medical Insights
+✅ What is Going Well
+🎯 Lifestyle Recommendations
+👉 Important Alerts or Next Steps
+
+Rules:
+- Be warm, friendly and encouraging
+- Use simple, patient-friendly language
+- Be thorough and detailed — minimum 150 words
+- Use the emoji headers shown above for each section
+- Do NOT diagnose or prescribe — provide general health guidance
+- End with: "⚕️ Always consult your doctor for medical decisions."
+"""
+
+        print(f'[GEMINI] Health summary prompt ({len(prompt)} chars) for patient: {patient.full_name}')
 
         payload = {
             'contents': [{'parts': [{'text': prompt}]}],
-            'generationConfig': {'temperature': 0.7, 'maxOutputTokens': 1024},
+            'generationConfig': {
+                'temperature': 0.7,
+                'maxOutputTokens': 2048,
+            },
         }
         text, error_response = _call_gemini(payload)
         if error_response is not None:
             return error_response
 
+        summary_text = text or 'Unable to generate summary. Please try again.'
+
+        print(f'[GEMINI] Summary response length: {len(summary_text)} chars')
+
         return ok('Summary generated.', {
-            'summary': text or 'Unable to generate summary.',
+            'summary': summary_text,
+            'patient_name': patient.full_name,
             'model': GEMINI_MODEL,
         })
 

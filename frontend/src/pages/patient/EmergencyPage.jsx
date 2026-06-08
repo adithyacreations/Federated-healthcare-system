@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -50,6 +50,9 @@ const EmergencyPage = () => {
   const [manualAddress, setManualAddress] = useState('');
   const [manualLat, setManualLat] = useState('');
   const [manualLng, setManualLng] = useState('');
+  const [countingDown, setCountingDown] = useState(false);
+  const [countdown, setCountdown] = useState(5);
+  const countdownRef = useRef(null);
 
   const gpsSupported = typeof navigator !== 'undefined' && 'geolocation' in navigator;
 
@@ -66,6 +69,12 @@ const EmergencyPage = () => {
       if (id) {
         setSosTriggered(true);
         toast.success('Emergency alert sent — dispatching ambulance');
+        // Bug-1: no beds free at the nearest hospital — warn the patient (they
+        // are still being routed; the hospital has been alerted to prepare one).
+        if (data?.data?.no_beds_warning) {
+          toast(data.data.warning || 'No beds available yet — hospital alerted to prepare one.',
+            { icon: '⚠️', duration: 6000 });
+        }
         navigate(`/patient/emergency-tracker/${id}`);
       } else {
         toast.error('Emergency could not be created');
@@ -93,9 +102,56 @@ const EmergencyPage = () => {
 
   const busy = sosLoading || detecting;
 
+  // 5-second countdown before dispatch — gives the patient a window to cancel
+  // an accidental SOS press.
+  const startCountdown = () => {
+    if (busy || sosTriggered || countingDown) return;
+    setCountingDown(true);
+    setCountdown(5);
+    countdownRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(countdownRef.current);
+          countdownRef.current = null;
+          setCountingDown(false);
+          handleSOS();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const cancelCountdown = () => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    setCountingDown(false);
+    setCountdown(5);
+    toast.success('SOS cancelled. Stay safe! 💚');
+  };
+
+  useEffect(() => () => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+  }, []);
+
   return (
     <DashboardLayout>
       <motion.div variants={pageVariants} initial="hidden" animate="visible">
+        {/* Back button — hidden during the activation countdown so it can't be
+            tapped by mistake while an SOS is arming. */}
+        {!countingDown && (
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="inline-flex items-center gap-1.5 mb-4 text-sm font-semibold"
+            style={{ color: '#F97316' }}
+          >
+            ← Back
+          </button>
+        )}
+
         {/* Impact section */}
         <motion.section
           variants={cardVariants}
@@ -141,31 +197,67 @@ const EmergencyPage = () => {
             </span>
           </div>
 
-          {/* SOS button — plain button, no complex click animations */}
-          <div className="flex items-center justify-center my-10" style={{ height: 220 }}>
-            <button
-              type="button"
-              onClick={handleSOS}
-              disabled={busy || sosTriggered}
-              style={{
-                width: '180px',
-                height: '180px',
-                borderRadius: '50%',
-                backgroundColor: sosTriggered ? '#22C55E' : '#EF4444',
-                color: 'white',
-                fontSize: '24px',
-                fontWeight: '800',
-                border: 'none',
-                cursor: busy ? 'wait' : 'pointer',
-                boxShadow: sosTriggered
-                  ? '0 0 0 0 rgba(34,197,94,0)'
-                  : '0 0 0 20px rgba(239,68,68,0.2)',
-                transition: 'all 0.3s ease',
-                outline: 'none',
-              }}
-            >
-              {busy ? '...' : sosTriggered ? '✓ SENT' : 'SOS'}
-            </button>
+          {/* SOS button — a 5s countdown runs before dispatch so an accidental
+              press can be cancelled. */}
+          <div className="flex items-center justify-center my-10" style={{ minHeight: 220 }}>
+            {countingDown ? (
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ color: '#F97316', fontSize: '16px', fontWeight: 700, marginBottom: '16px' }}>
+                  🚨 Activating Emergency SOS…
+                </p>
+                <div
+                  style={{
+                    width: '180px', height: '180px', borderRadius: '50%',
+                    backgroundColor: '#FEF2F2', border: '8px solid #EF4444',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', margin: '0 auto 24px',
+                  }}
+                >
+                  <span style={{ fontSize: '64px', fontWeight: 900, color: '#EF4444', lineHeight: 1 }}>
+                    {countdown}
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#EF4444', fontWeight: 600 }}>seconds</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={cancelCountdown}
+                  style={{
+                    width: '220px', padding: '16px', backgroundColor: 'white',
+                    color: '#333', border: '3px solid #333', borderRadius: '999px',
+                    fontWeight: 800, fontSize: '18px', cursor: 'pointer',
+                  }}
+                >
+                  ✕ CANCEL
+                </button>
+                <p style={{ color: '#9CA3AF', fontSize: '12px', marginTop: '12px' }}>
+                  Tap CANCEL if this was a mistake
+                </p>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={startCountdown}
+                disabled={busy || sosTriggered}
+                style={{
+                  width: '180px',
+                  height: '180px',
+                  borderRadius: '50%',
+                  backgroundColor: sosTriggered ? '#22C55E' : '#EF4444',
+                  color: 'white',
+                  fontSize: '24px',
+                  fontWeight: '800',
+                  border: 'none',
+                  cursor: busy ? 'wait' : 'pointer',
+                  boxShadow: sosTriggered
+                    ? '0 0 0 0 rgba(34,197,94,0)'
+                    : '0 0 0 20px rgba(239,68,68,0.2)',
+                  transition: 'all 0.3s ease',
+                  outline: 'none',
+                }}
+              >
+                {busy ? '...' : sosTriggered ? '✓ SENT' : 'SOS'}
+              </button>
+            )}
           </div>
 
           <p className="text-sm text-muted">Tap to send an emergency alert to the nearest ambulance.</p>

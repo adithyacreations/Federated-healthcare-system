@@ -1646,6 +1646,53 @@ class AddDepartmentView(APIView):
         return ok('Department added', serialize_dept(dept), status=201)
 
 
+class UpdateDepartmentView(APIView):
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def put(self, request, dept_id):
+        hospital = get_hospital(request)
+        try:
+            dept = Department.objects.get(dept_id=dept_id, hospital_id=hospital)
+        except Department.DoesNotExist:
+            return err('Department not found', status=404)
+
+        updated = []
+
+        if 'dept_name' in request.data:
+            dept_name = request.data.get('dept_name').strip()
+            if dept_name and dept_name != dept.dept_name:
+                dept.dept_name = dept_name
+                updated.append('dept_name')
+
+        if 'description' in request.data:
+            dept.description = request.data.get('description', '').strip()
+            updated.append('description')
+
+        photo = request.FILES.get('department_photo')
+        if photo:
+            try:
+                from utils import save_upload_locally
+                photo_url = save_upload_locally(
+                    photo, subdir='departments', request=request, prefix='dept',
+                )
+                dept.department_photo = photo_url
+                updated.append('department_photo')
+            except Exception as e:
+                print(f'[Department] photo upload error: {e}')
+
+        if updated:
+            dept.save(update_fields=updated)
+            log_audit(
+                request.user, 'department_updated', module='hospital',
+                entity_type='Department', entity_id=dept.dept_id,
+                ip_address=request.META.get('REMOTE_ADDR'),
+            )
+            return ok('Department updated', serialize_dept(dept))
+        else:
+            return err('Nothing to update')
+
+
 # ─── Hospital Patient (FL Training Data) ─────────────────────────────────────
 
 def serialize_patient_summary(p):

@@ -116,11 +116,20 @@ const AIHealthSummary = () => {
         patient_id: data.basic_info?.patient_id,
       });
 
-      const text = aiRes.data?.success ? aiRes.data.data?.summary : null;
-      if (!text) throw new Error(aiRes.data?.message || 'Empty response from AI');
+      // Handle multiple possible response shapes — the backend wraps in
+      // {success, data: {summary}} via the ok() helper, but be defensive.
+      const resData = aiRes.data;
+      const text =
+        (resData?.success && resData?.data?.summary) ||
+        resData?.summary ||
+        resData?.data?.summary ||
+        resData?.text ||
+        null;
+      if (!text) throw new Error(resData?.message || 'Empty response from AI');
 
       setSummary({
         text,
+        patient_name: resData?.data?.patient_name || data.basic_info?.name || '',
         is_demo: false,
         generated_at: new Date().toISOString(),
         stats: data.stats,
@@ -252,7 +261,7 @@ const AIHealthSummary = () => {
               </div>
             </div>
 
-            <div className="bg-gray-50 rounded-xl p-4 space-y-1">
+            <div className="bg-gray-50 rounded-xl p-4 space-y-1" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {formatText(summary.text).map((line, i) => (
                 <p
                   key={i}

@@ -60,8 +60,15 @@ const AnimatedSignIn = () => {
     try {
       const res = await login(email, password);
       if (res?.success) {
-        toast.success('Welcome to FederCare!');
-        navigate(ROLE_HOME[res.role] || '/dashboard');
+        // Staff added by a hospital admin log in with a temporary password and
+        // must set their own before reaching their dashboard.
+        if (res.force_password_change) {
+          toast('Please set a new password to continue', { icon: '🔑' });
+          navigate('/change-password');
+        } else {
+          toast.success('Welcome to FederCare!');
+          navigate(ROLE_HOME[res.role] || '/dashboard');
+        }
       } else {
         setError(res?.message || 'Login failed');
       }

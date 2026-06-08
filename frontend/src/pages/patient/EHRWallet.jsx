@@ -15,7 +15,7 @@ import { useAuth } from '../../context/AuthContext';
 import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
 
-const TABS = [
+const TAB_KEYS = [
   { key: 'all',           label: 'All' },
   { key: 'diagnoses',     label: 'Diagnoses' },
   { key: 'lab_reports',   label: 'Lab Reports' },
@@ -142,6 +142,24 @@ const EHRWallet = () => {
     ? allRecords
     : (w[activeTab] || []).map((r) => ({ ...r, _cat: activeTab }));
 
+  // Build tabs with dynamic counts from wallet + images data
+  const TABS = useMemo(() => {
+    const imgCount = images.data?.total || 0;
+    const allergyCount = (w.allergies || []).length;
+    return TAB_KEYS.map((t) => {
+      let count;
+      if (t.key === 'all') count = allRecords.length;
+      else if (t.key === 'images') count = imgCount;
+      else if (t.key === 'allergies') count = allergyCount;
+      else if (t.key === 'ai_summary') count = null;
+      else count = (w[t.key] || []).length;
+      return {
+        key: t.key,
+        label: count != null ? `${t.label} (${count})` : t.label,
+      };
+    });
+  }, [w, allRecords.length, images.data]);
+
   const requestQR = async () => {
     try {
       const { data } = await API.post('/api/patient/qr-token/');
@@ -246,10 +264,10 @@ const EHRWallet = () => {
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            variants={pageVariants}
           >
             {/* AI Health Summary */}
             {activeTab === 'ai_summary' ? (

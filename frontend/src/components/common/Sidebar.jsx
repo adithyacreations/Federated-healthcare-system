@@ -3,7 +3,7 @@ import {
   FiHome, FiUsers, FiCheckSquare, FiActivity, FiAlertTriangle, FiFileText, FiSettings,
   FiUserCheck, FiPackage, FiGrid, FiCpu, FiBriefcase, FiCalendar, FiShoppingCart,
   FiHeart, FiFilePlus, FiTruck, FiClipboard, FiBookOpen, FiPhoneCall, FiList,
-  FiMessageCircle, FiPlus, FiGlobe, FiBarChart2,
+  FiMessageCircle, FiPlus, FiBarChart2,
 } from 'react-icons/fi';
 import { useAuth } from '../../context/AuthContext';
 import useApi from '../../hooks/useApi';
@@ -18,7 +18,6 @@ const MENUS = {
     { to: '/admin/epidemic/history', icon: FiActivity, label: 'Epidemic History', section: 'HEALTH' },
     { to: '/admin/fl', icon: FiCpu, label: 'FL Monitor', section: 'HEALTH' },
     { to: '/admin/complaints', icon: FiFileText, label: 'Complaints', section: 'SYSTEM' },
-    { to: '/admin/website', icon: FiGlobe, label: 'Website Management', section: 'SYSTEM' },
     { to: '/admin/audit-logs', icon: FiFileText, label: 'Audit Logs', section: 'SYSTEM' },
     { to: '/admin/settings', icon: FiSettings, label: 'Settings', section: 'SYSTEM' },
     { to: '/profile', icon: FiUsers, label: 'Profile', section: 'ACCOUNT' },

@@ -5,6 +5,7 @@ import { AuthProvider } from './context/AuthContext';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/auth/LoginPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import ChangeFirstPasswordPage from './pages/auth/ChangeFirstPasswordPage';
 import PatientRegisterPage from './pages/auth/PatientRegisterPage';
 import HospitalRegisterPage from './pages/auth/HospitalRegisterPage';
 import PharmacistRegisterPage from './pages/auth/PharmacistRegisterPage';
@@ -57,6 +58,9 @@ const App = () => (
 
         {/* Universal profile page — all authenticated roles */}
         <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+
+        {/* Forced first-login password change (staff added with a temp password) */}
+        <Route path="/change-password" element={<ProtectedRoute><ChangeFirstPasswordPage /></ProtectedRoute>} />
 
         {/* Protected role areas — splat routes so each role can have nested pages later */}
         <Route path="/admin/*" element={<RoleHome role="super_admin" label="Super Admin"><SuperAdminRouter /></RoleHome>} />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { FiGrid, FiPlus, FiRefreshCw } from 'react-icons/fi';
 import DashboardLayout from '../../components/common/DashboardLayout';
@@ -26,6 +26,14 @@ const BedsPage = () => {
 
   const summary = beds.data?.summary || {};
   const bedList = beds.data?.beds || [];
+
+  // Auto-refresh every 5 min so the emergency-lock countdown stays current
+  // without a manual reload.
+  useEffect(() => {
+    const id = setInterval(() => beds.refetch(), 300000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -188,18 +196,45 @@ const BedsPage = () => {
                     <span className="text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full mt-1 inline-block">
                       🚨 Emergency
                     </span>
-                    {canUnlock(b) ? (
-                      <button
-                        onClick={() => handleUnlock(b)}
-                        className="mt-2 w-full text-[11px] font-semibold bg-orange-500 text-white px-2 py-1 rounded-lg hover:bg-orange-600 transition"
-                      >
-                        🔓 Unlock Bed
-                      </button>
-                    ) : (
-                      <p className="mt-2 text-[10px] text-gray-500 leading-tight">
-                        Locked · {daysRemaining(b)} day{daysRemaining(b) === 1 ? '' : 's'} left to unlock
-                      </p>
-                    )}
+                    {(() => {
+                      const minDays = b.minimum_lock_days ?? 3;
+                      const elapsed = daysElapsed(b) ?? 0;
+                      const remaining = daysRemaining(b);
+                      const pct = Math.min(100, Math.round((elapsed / minDays) * 100));
+                      const lockedStr = b.emergency_locked_at
+                        ? new Date(b.emergency_locked_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : null;
+                      return (
+                        <div className="mt-2 rounded-lg p-2" style={{ backgroundColor: '#FEF2F2' }}>
+                          {lockedStr && (
+                            <p className="text-[10px] text-gray-500 mb-1.5 leading-tight">
+                              🔒 Locked {lockedStr} · {elapsed} day{elapsed === 1 ? '' : 's'} ago
+                            </p>
+                          )}
+                          {canUnlock(b) ? (
+                            <button
+                              onClick={() => handleUnlock(b)}
+                              className="w-full text-[11px] font-bold text-white px-2 py-1.5 rounded-lg transition"
+                              style={{ backgroundColor: '#22C55E' }}
+                            >
+                              🔓 Unlock Bed
+                            </button>
+                          ) : (
+                            <>
+                              <div className="rounded-full overflow-hidden mb-1" style={{ backgroundColor: '#E5E5E5', height: '6px' }}>
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{ width: `${pct}%`, backgroundColor: '#F97316', transition: 'width 0.5s' }}
+                                />
+                              </div>
+                              <p className="text-[10px] font-semibold text-center m-0" style={{ color: '#F97316' }}>
+                                🔒 Unlock in {remaining} day{remaining === 1 ? '' : 's'}
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : (
                   <button

@@ -43,6 +43,7 @@ const responseBadge = (mins) => {
 const TripHistoryPage = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('all');
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -173,40 +174,89 @@ const TripHistoryPage = () => {
             <div className="bg-white rounded-2xl p-5 border border-gray-100">
               <h3 className="font-bold mb-4">🕐 Recent Trips</h3>
 
-              {stats.recent_trips.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-4xl mb-2">🚑</p>
-                  <p className="text-gray-400">No completed trips yet</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {stats.recent_trips.map((trip) => (
-                    <div
-                      key={trip.dispatch_id}
-                      className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl"
-                    >
-                      <div className={`w-3 h-3 rounded-full flex-shrink-0 ${severityDotClass[trip.severity] || 'bg-gray-400'}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-black truncate">
-                          👤 {trip.patient_name}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">
-                          🏥 {trip.hospital_name}
-                        </p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-xs font-medium text-black">{trip.date}</p>
-                        <p className="text-xs text-gray-400">{trip.time}</p>
-                        {trip.distance_km > 0 && (
-                          <p className="text-xs font-medium mt-1" style={{ color: '#F97316' }}>
-                            {trip.distance_km} km
-                          </p>
+              {/* Status filter tabs */}
+              <div className="flex gap-2 mb-4 overflow-x-auto">
+                {[
+                  { key: 'all', label: 'All' },
+                  { key: 'completed', label: '✅ Completed' },
+                  { key: 'cancelled', label: '❌ Cancelled' },
+                  { key: 'patient_not_found', label: '👤 Not Found' },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setStatusFilter(tab.key)}
+                    className="px-4 py-2 rounded-full text-[13px] font-semibold whitespace-nowrap flex-shrink-0"
+                    style={{
+                      border: 'none',
+                      backgroundColor: statusFilter === tab.key ? '#F97316' : '#F3F4F6',
+                      color: statusFilter === tab.key ? 'white' : '#666',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {(() => {
+                const filtered = (stats.recent_trips || []).filter(
+                  (t) => (statusFilter === 'all' ? true : t.status === statusFilter),
+                );
+                if (filtered.length === 0) {
+                  return (
+                    <div className="text-center py-8">
+                      <p className="text-4xl mb-2">🚑</p>
+                      <p className="text-gray-400">No trips in this category</p>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-3">
+                    {filtered.map((trip) => (
+                      <div key={trip.dispatch_id} className="p-3 bg-gray-50 rounded-xl">
+                        <div className="flex items-center gap-4">
+                          <div className={`w-3 h-3 rounded-full flex-shrink-0 ${severityDotClass[trip.severity] || 'bg-gray-400'}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm text-black truncate">
+                              👤 {trip.patient_name}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate">
+                              🏥 {trip.hospital_name}
+                            </p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-xs font-medium text-black">{trip.date}</p>
+                            <p className="text-xs text-gray-400">{trip.time}</p>
+                            {trip.distance_km > 0 && (
+                              <p className="text-xs font-medium mt-1" style={{ color: '#F97316' }}>
+                                {trip.distance_km} km
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {trip.status === 'cancelled' && (
+                          <div className="mt-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5' }}>
+                            <p className="text-xs font-bold m-0" style={{ color: '#EF4444' }}>❌ Cancelled by Patient</p>
+                            {trip.cancellation_reason && (
+                              <p className="text-[11px] text-gray-600 m-0">Reason: {trip.cancellation_reason}</p>
+                            )}
+                            {trip.patient_safe && (
+                              <p className="text-[11px] font-semibold m-0 mt-1" style={{ color: '#16A34A' }}>✅ Patient was safe</p>
+                            )}
+                          </div>
+                        )}
+                        {trip.status === 'patient_not_found' && (
+                          <div className="mt-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
+                            <p className="text-xs font-bold m-0" style={{ color: '#F97316' }}>👤 Patient Not Found</p>
+                            <p className="text-[11px] text-gray-600 m-0">Reported by driver</p>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </>
         )}

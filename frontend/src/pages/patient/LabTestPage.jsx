@@ -149,11 +149,20 @@ const LabTestPage = () => {
   }, []);
   useEffect(() => { loadLabOrders(); }, [loadLabOrders]);
 
-  // Active bookings on the chosen date (no_show frees the slot, so it's excluded).
-  const existingBookings = useMemo(() => allLabOrders.filter(
-    (o) => !['cancelled', 'completed', 'no_show'].includes(o.status)
-      && (!apptDate || o.appointment_date === apptDate),
-  ), [allLabOrders, apptDate]);
+  // Active bookings — only truly in-progress orders count.
+  // Unpaid orders on past dates are treated as abandoned and excluded.
+  const ACTIVE_STATUSES = ['pending', 'confirmed', 'processing', 'pending_verification'];
+  const todayDate = localTodayStr();
+  const existingBookings = useMemo(() => {
+    if (!apptDate) return [];
+    return allLabOrders.filter((o) => {
+      if (!ACTIVE_STATUSES.includes(o.status)) return false;
+      // Skip unpaid past-date orders — they are abandoned/expired
+      if (o.payment_status === 'pending' && o.appointment_date && o.appointment_date < todayDate) return false;
+      // Only show for the selected date or earlier
+      return o.appointment_date && o.appointment_date <= apptDate;
+    });
+  }, [allLabOrders, apptDate, todayDate]);
 
   // No-show count this calendar month → pre-booking warning.
   const monthlyNoShows = useMemo(() => {

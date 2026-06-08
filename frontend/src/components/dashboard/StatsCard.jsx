@@ -10,7 +10,7 @@ import useCountUp from '../../hooks/useCountUp';
  *   <StatsCard icon={FiUsers} title="Total Doctors" value={12} trend={8} />
  *   <StatsCard icon={FiDollarSign} title="Revenue" value={45000} prefix="₹" />
  */
-const StatsCard = ({ icon: Icon, title, value, trend, prefix = '', suffix = '' }) => {
+const StatsCard = ({ icon: Icon, title, value, trend, hint, prefix = '', suffix = '' }) => {
   const numeric = typeof value === 'number' && Number.isFinite(value);
   const counted = useCountUp(numeric ? value : 0);
   const shown = numeric
@@ -35,6 +35,7 @@ const StatsCard = ({ icon: Icon, title, value, trend, prefix = '', suffix = '' }
           {shown}
         </p>
         <p className="text-sm text-muted mt-0.5 truncate">{title}</p>
+        {hint && <p className="text-xs text-gray-400 mt-0.5 truncate">{hint}</p>}
         {trendUp !== null && (
           <div
             className={`mt-2 inline-flex items-center gap-1 text-xs font-semibold ${

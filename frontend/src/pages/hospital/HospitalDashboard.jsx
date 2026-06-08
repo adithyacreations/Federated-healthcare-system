@@ -236,10 +236,30 @@ const HospitalDashboard = () => {
 
         {/* ─── Stats ─────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatsCard icon={FiHeart}       title="Active Patients" value={d.active_patients ?? 0} />
-          <StatsCard icon={FiUsers}       title={`Online Doctors · ${d.total_doctors ?? 0} total`} value={d.online_doctors ?? d.available_doctors ?? 0} />
-          <StatsCard icon={FiCalendar}    title={`Consultations Today · ${d.monthly_consultations ?? 0}/mo`} value={d.todays_consultations ?? 0} />
-          <StatsCard icon={FiCheckCircle} title="Available Beds"  value={d.available_beds ?? 0} />
+          <StatsCard
+            icon={FiHeart}
+            title="Active Patients"
+            value={d.active_patients ?? 0}
+            hint="Today's consultations + emergencies"
+          />
+          <StatsCard
+            icon={FiUsers}
+            title="Available Doctors"
+            value={d.online_doctors ?? d.available_doctors ?? 0}
+            hint={`of ${d.total_doctors ?? 0} total`}
+          />
+          <StatsCard
+            icon={FiCalendar}
+            title="Today's Consultations"
+            value={d.todays_consultations ?? 0}
+            hint={`📅 ${d.monthly_consultations ?? 0} this month`}
+          />
+          <StatsCard
+            icon={FiCheckCircle}
+            title="Available Beds"
+            value={d.available_beds ?? 0}
+            hint={`of ${d.total_beds ?? 0} total`}
+          />
         </div>
 
         {/* ─── Today's doctor schedule preview ───────────────────── */}

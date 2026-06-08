@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { FiNavigation, FiPhone } from 'react-icons/fi';
+import { FiNavigation } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
 import DashboardHeader from '../../components/dashboard/DashboardHeader';
-import useApi from '../../hooks/useApi';
 import API from '../../api/axios';
+import { useAuth } from '../../context/AuthContext';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -56,15 +57,120 @@ const FitBoundsToMarkers = ({ positions }) => {
   return null;
 };
 
-const STATUSES = ['en_route', 'arrived', 'completed'];
-const LABELS = { en_route: 'En Route', arrived: 'Arrived', completed: 'Complete Trip' };
+const REPORT_TYPES = [
+  { type: 'patient_not_found', icon: '👤', label: 'Patient Not Found', desc: 'No one at this location' },
+  { type: 'patient_left', icon: '🚗', label: 'Patient Already Left', desc: 'Got another vehicle' },
+  { type: 'fake_emergency', icon: '⚠️', label: 'Fake Emergency', desc: 'No real emergency here' },
+  { type: 'wrong_location', icon: '📍', label: 'Wrong Location', desc: 'GPS location was incorrect' },
+];
 
 const ActiveDispatchPage = () => {
-  const { data: dispatch, refetch } = useApi('/api/emergency/active-dispatch/', { pollInterval: 10000 });
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [dispatch, setDispatch] = useState(null);
+  const [bedStatus, setBedStatus] = useState(null); // { beds_available, bed_warning } after arrival
+  const [bedReadyInfo, setBedReadyInfo] = useState(null); // { bedNumber, ward, message }
+  const [dispatchCancelled, setDispatchCancelled] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState('');
   const [ambulancePos, setAmbulancePos] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(null);
   const [sendingGps, setSendingGps] = useState(false);
-  const wsRef = useRef(null);
+  const [showReport, setShowReport] = useState(false);
+  const [reportType, setReportType] = useState('');
+  const [reportDesc, setReportDesc] = useState('');
+  const [submittingReport, setSubmittingReport] = useState(false);
+  const wsRef = useRef(null);     // GPS socket (also used to push my location)
+  const emWsRef = useRef(null);   // driver emergency socket (cancel pushes)
+  const pollRef = useRef(null);
+  const cancelledRef = useRef(false);
+
+  // Patient cancelled / marked safe (or driver reported) → show overlay + leave.
+  const handleEmergencyCancelled = useCallback((message) => {
+    if (cancelledRef.current) return;
+    cancelledRef.current = true;
+    setCancelMessage(message || '');
+    setDispatchCancelled(true);
+    if (pollRef.current) clearInterval(pollRef.current);
+    toast.success(message || '✅ Patient cancelled the emergency!');
+    setTimeout(() => navigate('/driver/history'), 3000);
+  }, [navigate]);
+
+  // Manual fetch (not useApi) so we can read the top-level `cancelled` flag.
+  const loadDispatch = useCallback(async () => {
+    try {
+      const res = await API.get('/api/emergency/active-dispatch/');
+      if (res.data?.cancelled) { handleEmergencyCancelled(res.data.message); return; }
+      const d = res.data?.data || null;
+      setDispatch(d);
+      // Persist the bed-ready banner across reloads/remounts (the hospital may
+      // have prepared the bed while the driver was away from this screen).
+      if (d?.bed_ready) {
+        setBedReadyInfo((prev) => prev || {
+          bedNumber: d.bed_type ? `${d.bed_ward || ''} ${d.bed_type}`.trim() : 'ready',
+          ward: d.bed_ward || '',
+          message: 'Hospital has prepared a bed for the patient.',
+        });
+      }
+    } catch (err) {
+      if (err.response?.status === 404) handleEmergencyCancelled('Emergency no longer active');
+    }
+  }, [handleEmergencyCancelled]);
+
+  // Dual update system: poll every 4s (fallback) + driver emergency WS (instant).
+  useEffect(() => {
+    loadDispatch();
+    pollRef.current = setInterval(loadDispatch, 4000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [loadDispatch]);
+
+  useEffect(() => {
+    const loginId = user?.login_id;
+    if (!loginId) return undefined;
+    let ws;
+    try {
+      ws = new WebSocket(`ws://localhost:8000/ws/emergency/${loginId}/`);
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'emergency_cancelled') {
+            handleEmergencyCancelled(msg.data?.message);
+          } else if (msg.type === 'bed_ready' || msg.type === 'hospital_ready') {
+            const b = msg.data || {};
+            setBedReadyInfo({
+              bedNumber: b.bed_number || 'ready',
+              ward: b.ward || '',
+              message: b.message || 'Hospital has prepared a bed for the patient.',
+            });
+            toast.success(`🛏️ Bed ${b.bed_number || ''} is ready!`);
+          }
+        } catch { /* ignore */ }
+      };
+      ws.onerror = () => {};
+      emWsRef.current = ws;
+    } catch { /* ignore */ }
+    return () => { try { ws?.close(); } catch { /* noop */ } };
+  }, [user?.login_id, handleEmergencyCancelled]);
+
+  const submitReport = async () => {
+    if (!reportType) { toast.error('Select a reason!'); return; }
+    if (!dispatch?.emergency_id) return;
+    setSubmittingReport(true);
+    try {
+      await API.post(`/api/emergency/${dispatch.emergency_id}/driver-report/`, {
+        report_type: reportType,
+        description: reportDesc,
+      });
+      toast.success('Report submitted!');
+      setShowReport(false);
+      setReportType('');
+      setReportDesc('');
+      loadDispatch();
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to submit report!');
+    } finally {
+      setSubmittingReport(false);
+    }
+  };
 
   useEffect(() => {
     if (!dispatch?.id) return undefined;
@@ -86,9 +192,20 @@ const ActiveDispatchPage = () => {
     if (!dispatch?.id) return;
     setUpdatingStatus(status);
     try {
-      await API.put(`/api/emergency/dispatch/${dispatch.id}/status/`, { status });
+      const res = await API.put(`/api/emergency/dispatch/${dispatch.id}/status/`, { status });
+      // Bug-1: on arrival the backend reports live bed availability — surface a
+      // warning if the hospital has no bed ready for this patient.
+      if (status === 'arrived') {
+        const d = res.data?.data || {};
+        if (d.bed_warning !== undefined) {
+          setBedStatus({ beds_available: d.beds_available, bed_warning: d.bed_warning });
+          if (d.bed_warning) {
+            toast.error('⚠️ No beds available at hospital! They have been alerted.');
+          }
+        }
+      }
       toast.success(`Status updated to ${status.replace('_', ' ')}`);
-      refetch();
+      loadDispatch();
     } catch {
       toast.error('Status update failed');
     } finally {
@@ -138,9 +255,34 @@ const ActiveDispatchPage = () => {
 
   const mapCenter = driverPos || patientPos || hospitalPos || [9.0, 76.8];
 
+  // Strict trip flow: Mark Arrived → (hospital marks a bed ready) → Complete.
+  // "Complete Trip" stays locked until the driver has arrived AND the hospital
+  // has confirmed a prepared bed, so a patient is never handed over early.
+  const hasArrived = ['arrived', 'pending_acknowledgment'].includes(dispatch?.status)
+    || Boolean(dispatch?.arrived_at);
+  const bedReady = Boolean(dispatch?.bed_ready) || Boolean(bedReadyInfo);
+
   return (
     <DashboardLayout>
       <DashboardHeader title="Active Dispatch" subtitle="Your current emergency assignment" />
+
+      {/* Emergency-cancelled overlay (patient cancelled / marked safe) */}
+      {dispatchCancelled && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-5" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}>
+          <div className="bg-white rounded-2xl p-8 text-center w-full max-w-sm">
+            <p style={{ fontSize: '48px', margin: 0 }}>✅</p>
+            <h3 className="font-extrabold mb-3" style={{ color: '#22C55E' }}>Emergency Cancelled</h3>
+            <p className="text-sm text-gray-600 mb-5" style={{ lineHeight: 1.5 }}>
+              {cancelMessage || 'The patient has cancelled the emergency. They are safe.'}
+              <br />Redirecting to trip history…
+            </p>
+            <div className="w-full h-1 rounded-full overflow-hidden" style={{ backgroundColor: '#E5E5E5' }}>
+              <div style={{ width: '100%', height: '100%', backgroundColor: '#22C55E', borderRadius: '999px', animation: 'adShrink 3s linear forwards' }} />
+            </div>
+            <style>{'@keyframes adShrink { from { width: 100%; } to { width: 0%; } }'}</style>
+          </div>
+        </div>
+      )}
 
       {!dispatch ? (
         <div className="dashboard-card text-center py-12">
@@ -155,11 +297,6 @@ const ActiveDispatchPage = () => {
               <div className="bg-white rounded-xl p-3 border border-red-100">
                 <p className="text-xs text-muted">Patient</p>
                 <p className="font-semibold text-ink">{dispatch.patient_name}</p>
-                {dispatch.patient_phone && (
-                  <a href={`tel:${dispatch.patient_phone}`} className="flex items-center gap-1 text-xs text-orange-500 mt-1">
-                    <FiPhone className="w-3 h-3" /> {dispatch.patient_phone}
-                  </a>
-                )}
               </div>
               <div className="bg-white rounded-xl p-3 border border-red-100">
                 <p className="text-xs text-muted">Severity</p>
@@ -174,6 +311,44 @@ const ActiveDispatchPage = () => {
                 <p className="font-semibold capitalize text-ink mt-1">{String(dispatch.status).replace('_', ' ')}</p>
               </div>
             </div>
+
+            {/* Patient direct-call card */}
+            {dispatch.patient_phone ? (
+              <div
+                className="rounded-2xl p-4 mb-4 flex items-center justify-between"
+                style={{ backgroundColor: '#F0FDF4', border: '1px solid #86EFAC' }}
+              >
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: '#16A34A' }}>
+                    📞 Patient Contact
+                  </p>
+                  <p className="font-bold text-base text-black m-0">{dispatch.patient_name || 'Patient'}</p>
+                  <p className="font-extrabold text-lg m-0" style={{ color: '#16A34A', letterSpacing: '1px' }}>
+                    {dispatch.patient_phone}
+                  </p>
+                </div>
+                <a
+                  href={`tel:${dispatch.patient_phone}`}
+                  className="flex items-center justify-center"
+                  style={{
+                    width: '56px', height: '56px', borderRadius: '50%',
+                    backgroundColor: '#22C55E', textDecoration: 'none', fontSize: '24px',
+                    boxShadow: '0 4px 12px rgba(34,197,94,0.3)',
+                  }}
+                >
+                  📞
+                </a>
+              </div>
+            ) : (
+              <div
+                className="rounded-xl px-4 py-3 mb-4"
+                style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}
+              >
+                <p className="text-xs m-0" style={{ color: '#F97316' }}>
+                  ⚠️ Patient phone not available. Contact the hospital if needed.
+                </p>
+              </div>
+            )}
 
             {dispatch.assigned_hospital?.name && (
               <div className="bg-white rounded-xl p-4 border border-gray-100 mb-4">
@@ -199,18 +374,119 @@ const ActiveDispatchPage = () => {
                 <p className="font-bold text-lg" style={{ color: '#F97316' }}>Waiting for Hospital</p>
                 <p className="text-gray-500 text-sm mt-1">Hospital admin needs to acknowledge patient arrival.</p>
               </div>
+            ) : !hasArrived ? (
+              // Step 1 — must mark arrival at the destination first.
+              <button
+                disabled={updatingStatus === 'arrived'}
+                onClick={() => updateStatus('arrived')}
+                className="w-full sm:w-auto px-6 py-3 rounded-full text-white text-sm font-bold disabled:opacity-50"
+                style={{ backgroundColor: '#F97316' }}
+              >
+                {updatingStatus === 'arrived' ? '…' : '📍 Mark Arrived at Location'}
+              </button>
+            ) : bedReady ? (
+              // Step 2b — hospital confirmed a prepared bed → completion unlocked.
+              <button
+                disabled={updatingStatus === 'completed'}
+                onClick={() => updateStatus('completed')}
+                className="w-full sm:w-auto px-6 py-3 rounded-full text-white text-sm font-bold disabled:opacity-50"
+                style={{ backgroundColor: '#22C55E' }}
+              >
+                {updatingStatus === 'completed' ? '…' : '✅ Complete Trip'}
+              </button>
             ) : (
-              <div className="flex gap-2 flex-wrap">
-                {STATUSES.filter((s) => s !== dispatch.status).map((s) => (
-                  <button
-                    key={s}
-                    disabled={updatingStatus === s}
-                    onClick={() => updateStatus(s)}
-                    className="px-4 py-2 rounded-full bg-orange-500 text-white hover:bg-orange-600 text-sm font-semibold disabled:opacity-50"
-                  >
-                    {updatingStatus === s ? '…' : LABELS[s]}
-                  </button>
-                ))}
+              // Step 2a — arrived, but waiting for the hospital to ready a bed.
+              <div>
+                <div
+                  className="rounded-xl px-4 py-3 mb-2.5"
+                  style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}
+                >
+                  <p className="text-[13px] font-bold m-0" style={{ color: '#F97316' }}>
+                    ⏳ Waiting for Hospital
+                  </p>
+                  <p className="text-xs text-gray-500 m-0 mt-0.5">
+                    The hospital must mark a bed ready before you can complete the trip.
+                  </p>
+                </div>
+                <button
+                  disabled
+                  className="w-full sm:w-auto px-6 py-3 rounded-full text-sm font-bold cursor-not-allowed"
+                  style={{ backgroundColor: '#E5E5E5', color: '#9CA3AF' }}
+                >
+                  🔒 Complete Trip (waiting for bed)
+                </button>
+              </div>
+            )}
+
+            {/* Bed-ready banner — hospital prepared a bed for the patient */}
+            {bedReadyInfo && (
+              <div
+                style={{
+                  backgroundColor: '#F0FDF4',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  marginTop: '12px',
+                  border: '2px solid #22C55E',
+                }}
+              >
+                <p style={{ fontWeight: 800, color: '#16A34A', fontSize: '15px', margin: '0 0 4px' }}>
+                  🛏️ Bed Ready!
+                </p>
+                <p style={{ color: '#166534', fontSize: '13px', margin: 0 }}>
+                  Bed {bedReadyInfo.bedNumber}
+                  {bedReadyInfo.ward ? ` — ${bedReadyInfo.ward}` : ''}
+                  {' '}is prepared for the patient.
+                </p>
+              </div>
+            )}
+
+            {/* Bug-1: bed availability warning shown after the driver arrives */}
+            {bedStatus?.bed_warning && (
+              <div
+                style={{
+                  backgroundColor: '#FEF2F2',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  marginTop: '12px',
+                  border: '2px solid #FCA5A5',
+                }}
+              >
+                <p style={{ fontWeight: 800, color: '#EF4444', fontSize: '15px', margin: '0 0 6px' }}>
+                  ⚠️ No Beds Available!
+                </p>
+                <p style={{ color: '#666', fontSize: '13px', margin: 0, lineHeight: 1.5 }}>
+                  The hospital has been alerted. Please wait for their instructions
+                  or contact the hospital directly before proceeding.
+                </p>
+              </div>
+            )}
+            {bedStatus && !bedStatus.bed_warning && bedStatus.beds_available != null && (
+              <div
+                style={{
+                  backgroundColor: '#F0FDF4',
+                  borderRadius: '12px',
+                  padding: '12px 16px',
+                  marginTop: '12px',
+                  border: '1px solid #86EFAC',
+                }}
+              >
+                <p style={{ fontWeight: 700, color: '#16A34A', fontSize: '13px', margin: 0 }}>
+                  ✅ Bed ready — {bedStatus.beds_available} bed(s) available at the hospital.
+                </p>
+              </div>
+            )}
+
+            {/* Incident report — patient not at the scene */}
+            {dispatch.status === 'arrived' && (
+              <div className="bg-white rounded-xl p-3 border border-gray-100 mt-3">
+                <p className="text-xs text-gray-500 mb-2">Patient not at this location?</p>
+                <button
+                  onClick={() => setShowReport(true)}
+                  className="w-full py-2.5 rounded-xl font-bold text-sm"
+                  style={{ backgroundColor: '#FEF2F2', color: '#EF4444', border: '1.5px solid #FCA5A5' }}
+                >
+                  👤 Report Incident (Patient Not Found)
+                </button>
               </div>
             )}
           </div>
@@ -310,6 +586,69 @@ const ActiveDispatchPage = () => {
               </span>
             </div>
           </div>
+
+          {/* Driver incident report modal */}
+          {showReport && (
+            <div
+              className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-5"
+              onClick={() => setShowReport(false)}
+            >
+              <div
+                className="bg-white rounded-2xl p-6 w-full max-w-md"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="font-extrabold mb-4">⚠️ Report Incident</h3>
+                <p className="text-[13px] font-semibold text-gray-700 mb-2">What happened?</p>
+                {REPORT_TYPES.map((opt) => (
+                  <button
+                    key={opt.type}
+                    onClick={() => setReportType(opt.type)}
+                    className="w-full flex items-center gap-2.5 text-left p-3 mb-2 rounded-lg"
+                    style={{
+                      backgroundColor: reportType === opt.type ? '#FEF2F2' : 'white',
+                      border: `1.5px solid ${reportType === opt.type ? '#EF4444' : '#E5E5E5'}`,
+                    }}
+                  >
+                    <span style={{ fontSize: '20px' }}>{opt.icon}</span>
+                    <div>
+                      <p
+                        className="font-semibold text-[13px] m-0"
+                        style={{ color: reportType === opt.type ? '#EF4444' : '#333' }}
+                      >
+                        {opt.label}
+                      </p>
+                      <p className="text-[11px] text-gray-400 m-0">{opt.desc}</p>
+                    </div>
+                  </button>
+                ))}
+                <textarea
+                  value={reportDesc}
+                  onChange={(e) => setReportDesc(e.target.value)}
+                  placeholder="Additional details (optional)…"
+                  rows={3}
+                  className="w-full p-2.5 mt-2 mb-3 rounded-lg text-[13px] outline-none resize-none"
+                  style={{ border: '1.5px solid #E5E5E5', boxSizing: 'border-box' }}
+                />
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => { setShowReport(false); setReportType(''); }}
+                    className="flex-1 py-3 rounded-xl font-semibold bg-white"
+                    style={{ border: '1px solid #E5E5E5' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submitReport}
+                    disabled={!reportType || submittingReport}
+                    className="py-3 rounded-xl font-bold text-white disabled:cursor-not-allowed"
+                    style={{ flex: 2, backgroundColor: reportType ? '#EF4444' : '#E5E5E5' }}
+                  >
+                    {submittingReport ? '⏳ Submitting…' : '📋 Submit Report'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </DashboardLayout>

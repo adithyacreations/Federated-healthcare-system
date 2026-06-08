@@ -209,8 +209,19 @@ const TestRecordsPage = () => {
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
-  const filtered = records.filter((r) => (activeTab === 'all' ? true : r.status === activeTab));
-  const tabCount = (key) => (key === 'all' ? records.length : records.filter((r) => r.status === key).length);
+  // From the patient's perspective: pending, confirmed, and processing are all
+  // "waiting for results" — group them under the Pending tab.
+  const PENDING_STATUSES = ['pending', 'confirmed', 'processing'];
+  const filtered = records.filter((r) => {
+    if (activeTab === 'all') return true;
+    if (activeTab === 'pending') return PENDING_STATUSES.includes(r.status);
+    return r.status === activeTab;
+  });
+  const tabCount = (key) => {
+    if (key === 'all') return records.length;
+    if (key === 'pending') return records.filter((r) => PENDING_STATUSES.includes(r.status)).length;
+    return records.filter((r) => r.status === key).length;
+  };
 
   const handlePayment = (record) => {
     if (!record.razorpay_order_id || !record.razorpay_key_id) {

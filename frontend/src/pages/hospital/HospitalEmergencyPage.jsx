@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
@@ -24,7 +25,10 @@ const fmtTime = (iso) => {
   }
 };
 
-const IncomingPatientCard = ({ patient, acknowledging, onAcknowledge, markingReady, onMarkReady }) => (
+const IncomingPatientCard = ({
+  patient, acknowledging, onAcknowledge, markingReady, onMarkReady,
+  availableBeds, loadingBeds, selectedBed, onSelectBed, onRefreshBeds, onGoToBeds,
+}) => (
   <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: '#FCA5A5' }}>
     <div className="flex items-start justify-between gap-4">
       <div className="flex-1 min-w-0">
@@ -107,7 +111,8 @@ const IncomingPatientCard = ({ patient, acknowledging, onAcknowledge, markingRea
               </span>
             )}
           </div>
-        ) : (
+        ) : patient.reserved_bed ? (
+          // A bed was auto-reserved at dispatch → one-click confirm it ready.
           <button
             onClick={() => onMarkReady(patient.dispatch_id)}
             disabled={markingReady === patient.dispatch_id}
@@ -116,6 +121,83 @@ const IncomingPatientCard = ({ patient, acknowledging, onAcknowledge, markingRea
           >
             {markingReady === patient.dispatch_id ? '⏳ Notifying…' : '🏥 Mark Bed Ready'}
           </button>
+        ) : (
+          // No bed reserved (e.g. no-beds-at-dispatch fallback) → validated pick.
+          <div style={{ backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12 }}>
+            {loadingBeds ? (
+              <p style={{ color: '#9CA3AF', fontSize: 13, margin: 0 }}>⏳ Checking beds…</p>
+            ) : availableBeds.length === 0 ? (
+              <div>
+                <div
+                  style={{
+                    backgroundColor: '#FEF2F2', borderRadius: 10, padding: '12px 14px',
+                    border: '1px solid #FCA5A5', marginBottom: 10,
+                  }}
+                >
+                  <p style={{ fontWeight: 700, color: '#EF4444', fontSize: 13, margin: '0 0 4px' }}>
+                    ❌ No Beds Available
+                  </p>
+                  <p style={{ color: '#666', fontSize: 12, margin: 0 }}>
+                    Free a bed from Bed Management to admit this patient.
+                  </p>
+                </div>
+                <button
+                  onClick={onGoToBeds}
+                  style={{
+                    width: '100%', padding: 10, backgroundColor: '#F97316', color: 'white',
+                    border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13,
+                    cursor: 'pointer', marginBottom: 8,
+                  }}
+                >
+                  🏥 Go to Bed Management
+                </button>
+                <button
+                  onClick={onRefreshBeds}
+                  style={{
+                    width: '100%', padding: 8, backgroundColor: 'white', color: '#666',
+                    border: '1px solid #E5E5E5', borderRadius: 8, fontSize: 12, cursor: 'pointer',
+                  }}
+                >
+                  🔄 Refresh Bed Status
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p style={{ fontWeight: 700, fontSize: 13, color: '#16A34A', margin: '0 0 10px' }}>
+                  ✅ {availableBeds.length} bed{availableBeds.length > 1 ? 's' : ''} available
+                </p>
+                <select
+                  value={selectedBed || ''}
+                  onChange={(e) => onSelectBed(patient.dispatch_id, e.target.value)}
+                  style={{
+                    width: '100%', padding: 10,
+                    border: `1.5px solid ${selectedBed ? '#F97316' : '#E5E5E5'}`,
+                    borderRadius: 8, fontSize: 13, marginBottom: 10, outline: 'none',
+                    backgroundColor: 'white',
+                  }}
+                >
+                  <option value="">Select a bed…</option>
+                  {availableBeds.map((bed) => (
+                    <option key={bed.bed_id} value={bed.bed_id}>
+                      {bed.bed_number}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => onMarkReady(patient.dispatch_id, selectedBed)}
+                  disabled={!selectedBed || markingReady === patient.dispatch_id}
+                  style={{
+                    width: '100%', padding: 12,
+                    backgroundColor: selectedBed ? '#22C55E' : '#E5E5E5',
+                    color: 'white', border: 'none', borderRadius: 8, fontWeight: 700,
+                    fontSize: 14, cursor: selectedBed ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  {markingReady === patient.dispatch_id ? '⏳ Assigning…' : '✅ Mark Bed Ready'}
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         {patient.status === 'pending_acknowledgment' ? (
@@ -139,12 +221,36 @@ const IncomingPatientCard = ({ patient, acknowledging, onAcknowledge, markingRea
 );
 
 const HospitalEmergencyPage = () => {
+  const navigate = useNavigate();
   const { data, loading, refetch, refreshing, lastUpdated } = useApi(
     '/api/emergency/incoming-patients/', { pollInterval: 15000 },
   );
   const incomingPatients = Array.isArray(data) ? data : [];
   const [acknowledging, setAcknowledging] = useState(null);
   const [markingReady, setMarkingReady] = useState(null);
+  const [availableBeds, setAvailableBeds] = useState([]);
+  const [loadingBeds, setLoadingBeds] = useState(false);
+  const [selectedBeds, setSelectedBeds] = useState({}); // { [dispatchId]: bedId }
+
+  const fetchAvailableBeds = useCallback(async () => {
+    setLoadingBeds(true);
+    try {
+      const res = await API.get('/api/hospital/beds/available/');
+      if (res.data?.success) setAvailableBeds(res.data.data?.beds || []);
+    } catch {
+      /* best-effort */
+    } finally {
+      setLoadingBeds(false);
+    }
+  }, []);
+
+  // Only need the bed list when a card has no pre-reserved bed to confirm.
+  const needsBedSelection = incomingPatients.some(
+    (p) => !p.bed_ready && !p.reserved_bed,
+  );
+  useEffect(() => {
+    if (needsBedSelection) fetchAvailableBeds();
+  }, [needsBedSelection, fetchAvailableBeds]);
 
   const handleAcknowledge = async (dispatchId) => {
     setAcknowledging(dispatchId);
@@ -161,20 +267,37 @@ const HospitalEmergencyPage = () => {
     }
   };
 
-  const handleMarkReady = async (dispatchId) => {
+  const handleMarkReady = async (dispatchId, bedId = null) => {
     setMarkingReady(dispatchId);
     try {
-      const res = await API.post(`/api/emergency/dispatch/${dispatchId}/bed-ready/`);
+      const res = await API.post(
+        `/api/emergency/dispatch/${dispatchId}/bed-ready/`,
+        bedId ? { bed_id: bedId } : {},
+      );
       if (res.data?.success) {
-        toast.success('🏥 Hospital marked ready! Driver notified.');
-        // Refetch so the persisted bed_ready state is reflected immediately.
+        toast.success(res.data.message || '🛏️ Bed prepared! Driver notified.');
+        setSelectedBeds((prev) => ({ ...prev, [dispatchId]: '' }));
+        // Refresh both the patient list (persisted bed_ready) and bed counts.
         refetch();
+        fetchAvailableBeds();
       }
-    } catch {
-      toast.error('Failed to mark ready!');
+    } catch (error) {
+      const d = error.response?.data;
+      if (d?.no_beds) {
+        toast.error('No beds available! Free a bed first.');
+      } else if (d?.requires_bed_selection) {
+        toast.error('Please select a specific bed.');
+        fetchAvailableBeds();
+      } else {
+        toast.error(d?.message || 'Failed to mark ready!');
+      }
     } finally {
       setMarkingReady(null);
     }
+  };
+
+  const handleSelectBed = (dispatchId, bedId) => {
+    setSelectedBeds((prev) => ({ ...prev, [dispatchId]: bedId }));
   };
 
   return (
@@ -225,6 +348,12 @@ const HospitalEmergencyPage = () => {
                 onAcknowledge={handleAcknowledge}
                 markingReady={markingReady}
                 onMarkReady={handleMarkReady}
+                availableBeds={availableBeds}
+                loadingBeds={loadingBeds}
+                selectedBed={selectedBeds[patient.dispatch_id] || ''}
+                onSelectBed={handleSelectBed}
+                onRefreshBeds={fetchAvailableBeds}
+                onGoToBeds={() => navigate('/hospital/beds')}
               />
             ))}
           </div>

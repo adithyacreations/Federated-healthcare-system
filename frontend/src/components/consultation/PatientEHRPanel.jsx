@@ -189,6 +189,58 @@ const BrainResultCard = ({ data, onClear }) => {
   );
 };
 
+// ── Skin disease (4-class) result ──────────────────────────────────────────
+const SkinResultCard = ({ data, onClear }) => {
+  const urgent = data.is_urgent;
+  const accent = urgent ? '#EF4444' : '#22C55E';
+  return (
+    <div style={{ borderRadius: 16, overflow: 'hidden', marginTop: 12, border: `2px solid ${urgent ? '#FCA5A5' : '#86EFAC'}` }}>
+      <div style={{ padding: '12px 16px', backgroundColor: accent, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <p style={{ color: 'white', fontWeight: 700, margin: 0, fontSize: 14 }}>🔬 Skin Analysis</p>
+        <span style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: 'white', padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
+          {urgent ? '⚠️ Urgent' : '✅ Low Risk'}
+        </span>
+      </div>
+      <div style={{ backgroundColor: urgent ? '#FEF2F2' : '#F0FDF4', padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+          <div style={{ width: 64, height: 64, borderRadius: '50%', backgroundColor: accent, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ color: 'white', fontSize: 16, fontWeight: 900 }}>{Math.round(data.confidence)}%</span>
+            <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9 }}>confidence</span>
+          </div>
+          <div>
+            <p style={{ fontWeight: 700, fontSize: 15, color: '#000', margin: '0 0 4px' }}>{data.predicted_label}</p>
+            <p style={{ fontSize: 11, color: '#9CA3AF', margin: 0 }}>Model accuracy: {(data.model_accuracy * 100).toFixed(1)}%</p>
+          </div>
+        </div>
+        {data.all_predictions.map((pred, i) => {
+          const hi = i === 0;
+          const col = hi ? accent : '#9CA3AF';
+          return (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                <span style={{ fontSize: 12, fontWeight: hi ? 700 : 400, color: hi ? '#000' : '#666' }}>{pred.label}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: col }}>{pred.probability}%</span>
+              </div>
+              <div style={{ backgroundColor: '#E5E5E5', borderRadius: 999, height: 5, overflow: 'hidden' }}>
+                <div style={{ width: `${pred.probability}%`, height: '100%', backgroundColor: hi ? (urgent ? '#EF4444' : '#F97316') : '#D1D5DB', borderRadius: 999 }} />
+              </div>
+            </div>
+          );
+        })}
+        {urgent && (
+          <div style={{ marginTop: 12, backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8, padding: '8px 12px' }}>
+            <p style={{ fontSize: 11, color: '#EF4444', margin: 0, fontWeight: 600 }}>
+              ⚠️ Possible serious skin condition — recommend prompt dermatology referral.
+            </p>
+          </div>
+        )}
+        <p style={{ fontSize: 11, color: '#9CA3AF', marginTop: 12, fontStyle: 'italic' }}>⚕️ {data.disclaimer}</p>
+        <button onClick={onClear} style={clearBtn}>Clear result</button>
+      </div>
+    </div>
+  );
+};
+
 /**
  * Consent-gated patient EHR panel, shared by the online ConsultationRoom and
  * the OfflineConsultationRoom. The doctor enters the patient's 6-digit consent
@@ -222,6 +274,10 @@ const PatientEHRPanel = ({ patientUuid, onClose, onAccessChange, doctorDepartmen
   // Brain MRI tumor detection — driven by a fresh file upload, not an EHR image.
   const [brainAnalysis, setBrainAnalysis] = useState(null);
   const [analyzingBrain, setAnalyzingBrain] = useState(false);
+
+  // Skin disease detection — driven by a fresh file upload (dermatology only).
+  const [skinAnalysis, setSkinAnalysis] = useState(null);
+  const [analyzingSkin, setAnalyzingSkin] = useState(false);
 
   const loadData = async (patientId) => {
     try {
@@ -363,6 +419,28 @@ const PatientEHRPanel = ({ patientUuid, onClose, onAccessChange, doctorDepartmen
       toast.error('Brain MRI analysis failed!');
     } finally {
       setAnalyzingBrain(false);
+    }
+  };
+
+  // Skin disease classification from a directly uploaded image file.
+  const handleSkinAnalysis = async (imageFile) => {
+    setAnalyzingSkin(true);
+    setSkinAnalysis(null);
+    try {
+      const fd = new FormData();
+      fd.append('image', imageFile);
+      const { data: res } = await API.post('/api/ai/skin-disease/', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (res?.success) {
+        setSkinAnalysis(res.data);
+        toast.success('Skin photo analyzed ✅');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Skin analysis failed!');
+    } finally {
+      setAnalyzingSkin(false);
     }
   };
 
@@ -553,6 +631,32 @@ const PatientEHRPanel = ({ patientUuid, onClose, onAccessChange, doctorDepartmen
 
                   {brainAnalysis && (
                     <BrainResultCard data={brainAnalysis} onClear={() => setBrainAnalysis(null)} />
+                  )}
+                </div>
+              )}
+
+              {/* Skin disease upload + result — dermatology only */}
+              {availableModels.includes('skin_disease') && (
+                <div className="mb-4 border border-gray-100 rounded-xl p-3">
+                  <p className="text-sm font-bold text-black mb-3">🔬 Skin Disease Analysis</p>
+                  <label className="block w-full border-2 border-dashed border-gray-200 rounded-xl p-4 text-center cursor-pointer hover:border-orange-400 transition-colors">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={analyzingSkin}
+                      onChange={(e) => {
+                        if (e.target.files[0]) handleSkinAnalysis(e.target.files[0]);
+                      }}
+                    />
+                    <p className="text-2xl mb-1">🔬</p>
+                    <p className="text-xs text-gray-500">
+                      {analyzingSkin ? '⏳ Analyzing skin photo…' : 'Upload & Analyze Skin Photo'}
+                    </p>
+                  </label>
+
+                  {skinAnalysis && (
+                    <SkinResultCard data={skinAnalysis} onClear={() => setSkinAnalysis(null)} />
                   )}
                 </div>
               )}

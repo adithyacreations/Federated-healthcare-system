@@ -712,13 +712,30 @@ class EmergencySOSView(APIView):
             radius_km = 10
         radius_km = max(1, min(radius_km, 25))
 
-        emergency = EmergencyRequest.objects.create(
-            patient_id=patient,
-            patient_lat=d['patient_lat'],
-            patient_lng=d['patient_lng'],
-            severity=d['severity'],
-            status='pending',
-        )
+        from django.db import transaction
+        
+        # Prevent rapid double-clicks from creating duplicate emergencies
+        with transaction.atomic():
+            # Lock the patient row to serialize concurrent requests
+            locked_patient = patient.__class__.objects.select_for_update().get(pk=patient.pk)
+            
+            active_emergency = EmergencyRequest.objects.filter(
+                patient_id=locked_patient,
+                status__in=['pending', 'dispatched', 'en_route', 'arrived', 'pending_acknowledgment']
+            ).first()
+            if active_emergency:
+                return ok('Emergency already active.', {
+                    'emergency_id': str(active_emergency.emergency_id),
+                    'status': active_emergency.status,
+                }, status=200)
+
+            emergency = EmergencyRequest.objects.create(
+                patient_id=locked_patient,
+                patient_lat=d['patient_lat'],
+                patient_lng=d['patient_lng'],
+                severity=d['severity'],
+                status='pending',
+            )
 
         # Find nearest available ambulance (GPS of ambulance; fall back to hospital GPS)
         from apps.emergency.utils import find_nearest_ambulance

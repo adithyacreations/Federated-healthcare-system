@@ -134,6 +134,21 @@ const BLANK_FORM = {
   diagnosis: '', symptoms: [],
 };
 
+// Fields the smart column-mapper can map a custom hospital CSV onto.
+const OUR_FIELDS = [
+  { key: 'full_name', label: 'Full Name', required: true, example: 'John Doe' },
+  { key: 'age', label: 'Age', required: false, example: '45' },
+  { key: 'gender', label: 'Gender', required: false, example: 'Male / Female' },
+  { key: 'blood_group', label: 'Blood Group', required: false, example: 'A+, B-, O+' },
+  { key: 'primary_diagnosis', label: 'Primary Diagnosis', required: false, example: 'Diabetes' },
+  { key: 'symptoms', label: 'Symptoms', required: false, example: 'fever, cough' },
+  { key: 'medications', label: 'Medications', required: false, example: 'Metformin 500mg' },
+  { key: 'visit_date', label: 'Visit Date', required: false, example: '2024-01-15' },
+];
+
+// Normalise a header/field for fuzzy auto-matching (strip case + separators).
+const normKey = (s) => (s || '').toLowerCase().replace(/[_\s-]/g, '');
+
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 const HospitalPatientsPage = () => {
@@ -153,6 +168,15 @@ const HospitalPatientsPage = () => {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const csvInputRef = useRef(null);
+
+  // Smart column-mapper wizard state
+  const [importStep, setImportStep] = useState(1);      // 1 upload · 2 map · 3 done
+  const [importFormat, setImportFormat] = useState('template'); // 'template' | 'custom'
+  const [csvHeaders, setCsvHeaders] = useState([]);
+  const [csvPreview, setCsvPreview] = useState([]);
+  const [totalRows, setTotalRows] = useState(0);
+  const [columnMapping, setColumnMapping] = useState({});
+  const [parsing, setParsing] = useState(false);
 
   // Demo generate state
   const [demoCount, setDemoCount] = useState(30);
@@ -205,12 +229,25 @@ const HospitalPatientsPage = () => {
     setModal('add');
   };
 
+  const resetImportWizard = () => {
+    setImportStep(1);
+    setImportFormat('template');
+    setCsvFile(null);
+    setCsvHeaders([]);
+    setCsvPreview([]);
+    setTotalRows(0);
+    setColumnMapping({});
+    setImportResult(null);
+    setParsing(false);
+  };
+
   const closeModal = () => {
     setModal(null);
     setViewPatient(null);
     setForm(BLANK_FORM);
     setStep(1);
     setSymptomSearch('');
+    resetImportWizard();
   };
 
   const handleDiagnosisChange = (diagnosis) => {
@@ -297,8 +334,7 @@ const HospitalPatientsPage = () => {
   };
 
   const openImport = () => {
-    setCsvFile(null);
-    setImportResult(null);
+    resetImportWizard();
     setModal('import');
   };
 
@@ -308,14 +344,61 @@ const HospitalPatientsPage = () => {
     setModal('generate');
   };
 
-  const handleCsvDrop = (e) => {
-    e.preventDefault();
-    const file = e.dataTransfer?.files?.[0];
-    if (file && file.name.endsWith('.csv')) setCsvFile(file);
-    else toast.error('Please drop a .csv file');
+  // Parse a custom-format CSV → detect headers, auto-map, advance to mapper step.
+  const handleParseCsv = async (file) => {
+    if (!file) return;
+    setCsvFile(file);
+    setParsing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await API.post('/api/hospital/patients/parse-csv/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (data.success) {
+        const d = data.data;
+        setCsvHeaders(d.headers);
+        setCsvPreview(d.preview_rows || []);
+        setTotalRows(d.total_rows || 0);
+
+        // Auto-map columns whose name fuzzily matches one of our fields.
+        const autoMap = {};
+        OUR_FIELDS.forEach((field) => {
+          const fk = normKey(field.key);
+          const fl = normKey(field.label);
+          const match = d.headers.find((h) => {
+            const hk = normKey(h);
+            return hk === fk || hk === fl || hk.includes(fk) || fk.includes(hk) || hk.includes(fl) || fl.includes(hk);
+          });
+          autoMap[field.key] = match || 'skip';
+        });
+        setColumnMapping(autoMap);
+        setImportStep(2);
+      } else {
+        toast.error(data.message);
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to parse CSV!');
+    } finally {
+      setParsing(false);
+    }
   };
 
-  const handleImport = async () => {
+  // File picked / dropped — branch on the chosen format.
+  const onCsvSelected = (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) { toast.error('Please select a .csv file'); return; }
+    if (importFormat === 'custom') handleParseCsv(file);
+    else setCsvFile(file);
+  };
+
+  const handleCsvDrop = (e) => {
+    e.preventDefault();
+    onCsvSelected(e.dataTransfer?.files?.[0]);
+  };
+
+  // "Our Template" → existing validated importer (keeps disease/symptom checks).
+  const handleTemplateImport = async () => {
     if (!csvFile) { toast.error('Please select a CSV file first'); return; }
     setImporting(true);
     try {
@@ -325,11 +408,43 @@ const HospitalPatientsPage = () => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setImportResult(data.data);
+      setImportStep(3);
       toast.success(data.message);
       patientsApi.refetch();
       stats.refetch();
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // "Custom Format" → import using the user's column mapping.
+  const handleMappedImport = async () => {
+    const requiredMapped = OUR_FIELDS
+      .filter((f) => f.required)
+      .every((f) => columnMapping[f.key] && columnMapping[f.key] !== 'skip');
+    if (!requiredMapped) { toast.error('Please map all required fields (Full Name)!'); return; }
+
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', csvFile);
+      formData.append('mapping', JSON.stringify(columnMapping));
+      const { data } = await API.post('/api/hospital/patients/import-mapped/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (data.success) {
+        setImportResult(data.data);
+        setImportStep(3);
+        toast.success(data.message);
+        patientsApi.refetch();
+        stats.refetch();
+      } else {
+        toast.error(data.message);
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Import failed!');
     } finally {
       setImporting(false);
     }
@@ -856,99 +971,274 @@ const HospitalPatientsPage = () => {
         ) : null}
       </Modal>
 
-      {/* ─── Import CSV Modal ──────────────────────────────────────── */}
-      <Modal isOpen={modal === 'import'} onClose={closeModal} title="Import Patients from CSV" size="lg">
-        <div className="space-y-4">
+      {/* ─── Import CSV Modal (smart column mapper) ─────────────────── */}
+      <Modal isOpen={modal === 'import'} onClose={closeModal} title="Import Patient Records" size="lg">
+        <p className="text-xs text-gray-400 -mt-2 mb-4">
+          📊 Offline records for FL training &amp; prediction only — no patient accounts are created.
+        </p>
 
-          {/* Instructions */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-            <p className="font-semibold mb-1">How to import:</p>
-            <ol className="list-decimal list-inside space-y-0.5 text-blue-700">
-              <li>Download template first (grey button in header)</li>
-              <li>Fill patient data in Excel / Sheets</li>
-              <li>Save as CSV format (.csv)</li>
-              <li>Upload here</li>
-            </ol>
-          </div>
+        {/* Step indicator */}
+        <div className="flex items-center gap-2 mb-6">
+          {['Upload File', 'Map Columns', 'Complete'].map((label, i) => {
+            const n = i + 1;
+            return (
+              <div key={label} className="flex items-center gap-2 flex-1">
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                  importStep >= n ? 'bg-orange-500 text-white' : 'bg-gray-200 text-gray-500'
+                }`}>
+                  {importStep > n ? '✓' : n}
+                </div>
+                <span className={`text-xs font-medium whitespace-nowrap ${importStep === n ? 'text-orange-600' : 'text-gray-400'}`}>
+                  {label}
+                </span>
+                {i < 2 && <div className={`h-px flex-1 ${importStep > n ? 'bg-orange-500' : 'bg-gray-200'}`} />}
+              </div>
+            );
+          })}
+        </div>
 
-          {/* File drop zone */}
-          {!importResult && (
+        {/* STEP 1 — Format + upload */}
+        {importStep === 1 && (
+          <div className="space-y-4">
+            {/* Format selector */}
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { key: 'template', icon: '📋', title: 'Our Template', desc: 'Already in FederCare format' },
+                { key: 'custom', icon: '🏥', title: 'Custom Format', desc: 'Map your own columns' },
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => { setImportFormat(opt.key); setCsvFile(null); }}
+                  className="p-4 rounded-xl text-center transition"
+                  style={{
+                    border: `2px solid ${importFormat === opt.key ? '#F97316' : '#E5E5E5'}`,
+                    backgroundColor: importFormat === opt.key ? '#FFF7ED' : 'white',
+                  }}
+                >
+                  <p className="text-2xl mb-1.5">{opt.icon}</p>
+                  <p className="font-bold text-[13px] text-gray-800 mb-1">{opt.title}</p>
+                  <p className="text-[11px] text-gray-400">{opt.desc}</p>
+                </button>
+              ))}
+            </div>
+
+            {importFormat === 'template' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+                Tip: download the template (grey button in the header) for the exact column names &amp; valid disease/symptom values.
+              </div>
+            )}
+
+            {/* Dropzone */}
             <div
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleCsvDrop}
               onClick={() => csvInputRef.current?.click()}
-              className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-success hover:bg-green-50/30 transition"
+              className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition"
+              style={{ borderColor: csvFile ? '#F97316' : '#E5E5E5', backgroundColor: csvFile ? '#FFF7ED' : 'white' }}
             >
               <input
                 ref={csvInputRef}
                 type="file"
                 accept=".csv"
                 className="hidden"
-                onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
+                onChange={(e) => onCsvSelected(e.target.files?.[0])}
               />
-              {csvFile ? (
+              {parsing ? (
                 <div>
-                  <p className="text-2xl mb-1">📄</p>
-                  <p className="font-semibold text-gray-700">{csvFile.name}</p>
+                  <span className="block w-8 h-8 mx-auto mb-3 border-[3px] border-orange-200 border-t-orange-500 rounded-full animate-spin" />
+                  <p className="font-semibold text-orange-600">Reading CSV…</p>
+                </div>
+              ) : csvFile ? (
+                <div>
+                  <p className="text-3xl mb-1.5">✅</p>
+                  <p className="font-bold text-orange-600">{csvFile.name}</p>
                   <p className="text-xs text-gray-400 mt-1">Click to change file</p>
                 </div>
               ) : (
                 <div>
-                  <p className="text-3xl mb-2">📄</p>
-                  <p className="text-gray-600 font-medium">Drop CSV file here</p>
-                  <p className="text-gray-400 text-sm mt-1">or click to browse</p>
-                  <p className="text-xs text-gray-400 mt-2">Accepts .csv only</p>
+                  <p className="text-4xl mb-2.5">📊</p>
+                  <p className="font-bold text-[15px] text-gray-700 mb-1">Click to upload CSV</p>
+                  <p className="text-xs text-gray-400">or drag &amp; drop · .csv only</p>
                 </div>
               )}
             </div>
-          )}
 
-          {/* Import result */}
-          {importResult && (
-            <div className="space-y-3">
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                <p className="font-bold text-green-700 text-base">
-                  ✅ Success: {importResult.imported} patients imported!
-                </p>
-              </div>
-              {importResult.warning_list?.length > 0 && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                  <p className="font-semibold text-yellow-700 mb-1">⚠️ {importResult.warnings} warnings:</p>
-                  <ul className="text-xs text-yellow-700 space-y-0.5 list-disc list-inside">
-                    {importResult.warning_list.map((w, i) => <li key={i}>{w}</li>)}
-                  </ul>
-                </div>
-              )}
-              {importResult.error_list?.length > 0 && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                  <p className="font-semibold text-red-700 mb-1">❌ {importResult.errors} errors:</p>
-                  <ul className="text-xs text-red-700 space-y-0.5 list-disc list-inside">
-                    {importResult.error_list.map((e, i) => <li key={i}>{e}</li>)}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-between pt-1">
-            <button onClick={closeModal} className="btn-secondary">Cancel</button>
-            {importResult ? (
-              <button onClick={closeModal} className="btn-primary">View Patients</button>
-            ) : (
+            {/* Template → direct import */}
+            {importFormat === 'template' && csvFile && (
               <button
-                onClick={handleImport}
-                disabled={importing || !csvFile}
-                className="inline-flex items-center gap-1.5 bg-success text-white px-4 py-2 rounded-lg text-sm font-semibold hover:opacity-90 transition disabled:opacity-50"
+                onClick={handleTemplateImport}
+                disabled={importing}
+                className="w-full py-3.5 rounded-xl font-bold text-white bg-orange-500 hover:bg-orange-600 transition disabled:opacity-60"
               >
-                {importing ? (
-                  <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing…</>
-                ) : (
-                  <><FiUpload className="w-4 h-4" /> Import Patients</>
-                )}
+                {importing ? '⏳ Importing…' : 'Import Now →'}
               </button>
             )}
+            <div className="flex justify-end">
+              <button onClick={closeModal} className="btn-secondary">Cancel</button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* STEP 2 — Column mapper */}
+        {importStep === 2 && (
+          <div className="space-y-4">
+            {/* File info */}
+            <div className="bg-gray-50 rounded-xl px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="font-bold text-sm text-gray-800">📊 {csvFile?.name}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{csvHeaders.length} columns detected</p>
+              </div>
+              <div className="text-right">
+                <p className="font-extrabold text-lg text-orange-500 leading-none">{totalRows.toLocaleString()}</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">total rows</p>
+              </div>
+            </div>
+
+            <p className="font-bold text-sm text-gray-800">Map Your Columns</p>
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <div className="grid grid-cols-2 bg-gray-50 px-4 py-2.5 border-b border-gray-200">
+                <p className="text-[11px] font-bold uppercase text-gray-500">FederCare Field</p>
+                <p className="text-[11px] font-bold uppercase text-gray-500">Your Column</p>
+              </div>
+              {OUR_FIELDS.map((field, i) => {
+                const mapped = columnMapping[field.key] && columnMapping[field.key] !== 'skip';
+                return (
+                  <div
+                    key={field.key}
+                    className="grid grid-cols-2 gap-3 px-4 py-2.5 items-center"
+                    style={{
+                      borderBottom: i < OUR_FIELDS.length - 1 ? '1px solid #F5F5F5' : 'none',
+                      backgroundColor: mapped ? '#FFFBF7' : 'white',
+                    }}
+                  >
+                    <div>
+                      <p className="font-semibold text-[13px] text-gray-900">
+                        {field.label}
+                        {field.required && <span className="text-red-500 ml-1">*</span>}
+                      </p>
+                      <p className="text-[11px] text-gray-400">e.g. {field.example}</p>
+                    </div>
+                    <select
+                      value={columnMapping[field.key] || 'skip'}
+                      onChange={(e) => setColumnMapping((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full px-2.5 py-2 rounded-lg text-[13px] bg-white outline-none"
+                      style={{ border: `1.5px solid ${mapped ? '#F97316' : '#E5E5E5'}` }}
+                    >
+                      <option value="skip">— Skip this field —</option>
+                      {csvHeaders.map((h) => (
+                        <option key={h} value={h}>{h}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Preview */}
+            {csvPreview.length > 0 && (
+              <div>
+                <p className="font-bold text-[13px] text-gray-800 mb-2">👁️ Data Preview (first 3 rows)</p>
+                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        {csvHeaders.map((h) => (
+                          <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvPreview.map((row, i) => (
+                        <tr key={i}>
+                          {csvHeaders.map((h, j) => (
+                            <td key={j} className="px-3 py-2 border-b border-gray-50 text-gray-700 whitespace-nowrap max-w-[150px] truncate">
+                              {row[j] || '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={handleMappedImport}
+              disabled={importing}
+              className="w-full py-3.5 rounded-xl font-bold text-white transition disabled:cursor-not-allowed"
+              style={{ backgroundColor: importing ? '#E5E5E5' : '#F97316' }}
+            >
+              {importing
+                ? `⏳ Importing ${totalRows.toLocaleString()} records…`
+                : `⬆️ Import ${totalRows.toLocaleString()} Records`}
+            </button>
+            <button
+              onClick={() => { setImportStep(1); setCsvFile(null); }}
+              className="w-full py-2.5 rounded-xl font-semibold text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 transition"
+            >
+              ← Back
+            </button>
+          </div>
+        )}
+
+        {/* STEP 3 — Result */}
+        {importStep === 3 && importResult && (
+          <div className="text-center py-2">
+            <div className="w-[72px] h-[72px] rounded-full mx-auto mb-5 flex items-center justify-center text-3xl" style={{ backgroundColor: '#F0FDF4', border: '3px solid #22C55E' }}>
+              ✅
+            </div>
+            <h3 className="font-extrabold text-lg text-gray-800 mb-1">Import Complete!</h3>
+
+            <div className="grid grid-cols-2 gap-3 my-5 text-left">
+              <div className="rounded-xl p-4" style={{ backgroundColor: '#F0FDF4' }}>
+                <p className="text-2xl font-black text-green-500 mb-1">{(importResult.imported || 0).toLocaleString()}</p>
+                <p className="text-xs text-gray-600">✅ Imported</p>
+              </div>
+              <div className="rounded-xl p-4" style={{ backgroundColor: importResult.errors > 0 ? '#FEF2F2' : '#F9FAFB' }}>
+                <p className="text-2xl font-black mb-1" style={{ color: importResult.errors > 0 ? '#EF4444' : '#9CA3AF' }}>
+                  {(importResult.errors || 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-600">❌ Failed</p>
+              </div>
+            </div>
+
+            {/* Warnings (template path) */}
+            {importResult.warning_list?.length > 0 && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3 text-left">
+                <p className="font-semibold text-yellow-700 mb-1 text-sm">⚠️ {importResult.warnings} warnings</p>
+                <ul className="text-xs text-yellow-700 space-y-0.5 list-disc list-inside max-h-28 overflow-y-auto">
+                  {importResult.warning_list.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+            {/* Errors (either path) */}
+            {(importResult.error_list?.length > 0 || importResult.error_rows?.length > 0) && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-left">
+                <p className="font-semibold text-red-700 mb-1 text-sm">❌ Skipped rows</p>
+                <ul className="text-xs text-red-700 space-y-0.5 list-disc list-inside max-h-28 overflow-y-auto">
+                  {(importResult.error_list || importResult.error_rows.map((r) => `Row ${r.row}: ${r.error}`)).map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="rounded-lg p-3 mb-5 text-left" style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
+              <p className="text-xs font-semibold text-orange-600">
+                📊 These records are used for AI prediction and federated learning training. No patient accounts were created.
+              </p>
+            </div>
+
+            <button
+              onClick={closeModal}
+              className="w-full py-3.5 rounded-xl font-bold text-white bg-orange-500 hover:bg-orange-600 transition"
+            >
+              Done ✅
+            </button>
+          </div>
+        )}
       </Modal>
 
       {/* ─── Generate Demo Modal ───────────────────────────────────── */}

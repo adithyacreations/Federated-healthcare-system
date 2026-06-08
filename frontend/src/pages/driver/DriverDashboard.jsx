@@ -57,9 +57,6 @@ const severityBadge = (sev) => {
   );
 };
 
-const DISPATCH_STATUSES = ['en_route', 'arrived', 'completed'];
-const DISPATCH_LABELS = { en_route: 'En Route', arrived: 'Arrived', completed: 'Complete Trip' };
-
 const DriverDashboard = () => {
   const { user } = useAuth();
   const [toggling, setToggling] = useState(false);
@@ -73,10 +70,20 @@ const DriverDashboard = () => {
   const [showAlert, setShowAlert] = useState(false);
   const [routeInfo, setRouteInfo] = useState(null);
   const wsRef = useRef(null);
+  const alertRef = useRef(null); // mirrors emergencyAlert for the WS closure
+  const dismissedRef = useRef(null); // last dispatch id this driver handled (poll guard)
 
   const { data: dashData, refetch: refetchDash } = useApi('/api/emergency/dashboard/', { pollInterval: 10000 });
-  const { data: dispatch, refetch: refetchDispatch } = useApi('/api/emergency/active-dispatch/', { pollInterval: 10000 });
-  const { data: historyRaw } = useApi('/api/emergency/history/');
+  // We use `unwrap: false` so we can access the `cancelled` and `message` metadata
+  // sent by the backend when a trip was recently cancelled by the patient.
+  const { data: dispatchRes, refetch: refetchDispatch } = useApi('/api/emergency/active-dispatch/', {
+    pollInterval: 4000,
+    unwrap: false,
+  });
+  
+  const dispatch = dispatchRes?.data;
+  const isRecentlyCancelled = dispatchRes?.cancelled;
+  const cancelMessage = dispatchRes?.message;  const { data: historyRaw } = useApi('/api/emergency/history/');
 
   const [tripStats, setTripStats] = useState({
     total_trips: 0,
@@ -96,6 +103,34 @@ const DriverDashboard = () => {
     const id = setInterval(fetchTripStats, 60000);
     return () => clearInterval(id);
   }, []);
+
+  // Keep a ref in sync so the long-lived WebSocket handler can read the current
+  // alert without being re-created on every alert change.
+  useEffect(() => { alertRef.current = emergencyAlert; }, [emergencyAlert]);
+
+  // Poll-backstop popup: the dispatch alert normally arrives instantly over the
+  // emergency WebSocket, but a dropped/reconnecting socket (e.g. after a dev
+  // reload) can miss it. The 4s active-dispatch poll is the safety net — if this
+  // driver has an un-accepted ('dispatched') dispatch and no popup is open,
+  // raise it from poll data. `dismissedRef` stops a just-handled dispatch from
+  // being re-raised before the poll refreshes. (This only OPENS popups; closing
+  // stays with the WS cancel + countdown, since the poll lags the socket.)
+  useEffect(() => {
+    if (!dispatch || dispatch.status !== 'dispatched') return;
+    const id = dispatch.dispatch_id || dispatch.id;
+    if (!id || id === dismissedRef.current || alertRef.current) return;
+    setEmergencyAlert({
+      dispatch_id: id,
+      patient_name: dispatch.patient_name,
+      patient_phone: dispatch.patient_phone,
+      severity: dispatch.severity,
+      distance_km: dispatch.distance_km,
+      hospital_name: dispatch.hospital_name,
+      eta_minutes: dispatch.eta_minutes,
+      timeout_seconds: dispatch.timeout_seconds || 60,
+    });
+    setShowAlert(true);
+  }, [dispatch]);
 
   const history = (historyRaw || []).slice(0, 5);
   const driverName = dashData?.driver_name || user?.full_name || 'Driver';
@@ -155,6 +190,21 @@ const DriverDashboard = () => {
           return;
         }
 
+        // This driver's pending request was superseded (timed out + reassigned,
+        // or another driver accepted the same emergency) → dismiss the popup.
+        if (msg.type === 'dispatch_cancelled' || msg.type === 'emergency_cancelled') {
+          const cancelledId = msg.data?.dispatch_id;
+          if (!cancelledId || alertRef.current?.dispatch_id === cancelledId) {
+            if (cancelledId) dismissedRef.current = cancelledId;
+            setShowAlert(false);
+            setEmergencyAlert(null);
+            toast(msg.data?.message || 'Emergency handled by another driver', { icon: 'ℹ️' });
+          }
+          refetchDash();
+          refetchDispatch();
+          return;
+        }
+
         if (msg.type !== 'emergency_dispatch') return;
 
         setEmergencyAlert(msg.data);
@@ -198,12 +248,14 @@ const DriverDashboard = () => {
 
   const acceptDispatch = async () => {
     const dispatchId = emergencyAlert?.dispatch_id;
-    if (!dispatchId) { setShowAlert(false); return; }
+    if (!dispatchId) { setShowAlert(false); setEmergencyAlert(null); return; }
+    dismissedRef.current = dispatchId; // poll must not re-raise this one
     setAccepting(true);
     try {
       const res = await API.post(`/api/emergency/dispatch/${dispatchId}/accept/`);
       toast.success(res.data?.message || 'Dispatch accepted');
       setShowAlert(false);
+      setEmergencyAlert(null);
       refetchDispatch();
       refetchDash();
     } catch {
@@ -216,7 +268,9 @@ const DriverDashboard = () => {
   const rejectDispatch = async () => {
     const dispatchId = emergencyAlert?.dispatch_id;
     setShowAlert(false);
+    setEmergencyAlert(null);
     if (!dispatchId) return;
+    dismissedRef.current = dispatchId; // poll must not re-raise this one
     setRejecting(true);
     try {
       await API.post(`/api/emergency/dispatch/${dispatchId}/reject/`);
@@ -390,19 +444,31 @@ const DriverDashboard = () => {
                   </p>
                 </div>
               ) : (
-                <div className="flex gap-2 flex-wrap">
-                  {DISPATCH_STATUSES.filter((s) => s !== dispatch.status).map((s) => (
+                (() => {
+                  // Strict order: only the next step is actionable, so "Complete
+                  // Trip" never appears until the driver has marked arrival.
+                  const hasArrived = dispatch.status === 'arrived' || Boolean(dispatch.arrived_at);
+                  const nextStatus = hasArrived ? 'completed' : 'arrived';
+                  return (
                     <button
-                      key={s}
-                      disabled={updatingStatus === s}
-                      onClick={() => updateDispatchStatus(s)}
-                      className="px-4 py-2 rounded-full bg-orange-500 text-white hover:bg-orange-600 text-sm font-semibold disabled:opacity-50"
+                      disabled={updatingStatus === nextStatus}
+                      onClick={() => updateDispatchStatus(nextStatus)}
+                      className="w-full sm:w-auto px-6 py-3 rounded-full text-white text-sm font-bold disabled:opacity-50"
+                      style={{ backgroundColor: hasArrived ? '#22C55E' : '#F97316' }}
                     >
-                      {updatingStatus === s ? '…' : DISPATCH_LABELS[s]}
+                      {updatingStatus === nextStatus
+                        ? '…'
+                        : hasArrived ? '✅ Complete Trip' : '📍 Mark Arrived'}
                     </button>
-                  ))}
-                </div>
+                  );
+                })()
               )}
+            </motion.div>
+          ) : isRecentlyCancelled ? (
+            <motion.div variants={cardVariants} className="rounded-2xl border-2 border-red-400 bg-red-50 p-6 text-center">
+              <span className="text-4xl mb-3 block">🚨</span>
+              <p className="font-bold text-xl text-red-700 mb-2">Trip Cancelled by Patient</p>
+              <p className="text-red-600 font-medium">{cancelMessage}</p>
             </motion.div>
           ) : (
             <div className="dashboard-card text-center py-8 text-muted">No active dispatch</div>

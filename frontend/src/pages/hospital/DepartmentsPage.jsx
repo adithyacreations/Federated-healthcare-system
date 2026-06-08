@@ -9,22 +9,56 @@ const DepartmentsPage = () => {
   const departments = useApi('/api/hospital/departments/');
   const [form, setForm] = useState({ dept_name: '', description: '' });
   const [adding, setAdding] = useState(false);
+  const [deptPhoto, setDeptPhoto] = useState(null);
+  const [deptPhotoPreview, setDeptPhotoPreview] = useState(null);
 
   const deptList = Array.isArray(departments.data) ? departments.data : departments.data?.data || [];
+
+  const handleDeptPhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDeptPhoto(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setDeptPhotoPreview(reader.result);
+    reader.readAsDataURL(file);
+  };
 
   const handleAdd = async (e) => {
     e.preventDefault();
     if (!form.dept_name.trim()) { toast.error('Department name is required'); return; }
     setAdding(true);
     try {
-      await API.post('/api/hospital/departments/add/', form);
+      const formData = new FormData();
+      formData.append('dept_name', form.dept_name);
+      formData.append('description', form.description || '');
+      if (deptPhoto) formData.append('department_photo', deptPhoto);
+      await API.post('/api/hospital/departments/add/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
       toast.success('Department added');
       departments.refetch();
       setForm({ dept_name: '', description: '' });
+      setDeptPhoto(null);
+      setDeptPhotoPreview(null);
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Failed to add department');
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleUpdatePhoto = async (deptId, file) => {
+    if (!file) return;
+    try {
+      const formData = new FormData();
+      formData.append('department_photo', file);
+      await API.put(`/api/hospital/departments/${deptId}/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('Department photo updated');
+      departments.refetch();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to update photo');
     }
   };
 
@@ -48,7 +82,38 @@ const DepartmentsPage = () => {
         <h2 className="flex items-center gap-2 text-base font-bold text-gray-700 mb-4">
           <FiPlus className="w-4 h-4" /> Add Department
         </h2>
-        <form onSubmit={handleAdd} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+        <form onSubmit={handleAdd} className="space-y-3">
+          {/* Optional department photo */}
+          <div className="sm:max-w-xs">
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Department Photo <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <label
+              htmlFor="dept-photo"
+              className="block border-2 border-dashed rounded-xl text-center cursor-pointer transition"
+              style={{
+                borderColor: deptPhotoPreview ? '#F97316' : '#E5E5E5',
+                backgroundColor: deptPhotoPreview ? '#FFF7ED' : 'white',
+                padding: deptPhotoPreview ? '12px' : '16px',
+              }}
+            >
+              <input id="dept-photo" type="file" accept="image/*" className="hidden" onChange={handleDeptPhotoChange} />
+              {deptPhotoPreview ? (
+                <div>
+                  <img src={deptPhotoPreview} alt="Dept preview" className="w-full object-cover rounded-lg" style={{ height: '120px' }} />
+                  <p className="text-xs mt-2" style={{ color: '#F97316' }}>✅ Click to change</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-3xl mb-1">🏥</p>
+                  <p className="font-semibold text-gray-600 text-[13px]">Upload department photo</p>
+                  <p className="text-[11px] text-gray-400">JPG, PNG — Optional</p>
+                </div>
+              )}
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Department Name *</label>
             <input
@@ -75,6 +140,7 @@ const DepartmentsPage = () => {
             <FiPlus className="w-4 h-4" />
             {adding ? 'Adding…' : 'Add Department'}
           </button>
+          </div>
         </form>
       </section>
 
@@ -98,6 +164,40 @@ const DepartmentsPage = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {deptList.map((d) => (
               <div key={d.dept_id} className="card hover:border-primary-200 hover:shadow-md transition border border-transparent">
+                {d.department_photo ? (
+                  <div className="relative group">
+                    <img
+                      src={d.department_photo}
+                      alt={d.dept_name}
+                      className="w-full h-28 object-cover rounded-xl mb-3"
+                    />
+                    <label className="absolute inset-0 bg-black/50 text-white opacity-0 group-hover:opacity-100 transition rounded-xl mb-3 flex items-center justify-center cursor-pointer text-sm font-medium">
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={(e) => handleUpdatePhoto(d.dept_id, e.target.files?.[0])} 
+                      />
+                      Change Photo
+                    </label>
+                  </div>
+                ) : (
+                  <label
+                    className="w-full h-28 rounded-xl mb-3 flex flex-col items-center justify-center text-4xl cursor-pointer hover:bg-orange-100 transition group relative"
+                    style={{ backgroundColor: '#FFF7ED' }}
+                  >
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => handleUpdatePhoto(d.dept_id, e.target.files?.[0])} 
+                    />
+                    🏥
+                    <span className="absolute bottom-2 text-[10px] text-orange-500 font-bold opacity-0 group-hover:opacity-100 transition bg-white/80 px-2 py-0.5 rounded-md">
+                      Add Photo
+                    </span>
+                  </label>
+                )}
                 <div className="flex items-start justify-between mb-3">
                   <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center">
                     <FiBriefcase className="w-5 h-5 text-primary-500" />

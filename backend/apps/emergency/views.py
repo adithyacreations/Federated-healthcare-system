@@ -337,6 +337,35 @@ def release_bed_reservation(bed):
         print(f'[BED] Release error: {exc}')
 
 
+def _release_bed_if_terminal(emergency):
+    """Safety-net: if `emergency` is in a terminal state (cancelled / no_drivers /
+    completed) AND its assigned bed is still reserved, release it now.
+
+    Called from every path that ends an emergency — timeout bail-out, stale-dispatch
+    sweep, reject when not reroutable — so a bed can never stay locked by a dead
+    emergency regardless of which code path ran first or whether there was a race.
+    """
+    if not emergency:
+        return
+    try:
+        emergency.refresh_from_db()
+    except EmergencyRequest.DoesNotExist:
+        return
+    if emergency.status not in ('cancelled', 'no_drivers', 'completed'):
+        return
+    bed = emergency.assigned_bed_id
+    if bed is None:
+        return
+    try:
+        bed.refresh_from_db()
+    except Exception:
+        return
+    if bed.status == 'reserved' and str(getattr(bed, 'emergency_id_id', '')) == str(emergency.emergency_id):
+        release_bed_reservation(bed)
+        print(f'[BED] Safety-net released bed {bed.bed_id} '
+              f'(emergency {emergency.emergency_id} is {emergency.status})')
+
+
 def _reroute_emergency_bed(dispatch, emergency):
     """Reserve a bed at the next-nearest hospital and update the destination."""
     # A bed reroute keeps the SAME (already-accepted) driver and only changes the
@@ -452,11 +481,11 @@ def _eta_minutes_for(distance_km):
 # How long a driver has to accept before we auto-reassign — less urgent cases
 # give the driver more time before moving on.
 SEVERITY_TIMEOUTS = {
-    'critical': 60,
-    'high': 60,
-    'moderate': 180,
-    'low': 300,
-    'non_urgent': 300,
+    'critical': 20,
+    'high': 30,
+    'moderate': 45,
+    'low': 60,
+    'non_urgent': 60,
 }
 
 
@@ -508,10 +537,52 @@ def reap_stale_dispatches(driver=None):
             dispatch.save(update_fields=['dispatch_status'])
             free_ambulance(dispatch)
             cancel_dispatch_timer(dispatch.dispatch_id, 'orphaned — swept on read')
+            _release_bed_if_terminal(dispatch.emergency_id)
             swept += 1
             print(f'[SWEEP] Orphaned dispatch {dispatch.dispatch_id} '
                   f'(> {max_age}s un-accepted) auto-rejected + ambulance freed')
     return swept
+
+
+def reap_orphaned_emergencies():
+    """Catch emergencies stuck at status='dispatched' where ALL dispatches have
+    already been rejected/cancelled — meaning the in-memory auto-reassign timer
+    was lost (server restart/autoreload) and the emergency was never moved to
+    'no_drivers'. Releases the bed and marks the emergency terminal.
+
+    This is the durable backstop for the timer-based reroute chain: if the chain
+    broke mid-way, the emergency sits at 'dispatched' forever with a locked bed.
+    """
+    from django.utils import timezone as dj_tz
+    from datetime import timedelta
+
+    # Only look at emergencies that are old enough (past the longest timeout +
+    # grace) so we don't accidentally reap one mid-dispatch.
+    cutoff = dj_tz.now() - timedelta(seconds=max(SEVERITY_TIMEOUTS.values()) + _STALE_DISPATCH_GRACE + 60)
+    stuck = EmergencyRequest.objects.filter(
+        status='dispatched',
+        created_at__lte=cutoff,
+    ).select_related('assigned_bed_id', 'assigned_hospital_id', 'patient_id', 'patient_id__login_id')
+
+    fixed = 0
+    for emergency in stuck:
+        # Check if there are ANY active dispatches left
+        active = AmbulanceDispatch.objects.filter(
+            emergency_id=emergency,
+            dispatch_status__in=['dispatched', 'en_route', 'arrived', 'pending_acknowledgment'],
+        ).exists()
+        if active:
+            continue  # Still has a live dispatch — not orphaned
+
+        # All dispatches are rejected/cancelled/completed — this emergency is dead
+        emergency.status = 'no_drivers'
+        emergency.save(update_fields=['status', 'updated_at'])
+        release_bed_reservation(emergency.assigned_bed_id)
+        fixed += 1
+        print(f'[SWEEP] Orphaned emergency {emergency.emergency_id} '
+              f'(all dispatches rejected) → no_drivers + bed released')
+
+    return fixed
 
 
 def assign_next_ambulance(emergency):
@@ -526,16 +597,25 @@ def assign_next_ambulance(emergency):
     # dispatching to a new driver (the "phantom re-dispatch").
     if not should_reroute(emergency):
         print('[REROUTE] Emergency not active — no reassignment.')
+        _release_bed_if_terminal(emergency)
         return None
 
+    # Exclude EVERY ambulance that has already had ANY dispatch for this
+    # emergency — rejected, timed-out, or cancelled. Once an ambulance has been
+    # offered this emergency it must never be offered the same one again, so a
+    # driver who declined can't be re-asked after the next driver also declines.
+    # (should_reroute above already bailed if an accepted/active dispatch exists,
+    # so this set is only the exhausted ones.)
     tried_ids = list(
         AmbulanceDispatch.objects.filter(
-            emergency_id=emergency, dispatch_status='rejected',
-        ).values_list('ambulance_id', flat=True)
+            emergency_id=emergency,
+        ).values_list('ambulance_id', flat=True).distinct()
     )
+    print(f'[REROUTE] Excluded ambulances (already tried): {tried_ids}')
     nearest, distance = find_nearest_ambulance(
         float(emergency.patient_lat), float(emergency.patient_lng),
         exclude_ids=tried_ids,
+        radius_km=50,
     )
 
     patient_group = f'emergency_{emergency.patient_id.login_id.login_id}'
@@ -545,6 +625,11 @@ def assign_next_ambulance(emergency):
         print('[EMERGENCY] No more ambulances available — notifying patient to call 108.')
         emergency.status = 'no_drivers'
         emergency.save(update_fields=['status'])
+
+        # ── Release the reserved bed — no driver is coming ──
+        _release_bed_if_terminal(emergency)
+        cancel_emergency_timers(emergency, 'no_drivers — bed released')
+
         send_notification(
             emergency.patient_id.login_id,
             '❌ No Ambulance Available!',
@@ -619,17 +704,23 @@ def schedule_dispatch_timeout(dispatch_id, seconds=None):
             ).get(dispatch_id=dispatch_id)
             print(f'[EMERGENCY] Auto-reject triggered for dispatch {dispatch_id}')
             print(f'[EMERGENCY] Dispatch status: {dispatch.dispatch_status}')
-            # If the patient cancelled, a driver already accepted, or the trip
-            # otherwise ended while this timer was pending, stand down — do NOT
-            # auto-reject + reroute, or we'd dispatch a new driver to a trip
-            # that's already handled.
+            # FIRST guard — cheapest + most direct: the re-read above is fresh
+            # from the DB, so if this dispatch is no longer 'dispatched' (driver
+            # accepted → en_route, or it was rejected / cancelled / completed
+            # while the timer was pending) the timer is stale. Stand down — never
+            # reroute. This is the line that stops a request reaching a 2nd
+            # driver after the 1st already accepted.
+            if dispatch.dispatch_status != 'dispatched':
+                print(f"[EMERGENCY] STOP: status is '{dispatch.dispatch_status}', "
+                      f"not 'dispatched' — no reroute.")
+                return
+            # Then the broader guard: patient cancelled / marked safe, the
+            # emergency ended, or another driver already accepted it.
             if not should_reroute(dispatch.emergency_id, dispatch):
                 print('[EMERGENCY] Emergency not reroutable — aborting auto-reject/reroute.')
-                return
-            # Still 'dispatched' means the driver never accepted (accept moves
-            # it to 'en_route'). Treat as a no-response and move on.
-            if dispatch.dispatch_status != 'dispatched':
-                print('[EMERGENCY] Already accepted/handled — no action.')
+                # Safety net: release bed if the emergency ended but the bed
+                # wasn't released by the cancel/ImSafe path (race condition).
+                _release_bed_if_terminal(dispatch.emergency_id)
                 return
             dispatch.dispatch_status = 'rejected'
             dispatch.save(update_fields=['dispatch_status'])
@@ -725,6 +816,9 @@ class DriverDashboardView(APIView):
         # Reap orphaned 'dispatched' rows so the dashboard's active-dispatch
         # card reflects reality after a restart / interrupted run.
         reap_stale_dispatches(driver)
+        # Also catch emergencies stuck at 'dispatched' with no active dispatches
+        # (all drivers rejected but the timer was lost to a restart).
+        reap_orphaned_emergencies()
 
         dispatches = AmbulanceDispatch.objects.filter(
             ambulance_id__driver_id=driver
@@ -1051,12 +1145,14 @@ class RejectDispatchView(APIView):
         if dispatch.dispatch_status != 'dispatched':
             return err('This dispatch can no longer be rejected.', status_code=400)
 
+        # Cancel the auto-reassign timer FIRST — before flipping status — so it
+        # can't fire mid-reject and trigger a SECOND reroute alongside the one
+        # below (which would dispatch two drivers at once). The reassignment
+        # further down starts a fresh timer for the next driver.
+        cancel_dispatch_timer(dispatch.dispatch_id, 'driver rejected')
+
         dispatch.dispatch_status = 'rejected'
         dispatch.save(update_fields=['dispatch_status'])
-
-        # Driver rejected this one → cancel its timer (reassignment below starts
-        # a fresh timer for the next driver).
-        cancel_dispatch_timer(dispatch.dispatch_id, 'driver rejected')
 
         # Free this ambulance + driver so they remain eligible for others.
         free_ambulance(dispatch)
@@ -1066,6 +1162,7 @@ class RejectDispatchView(APIView):
         # If the patient already cancelled, or another driver already accepted
         # this emergency, a reject here must NOT trigger a reroute.
         if not should_reroute(emergency, dispatch):
+            _release_bed_if_terminal(emergency)
             return ok('Dispatch rejected. Emergency no longer reroutable — no reassignment.')
 
         send_notification(
@@ -1164,6 +1261,15 @@ class UpdateDispatchStatusView(APIView):
             # Guards against a direct API call (or a stale UI) skipping the step.
             if dispatch.dispatch_status != 'arrived':
                 return err('Please mark the ambulance as arrived first.', status_code=400)
+            # Gate completion on the receiving hospital confirming a prepared bed
+            # (set by MarkBedReadyView) — a patient must never be handed over
+            # before the hospital is ready to admit them.
+            if not dispatch.bed_ready:
+                return err(
+                    'Hospital has not marked a bed ready yet. Please wait for the '
+                    'bed-ready confirmation before completing the trip.',
+                    status_code=400,
+                )
             # Driver finished the trip, but the ambulance stays UNAVAILABLE
             # until the receiving hospital acknowledges the patient arrival.
             dispatch.dispatch_status = 'pending_acknowledgment'
@@ -1405,6 +1511,8 @@ class DriverTripStatsView(APIView):
             dispatch_status__in=['completed', 'cancelled'],
         ).order_by('-dispatched_at')[:20]
 
+        from django.utils.timezone import localtime
+
         recent_trips = []
         for d in history_qs:
             try:
@@ -1419,13 +1527,16 @@ class DriverTripStatsView(APIView):
                         and emergency.cancelled_by == 'driver'
                         and emergency.driver_report_type == 'patient_not_found'):
                     disp_status = 'patient_not_found'
+                    
+                local_dt = localtime(d.dispatched_at) if d.dispatched_at else None
+                
                 recent_trips.append({
                     'dispatch_id': str(d.dispatch_id),
                     'patient_name': emergency.patient_id.full_name,
                     'severity': emergency.severity,
                     'hospital_name': hospital,
-                    'date': d.dispatched_at.strftime('%d %b %Y'),
-                    'time': d.dispatched_at.strftime('%I:%M %p'),
+                    'date': local_dt.strftime('%d %b %Y') if local_dt else '',
+                    'time': local_dt.strftime('%I:%M %p') if local_dt else '',
                     'distance_km': float(getattr(d, 'distance_km', 0) or 0),
                     'completed_at': str(d.completed_at) if d.completed_at else '',
                     'status': disp_status,
@@ -1502,6 +1613,9 @@ class IncomingPatientsView(APIView):
             hospital = HospitalRegistration.objects.get(login_id=request.user)
         except HospitalRegistration.DoesNotExist:
             return err('Hospital profile not found.', status_code=404)
+
+        # Sweep orphaned emergencies so beds aren't stuck from dead dispatches.
+        reap_orphaned_emergencies()
 
         active_statuses = ['arrived', 'pending_acknowledgment']
         related = (

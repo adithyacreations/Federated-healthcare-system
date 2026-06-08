@@ -74,7 +74,12 @@ export const AuthProvider = ({ children }) => {
     setRole(userRole);
     setUser(profile);
 
-    return { success: true, role: userRole };
+    return {
+      success: true,
+      role: userRole,
+      // Staff created with a temporary password must set a real one first.
+      force_password_change: Boolean(payload.force_password_change),
+    };
   };
 
   const logout = async () => {

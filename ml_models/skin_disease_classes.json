@@ -1,0 +1,19 @@
+{
+  "classes": [
+    "Benign Lesion",
+    "Inflammatory Infection",
+    "Melanoma",
+    "Skin Cancer"
+  ],
+  "num_classes": 4,
+  "model_type": "skin_disease",
+  "input_size": 224,
+  "accuracy": 0.7821,
+  "top3_accuracy": 0.9975,
+  "class_descriptions": {
+    "Melanoma": "Melanoma - Malignant skin cancer",
+    "Skin Cancer": "Basal Cell Carcinoma - Skin cancer",
+    "Benign Lesion": "Benign skin lesions - Non-cancerous",
+    "Inflammatory Infection": "Inflammatory and infectious skin conditions"
+  }
+}

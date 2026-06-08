@@ -43,7 +43,6 @@ const EpidemicPage = () => {
   const allTrends = epidemic.data?.trends || [];
   const activeEpidemics = epidemic.data?.active
     || allTrends.filter((t) => !t.is_resolved);
-  const spikes = activeEpidemics.filter((t) => t.spike_detected);
 
   const openResolveModal = (ep) => {
     setSelectedEpidemic(ep);
@@ -276,33 +275,44 @@ const EpidemicPage = () => {
         </div>
       </section>
 
-      {/* ─── Section 1: Active Spike Alerts ─────────────────── */}
+      {/* ─── Section 1: Active Epidemic Alerts ──────────────── */}
       <section className="mb-8">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-primary-500 mb-4">
           <FiAlertTriangle className="w-5 h-5 text-danger" />
-          Active Spike Alerts
-          {spikes.length > 0 && (
+          Active Epidemic Alerts
+          {activeEpidemics.length > 0 && (
             <span className="ml-1 text-xs bg-danger text-white px-2 py-0.5 rounded-full font-bold">
-              {spikes.length}
+              {activeEpidemics.length}
             </span>
           )}
         </h2>
         {epidemic.loading ? (
           <div className="card text-center text-gray-400 text-sm py-6">Loading…</div>
-        ) : spikes.length === 0 ? (
+        ) : activeEpidemics.length === 0 ? (
           <div className="card text-center py-8">
             <div className="text-4xl mb-2">🌿</div>
-            <div className="text-gray-500 font-medium">No active epidemic spikes.</div>
+            <div className="text-gray-500 font-medium">No active epidemic alerts.</div>
             <div className="text-gray-400 text-sm mt-1">All regions are clear.</div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {spikes.map((t) => {
+            {activeEpidemics.map((t) => {
               const s = LEVEL_STYLES[t.alert_level] || LEVEL_STYLES.low;
               return (
                 <div key={t.trend_id} className={`rounded-2xl border-2 p-5 ${s.card}`}>
-                  <div className="flex items-start justify-between mb-3">
-                    <h4 className="font-bold text-xl text-gray-800">{t.disease_name}</h4>
+                  <div className="flex items-start justify-between mb-3 gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-bold text-xl text-gray-800">{t.disease_name}</h4>
+                      {t.spike_detected ? (
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-danger">
+                          🤖 Auto-Detected
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#FFF7ED', color: '#F97316' }}>
+                          ✍️ Manual
+                        </span>
+                      )}
+                    </div>
                     <AlertBadge level={t.alert_level} />
                   </div>
                   <div className="space-y-1.5 text-sm text-gray-700">
@@ -320,9 +330,11 @@ const EpidemicPage = () => {
                     </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1 text-xs font-semibold text-danger">
-                      🚨 Spike Detected
-                    </span>
+                    {t.spike_detected ? (
+                      <span className="flex items-center gap-1 text-xs font-semibold text-danger">
+                        🚨 Spike Detected
+                      </span>
+                    ) : <span />}
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleBroadcast(t)}
@@ -331,12 +343,14 @@ const EpidemicPage = () => {
                       >
                         <FiBell className="w-3.5 h-3.5" /> Send Alert
                       </button>
-                      <button
-                        onClick={() => openResolveModal(t)}
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold bg-orange-500 text-white px-3 py-1.5 rounded-lg hover:bg-orange-600 transition"
-                      >
-                        <FiCheckCircle className="w-3.5 h-3.5" /> Resolve
-                      </button>
+                      {!t.is_resolved && (
+                        <button
+                          onClick={() => openResolveModal(t)}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold bg-orange-500 text-white px-3 py-1.5 rounded-lg hover:bg-orange-600 transition"
+                        >
+                          <FiCheckCircle className="w-3.5 h-3.5" /> Resolve
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
