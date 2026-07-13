@@ -1,82 +1,253 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import toast from 'react-hot-toast';
+import {
+  FiCalendar, FiClock, FiEdit2, FiLock, FiRefreshCcw, FiSave, FiTrash2, FiX,
+} from 'react-icons/fi';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
+import Modal from '../../components/common/Modal';
 import API from '../../api/axios';
 import { cleanDoctorName } from '../../utils/nameUtils';
 
-const AVAILABILITY_INFO = {
-  in_consultation: {
-    label: 'In Consultation', color: '#F97316', bg: '#FFF7ED', dot: '#F97316', icon: '🔴',
-  },
-  has_slots: {
-    label: 'Available', color: '#22C55E', bg: '#F0FDF4', dot: '#22C55E', icon: '🟢',
-  },
-  done_for_day: {
-    label: 'Done for Today', color: '#666666', bg: '#F3F4F6', dot: '#666666', icon: '⚫',
-  },
-  no_slots: {
-    label: 'No Schedule', color: '#999999', bg: '#FAFAFA', dot: '#CCCCCC', icon: '⚪',
-  },
-};
-
-const SLOT_COLOR = {
-  available:   { bg: '#F0FDF4', border: '#86EFAC', text: '#16A34A' },
-  booked:      { bg: '#FFF7ED', border: '#FED7AA', text: '#F97316' },
-  in_progress: { bg: '#FEF2F2', border: '#FCA5A5', text: '#DC2626' },
-  completed:   { bg: '#F3F4F6', border: '#D1D5DB', text: '#9CA3AF' },
-  past:        { bg: '#F9FAFB', border: '#E5E7EB', text: '#9CA3AF' },
-};
-
-const FILTER_TABS = [
-  { key: 'all',             label: 'All Doctors' },
-  { key: 'in_consultation', label: '🔴 In Consultation' },
-  { key: 'has_slots',       label: '🟢 Available' },
-  { key: 'done_for_day',    label: '⚫ Done' },
-  { key: 'no_slots',        label: '⚪ No Schedule' },
+const DAYS = [
+  { key: 'monday', label: 'Mon' },
+  { key: 'tuesday', label: 'Tue' },
+  { key: 'wednesday', label: 'Wed' },
+  { key: 'thursday', label: 'Thu' },
+  { key: 'friday', label: 'Fri' },
+  { key: 'saturday', label: 'Sat' },
+  { key: 'sunday', label: 'Sun' },
 ];
+
+const BLANK_FORM = {
+  doctor_id: '',
+  working_days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  start_time: '09:00',
+  end_time: '17:00',
+  slot_duration_minutes: 30,
+  consultation_type: 'both',
+  consultation_fee: '500',
+  is_active: true,
+  days_ahead: 30,
+};
+
+const STATUS_STYLE = {
+  available: { bg: '#f0fdf4', border: '#bbf7d0', text: '#15803d' },
+  booked: { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c' },
+  in_progress: { bg: '#fef2f2', border: '#fecaca', text: '#dc2626' },
+  completed: { bg: '#f3f4f6', border: '#d1d5db', text: '#6b7280' },
+  past: { bg: '#f9fafb', border: '#e5e7eb', text: '#9ca3af' },
+  blocked: { bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' },
+};
 
 const todayISO = () => new Date().toISOString().split('T')[0];
 
+const typeLabel = (value) => {
+  if (value === 'both') return 'Online or offline';
+  if (value === 'offline' || value === 'in_person') return 'Offline';
+  return 'Online';
+};
+
 const DoctorSchedulePage = () => {
-  const [schedule, setSchedule] = useState([]);
+  const [dailySchedule, setDailySchedule] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [schedules, setSchedules] = useState([]);
+  const [doctors, setDoctors] = useState([]);
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [expandedDoctor, setExpandedDoctor] = useState(null);
-  const [filterAvailability, setFilterAvailability] = useState('all');
+  const [editingSchedule, setEditingSchedule] = useState(null);
+  const [form, setForm] = useState(BLANK_FORM);
+  const [blockSlot, setBlockSlot] = useState(null);
+  const [blockReason, setBlockReason] = useState('');
+  const [blocking, setBlocking] = useState(false);
+  const [deletingSchedule, setDeletingSchedule] = useState(null);
+
+  const approvedDoctors = useMemo(
+    () => doctors.filter((d) => d.approval_status === 'approved' && d.is_active !== false),
+    [doctors],
+  );
+
+  const visibleSchedules = useMemo(() => {
+    const seen = new Set();
+    return schedules.filter((schedule) => {
+      const doctorId = String(schedule.doctor || '');
+      if (seen.has(doctorId)) return false;
+      seen.add(doctorId);
+      return true;
+    });
+  }, [schedules]);
+
+  const scheduledDoctorIds = useMemo(
+    () => new Set(visibleSchedules.map((schedule) => String(schedule.doctor))),
+    [visibleSchedules],
+  );
+
+  const fetchBoard = async () => {
+    const res = await API.get(`/api/hospital/doctor-schedule/?date=${selectedDate}`);
+    if (res.data?.success) {
+      setDailySchedule(res.data.data || []);
+      setSummary(res.data.summary || null);
+    }
+  };
+
+  const fetchSchedules = async () => {
+    const res = await API.get('/api/hospital/doctor-schedules/');
+    if (res.data?.success) setSchedules(res.data.data?.schedules || []);
+  };
+
+  const fetchDoctors = async () => {
+    const res = await API.get('/api/hospital/doctors/');
+    if (res.data?.success) setDoctors(res.data.data || []);
+  };
+
+  const loadAll = async () => {
+    try {
+      setLoading(true);
+      await Promise.all([fetchBoard(), fetchSchedules(), fetchDoctors()]);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not load schedule data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchSchedule = async () => {
-      try {
-        setLoading(true);
-        const res = await API.get(`/api/hospital/doctor-schedule/?date=${selectedDate}`);
-        if (res.data?.success) {
-          setSchedule(res.data.data || []);
-          setSummary(res.data.summary || null);
-        }
-      } catch (e) {
-        /* best-effort */
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchSchedule();
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate]);
 
-  const filteredSchedule = schedule.filter(
-    (d) => filterAvailability === 'all' || d.availability === filterAvailability,
-  );
+  const toggleDay = (day) => {
+    setForm((current) => {
+      const set = new Set(current.working_days);
+      if (set.has(day)) set.delete(day);
+      else set.add(day);
+      return { ...current, working_days: DAYS.map((d) => d.key).filter((key) => set.has(key)) };
+    });
+  };
+
+  const resetForm = () => {
+    setEditingSchedule(null);
+    setForm(BLANK_FORM);
+  };
+
+  const editSchedule = (schedule) => {
+    setEditingSchedule(schedule);
+    setForm({
+      doctor_id: schedule.doctor,
+      working_days: schedule.working_days || [],
+      start_time: String(schedule.start_time || '09:00').slice(0, 5),
+      end_time: String(schedule.end_time || '17:00').slice(0, 5),
+      slot_duration_minutes: schedule.slot_duration_minutes,
+      consultation_type: schedule.consultation_type,
+      consultation_fee: String(schedule.consultation_fee ?? ''),
+      is_active: schedule.is_active,
+      days_ahead: 30,
+    });
+  };
+
+  const submitSchedule = async (e) => {
+    e.preventDefault();
+    if (!form.doctor_id) return toast.error('Select a doctor');
+    if (!editingSchedule && scheduledDoctorIds.has(String(form.doctor_id))) {
+      return toast.error('This doctor already has a schedule. Click Edit to change it.');
+    }
+    if (!form.working_days.length) return toast.error('Working days cannot be empty');
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        slot_duration_minutes: Number(form.slot_duration_minutes),
+        consultation_fee: Number(form.consultation_fee || 0),
+        days_ahead: Number(form.days_ahead || 30),
+      };
+      const response = editingSchedule
+        ? await API.put(`/api/hospital/doctor-schedules/${editingSchedule.schedule_id}/`, payload)
+        : await API.post('/api/hospital/doctor-schedules/', payload);
+      toast.success(response.data?.message || 'Doctor schedule created successfully');
+      if (response.data?.data?.slot_message) toast.success(response.data.data.slot_message);
+      resetForm();
+      await Promise.all([fetchBoard(), fetchSchedules()]);
+    } catch (err) {
+      const data = err?.response?.data;
+      const errors = data?.errors && typeof data.errors === 'object'
+        ? Object.values(data.errors).flat().join(' ')
+        : '';
+      toast.error(errors || data?.message || 'Could not save schedule');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleScheduleActive = async (schedule) => {
+    try {
+      const payload = {
+        doctor_id: schedule.doctor,
+        working_days: schedule.working_days,
+        start_time: String(schedule.start_time).slice(0, 5),
+        end_time: String(schedule.end_time).slice(0, 5),
+        slot_duration_minutes: schedule.slot_duration_minutes,
+        consultation_type: schedule.consultation_type,
+        consultation_fee: schedule.consultation_fee,
+        is_active: !schedule.is_active,
+        days_ahead: 30,
+      };
+      const response = await API.put(`/api/hospital/doctor-schedules/${schedule.schedule_id}/`, payload);
+      toast.success(response.data?.message || 'Doctor schedule updated successfully');
+      await Promise.all([fetchBoard(), fetchSchedules()]);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not update schedule');
+    }
+  };
+
+  const deleteSchedule = async (schedule) => {
+    const okToDelete = window.confirm(
+      `Delete schedule for ${cleanDoctorName(schedule.doctor_name)}? Booked consultation history will be preserved.`,
+    );
+    if (!okToDelete) return;
+
+    setDeletingSchedule(schedule.schedule_id);
+    try {
+      const response = await API.delete(`/api/hospital/doctor-schedules/${schedule.schedule_id}/`);
+      toast.success(response.data?.message || 'Doctor schedule deleted successfully');
+      if (editingSchedule?.schedule_id === schedule.schedule_id) resetForm();
+      await Promise.all([fetchBoard(), fetchSchedules()]);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not delete schedule');
+    } finally {
+      setDeletingSchedule(null);
+    }
+  };
+
+  const submitBlock = async (e) => {
+    e.preventDefault();
+    if (!blockSlot) return;
+    setBlocking(true);
+    try {
+      await API.post(`/api/hospital/doctor-slots/${blockSlot.slot_id}/block/`, {
+        block_reason: blockReason,
+      });
+      toast.success('Slot blocked successfully');
+      setBlockSlot(null);
+      setBlockReason('');
+      await fetchBoard();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not block slot');
+    } finally {
+      setBlocking(false);
+    }
+  };
 
   return (
     <DashboardLayout>
-      <div className="p-6 min-h-screen" style={{ backgroundColor: '#FAF7F2' }}>
-        {/* Header */}
+      <div className="p-6 min-h-screen" style={{ backgroundColor: '#fff6ec' }}>
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-black">📅 Doctor Schedule</h1>
+            <h1 className="font-bricolage text-3xl font-extrabold text-black">Doctor Schedule Management</h1>
             <p className="text-gray-500 text-sm mt-1">
-              View all doctor availability and today's consultations
+              Create hospital-controlled schedules, generate slots, and manage slot blocks.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -88,182 +259,365 @@ const DoctorSchedulePage = () => {
             />
             <button
               onClick={() => setSelectedDate(todayISO())}
-              className="px-4 py-2 rounded-xl text-sm font-medium text-white"
-              style={{ backgroundColor: '#F97316' }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white"
+              style={{ backgroundColor: '#ff4f01' }}
             >
-              Today
+              <FiCalendar className="w-4 h-4" /> Today
+            </button>
+            <button
+              onClick={loadAll}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold bg-black text-white"
+            >
+              <FiRefreshCcw className="w-4 h-4" /> Refresh
             </button>
           </div>
         </div>
 
-        {/* Summary */}
-        {summary && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
-              <p className="text-2xl font-bold text-black">{summary.total_doctors}</p>
-              <p className="text-xs text-gray-500 mt-1">👨‍⚕️ Total Doctors</p>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
+          <motion.form
+            onSubmit={submitSchedule}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="xl:col-span-1 bg-white rounded-2xl border border-gray-200 p-5 h-fit"
+          >
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="font-bold text-black">{editingSchedule ? 'Edit Schedule' : 'Create Schedule'}</h2>
+              {editingSchedule && (
+                <button type="button" onClick={resetForm} className="p-2 rounded-full hover:bg-orange-50" aria-label="Cancel edit">
+                  <FiX className="w-4 h-4" />
+                </button>
+              )}
             </div>
-            <div className="rounded-2xl p-4 text-center" style={{ backgroundColor: '#FEF2F2' }}>
-              <p className="text-2xl font-bold text-red-600">{summary.in_consultation}</p>
-              <p className="text-xs text-red-500 mt-1">🔴 In Consultation</p>
-            </div>
-            <div className="rounded-2xl p-4 text-center" style={{ backgroundColor: '#F0FDF4' }}>
-              <p className="text-2xl font-bold text-green-600">{summary.has_slots}</p>
-              <p className="text-xs text-green-500 mt-1">🟢 Available</p>
-            </div>
-            <div className="bg-gray-50 rounded-2xl p-4 text-center">
-              <p className="text-2xl font-bold text-gray-600">{summary.no_slots}</p>
-              <p className="text-xs text-gray-400 mt-1">⚪ No Schedule</p>
-            </div>
-          </div>
-        )}
 
-        {/* Filter tabs */}
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-          {FILTER_TABS.map((tab) => {
-            const active = filterAvailability === tab.key;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => setFilterAvailability(tab.key)}
-                className="px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all"
-                style={{
-                  backgroundColor: active ? '#F97316' : '#FFFFFF',
-                  color: active ? '#FFFFFF' : '#000000',
-                  border: active ? 'none' : '1px solid #E5E5E5',
-                }}
-              >
-                {tab.label}
-                {tab.key !== 'all' && summary && (
-                  <span className="ml-1">({summary[tab.key] || 0})</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Loading */}
-        {loading && (
-          <div className="text-center py-12">
-            <p className="text-gray-400">Loading schedule...</p>
-          </div>
-        )}
-
-        {/* Doctor cards */}
-        {!loading && (
-          <div className="space-y-3">
-            {filteredSchedule.length === 0 ? (
-              <div className="bg-white rounded-2xl p-12 text-center">
-                <p className="text-4xl mb-3">📅</p>
-                <p className="font-semibold text-gray-700">No doctors found</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Doctor</label>
+                <select
+                  value={form.doctor_id}
+                  onChange={(e) => setForm({ ...form, doctor_id: e.target.value })}
+                  disabled={Boolean(editingSchedule)}
+                  className={`w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400 ${
+                    editingSchedule ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : 'bg-white'
+                  }`}
+                  required
+                >
+                  <option value="">Select doctor</option>
+                  {approvedDoctors.map((doctor) => {
+                    const alreadyScheduled = !editingSchedule && scheduledDoctorIds.has(String(doctor.doctor_id));
+                    return (
+                      <option key={doctor.doctor_id} value={doctor.doctor_id} disabled={alreadyScheduled}>
+                        {cleanDoctorName(doctor.full_name)} - {doctor.specialization}
+                        {alreadyScheduled ? ' (scheduled)' : ''}
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
-            ) : (
-              filteredSchedule.map((doctor) => {
-                const availInfo = AVAILABILITY_INFO[doctor.availability] || AVAILABILITY_INFO.no_slots;
-                const isExpanded = expandedDoctor === doctor.doctor_id;
 
-                return (
-                  <motion.div
-                    key={doctor.doctor_id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="bg-white rounded-2xl border border-gray-100 overflow-hidden"
-                  >
-                    <button
-                      onClick={() => setExpandedDoctor(isExpanded ? null : doctor.doctor_id)}
-                      className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors text-left"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div
-                          className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
-                          style={{ backgroundColor: '#F97316' }}
-                        >
-                          {doctor.full_name?.charAt(0)}
-                        </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-2">Working Days</label>
+                <div className="grid grid-cols-7 gap-1">
+                  {DAYS.map((day) => {
+                    const active = form.working_days.includes(day.key);
+                    return (
+                      <button
+                        key={day.key}
+                        type="button"
+                        onClick={() => toggleDay(day.key)}
+                        className="h-10 rounded-full text-xs font-semibold border cursor-pointer"
+                        style={{
+                          backgroundColor: active ? '#ff4f01' : '#fff',
+                          color: active ? '#000' : '#666',
+                          borderColor: active ? '#ff4f01' : '#e5e5e5',
+                        }}
+                      >
+                        {day.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Start Time</label>
+                  <input
+                    type="time"
+                    value={form.start_time}
+                    onChange={(e) => setForm({ ...form, start_time: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">End Time</label>
+                  <input
+                    type="time"
+                    value={form.end_time}
+                    onChange={(e) => setForm({ ...form, end_time: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Slot Duration</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={form.slot_duration_minutes}
+                    onChange={(e) => setForm({ ...form, slot_duration_minutes: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1">Fee</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.consultation_fee}
+                    onChange={(e) => setForm({ ...form, consultation_fee: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Consultation Type</label>
+                <select
+                  value={form.consultation_type}
+                  onChange={(e) => setForm({ ...form, consultation_type: e.target.value })}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
+                >
+                  <option value="online">Online</option>
+                  <option value="offline">Offline</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
+
+              <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2.5 cursor-pointer">
+                <span className="text-sm font-medium text-gray-700">Active schedule</span>
+                <input
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                  className="h-4 w-4 accent-orange-500"
+                />
+              </label>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 font-semibold disabled:opacity-60"
+                style={{ backgroundColor: '#ff4f01', color: '#000' }}
+              >
+                <FiSave className="w-4 h-4" /> {saving ? 'Saving...' : editingSchedule ? 'Update Schedule' : 'Create Schedule'}
+              </button>
+            </div>
+          </motion.form>
+
+          <div className="xl:col-span-2 space-y-4">
+            <div className="bg-white rounded-2xl border border-gray-200 p-5">
+              <h2 className="font-bold text-black mb-4">Saved Schedules</h2>
+              {visibleSchedules.length === 0 ? (
+                <p className="text-sm text-gray-500">No doctor schedules created yet.</p>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {visibleSchedules.map((schedule) => (
+                    <div key={schedule.schedule_id} className="rounded-xl border border-gray-200 p-4 bg-[#fffaf5]">
+                      <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="font-bold text-black">{cleanDoctorName(doctor.full_name)}</p>
-                          <p className="text-sm text-gray-500">{doctor.specialization || 'General'}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {doctor.completed_slots}/{doctor.booked_slots} completed · {doctor.total_slots} total slots
-                          </p>
+                          <p className="font-bold text-black">{cleanDoctorName(schedule.doctor_name)}</p>
+                          <p className="text-xs text-gray-500">{schedule.specialization || 'General'}</p>
                         </div>
-                      </div>
-
-                      <div className="flex items-center gap-3">
                         <span
-                          className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1"
-                          style={{ backgroundColor: availInfo.bg, color: availInfo.color }}
+                          className="text-xs px-2.5 py-1 rounded-full font-semibold"
+                          style={{
+                            backgroundColor: schedule.is_active ? '#f0fdf4' : '#f3f4f6',
+                            color: schedule.is_active ? '#15803d' : '#6b7280',
+                          }}
                         >
-                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: availInfo.dot }} />
-                          {availInfo.label}
-                        </span>
-                        <span className={`text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
-                          ▼
+                          {schedule.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </div>
-                    </button>
-
-                    {isExpanded && (
-                      <div className="px-4 pb-4 border-t border-gray-50">
-                        {doctor.slots.length === 0 ? (
-                          <p className="text-center text-gray-400 text-sm py-4">
-                            No slots scheduled
-                          </p>
-                        ) : (
-                          <div className="mt-3">
-                            <p className="text-xs text-gray-500 mb-2 font-medium">Time Slots:</p>
-                            <div className="flex flex-wrap gap-2">
-                              {doctor.slots.map((slot) => {
-                                const c = SLOT_COLOR[slot.status] || SLOT_COLOR.available;
-                                return (
-                                  <div
-                                    key={slot.slot_id}
-                                    className="px-3 py-2 rounded-xl border text-xs"
-                                    style={{ backgroundColor: c.bg, borderColor: c.border, color: c.text }}
-                                  >
-                                    <p className="font-semibold">
-                                      {slot.start_time?.slice(0, 5)} - {slot.end_time?.slice(0, 5)}
-                                    </p>
-                                    {slot.patient_name && (
-                                      <p className="truncate max-w-24 mt-0.5">👤 {slot.patient_name}</p>
-                                    )}
-                                    <p className="capitalize mt-0.5">
-                                      {String(slot.status).replace('_', ' ')}
-                                      {slot.consult_type === 'online' ? ' 💻' : ' 🏥'}
-                                    </p>
-                                  </div>
-                                );
-                              })}
-                            </div>
-
-                            {doctor.booked_slots > 0 && (
-                              <div className="mt-3">
-                                <div className="flex justify-between text-xs text-gray-400 mb-1">
-                                  <span>Progress</span>
-                                  <span>{doctor.completed_slots}/{doctor.booked_slots} done</span>
-                                </div>
-                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                  <div
-                                    className="h-full rounded-full"
-                                    style={{
-                                      width: `${(doctor.completed_slots / doctor.booked_slots) * 100}%`,
-                                      backgroundColor: '#F97316',
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                      <div className="grid grid-cols-2 gap-2 mt-4 text-sm">
+                        <div className="flex items-center gap-2 text-gray-700">
+                          <FiClock className="w-4 h-4 text-orange-500" />
+                          {String(schedule.start_time).slice(0, 5)}-{String(schedule.end_time).slice(0, 5)}
+                        </div>
+                        <div className="text-gray-700">{schedule.slot_duration_minutes} min slots</div>
+                        <div className="text-gray-700">₹{Number(schedule.consultation_fee || 0).toFixed(0)}</div>
+                        <div className="text-gray-700">{typeLabel(schedule.consultation_type)}</div>
                       </div>
-                    )}
-                  </motion.div>
-                );
-              })
+                      <p className="text-xs text-gray-500 mt-3 capitalize">{(schedule.working_days || []).join(', ')}</p>
+                      <div className="flex gap-2 mt-4">
+                        <button
+                          onClick={() => editSchedule(schedule)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white bg-black"
+                        >
+                          <FiEdit2 className="w-3.5 h-3.5" /> Edit
+                        </button>
+                        <button
+                          onClick={() => toggleScheduleActive(schedule)}
+                          className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 bg-white"
+                        >
+                          {schedule.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                        <button
+                          onClick={() => deleteSchedule(schedule)}
+                          disabled={deletingSchedule === schedule.schedule_id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-60"
+                        >
+                          <FiTrash2 className="w-3.5 h-3.5" />
+                          {deletingSchedule === schedule.schedule_id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {summary && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  ['Doctors', summary.total_doctors],
+                  ['In Consultation', summary.in_consultation],
+                  ['Available', summary.has_slots],
+                  ['No Schedule', summary.no_slots],
+                ].map(([label, value]) => (
+                  <div key={label} className="bg-white rounded-2xl border border-gray-200 p-4">
+                    <p className="text-2xl font-extrabold text-black">{value}</p>
+                    <p className="text-xs text-gray-500 mt-1">{label}</p>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-        )}
+        </div>
+
+        <div className="space-y-3">
+          {loading ? (
+            <div className="bg-white rounded-2xl border border-gray-200 p-8 text-sm text-gray-500">Loading schedule...</div>
+          ) : dailySchedule.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-500">No doctors found.</div>
+          ) : (
+            dailySchedule.map((doctor) => {
+              const isExpanded = expandedDoctor === doctor.doctor_id;
+              return (
+                <motion.div
+                  key={doctor.doctor_id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white rounded-2xl border border-gray-200 overflow-hidden"
+                >
+                  <button
+                    onClick={() => setExpandedDoctor(isExpanded ? null : doctor.doctor_id)}
+                    className="w-full p-4 flex items-center justify-between hover:bg-orange-50 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="w-12 h-12 rounded-full flex items-center justify-center text-black font-bold text-lg bg-orange-500/20 flex-shrink-0">
+                        {doctor.full_name?.charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-black truncate">{cleanDoctorName(doctor.full_name)}</p>
+                        <p className="text-sm text-gray-500 truncate">{doctor.specialization || 'General'}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {doctor.total_slots} total · {doctor.booked_slots} booked · {doctor.blocked_slots || 0} blocked
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs px-3 py-1 rounded-full bg-orange-50 text-orange-600 font-semibold capitalize">
+                      {String(doctor.availability || '').replaceAll('_', ' ')}
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="px-4 pb-4 border-t border-gray-100">
+                      {doctor.slots.length === 0 ? (
+                        <p className="text-center text-gray-400 text-sm py-4">No slots generated for this date.</p>
+                      ) : (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {doctor.slots.map((slot) => {
+                            const style = STATUS_STYLE[slot.status] || STATUS_STYLE.available;
+                            const canBlock = slot.status === 'available' && !slot.is_booked && !slot.is_blocked;
+                            const blockedByLabel = slot.blocked_by === 'doctor'
+                              ? 'Doctor'
+                              : slot.blocked_by === 'hospital_admin'
+                                ? 'Hospital admin'
+                                : 'System';
+                            return (
+                              <div
+                                key={slot.slot_id}
+                                className="min-w-[180px] rounded-xl border p-3 text-xs"
+                                style={{ backgroundColor: style.bg, borderColor: style.border, color: style.text }}
+                              >
+                                <p className="font-semibold text-sm">
+                                  {String(slot.start_time).slice(0, 5)}-{String(slot.end_time).slice(0, 5)}
+                                </p>
+                                <p className="capitalize mt-1">{String(slot.status).replaceAll('_', ' ')}</p>
+                                <p className="mt-1 text-gray-500">{typeLabel(slot.consult_type)} · ₹{Number(slot.consultation_fee || 0).toFixed(0)}</p>
+                                {slot.patient_name && <p className="truncate mt-1 text-gray-600">{slot.patient_name}</p>}
+                                {slot.status === 'blocked' && (
+                                  <div className="mt-2 rounded-lg bg-white/70 border border-red-100 px-2 py-1.5 text-[11px] text-red-700">
+                                    <p>Blocked by: {blockedByLabel}</p>
+                                    <p>Reason: {slot.block_reason || 'Unavailable'}</p>
+                                  </div>
+                                )}
+                                {canBlock && (
+                                  <button
+                                    onClick={() => { setBlockSlot(slot); setBlockReason(''); }}
+                                    className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white bg-black cursor-pointer"
+                                  >
+                                    <FiLock className="w-3.5 h-3.5" /> Block
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })
+          )}
+        </div>
       </div>
+
+      <Modal isOpen={Boolean(blockSlot)} onClose={() => setBlockSlot(null)} title="Block Doctor Slot">
+        <form onSubmit={submitBlock} className="space-y-4">
+          <div className="rounded-xl border border-gray-200 bg-orange-50 p-3">
+            <p className="font-semibold text-black">
+              {blockSlot?.start_time?.slice(0, 5)}-{blockSlot?.end_time?.slice(0, 5)}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">Booked slots cannot be blocked.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Reason</label>
+            <textarea
+              rows={3}
+              value={blockReason}
+              onChange={(e) => setBlockReason(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
+              placeholder="Doctor unavailable, emergency duty, maintenance..."
+            />
+          </div>
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={() => setBlockSlot(null)} className="px-4 py-2 rounded-full border border-gray-200">
+              Cancel
+            </button>
+            <button type="submit" disabled={blocking} className="px-4 py-2 rounded-full bg-black text-white disabled:opacity-60">
+              {blocking ? 'Blocking...' : 'Block Slot'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </DashboardLayout>
   );
 };

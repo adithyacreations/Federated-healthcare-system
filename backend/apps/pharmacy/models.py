@@ -22,6 +22,9 @@ ORDER_STATUS = [
     ('confirmed', 'Confirmed'),
     ('dispatched', 'Dispatched'),
     ('delivered', 'Delivered'),
+    ('wrong_product', 'Wrong Product Reported'),
+    ('resolved', 'Resolved'),
+    ('refunded', 'Refunded'),
     ('cancelled', 'Cancelled'),
 ]
 
@@ -29,11 +32,30 @@ PAYMENT_STATUS = [
     ('pending', 'Pending'),
     ('paid', 'Paid'),
     ('failed', 'Failed'),
+    ('refunded', 'Refunded'),
 ]
 
 # Force local disk storage — the project default storage is Cloudinary, but
 # medicine images (like prescriptions) are kept on the local filesystem.
 local_media_storage = FileSystemStorage()
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Drivers
+# ════════════════════════════════════════════════════════════════════════════
+
+class PharmacyDriver(models.Model):
+    driver_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pharmacist = models.ForeignKey('PharmacistRegistration', on_delete=models.CASCADE, related_name='drivers')
+    name = models.CharField(max_length=120)
+    phone = models.CharField(max_length=15)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.phone})"
+
+    class Meta:
+        db_table = 'pharmacy_drivers'
 
 
 class PharmacistRegistration(models.Model):
@@ -92,6 +114,13 @@ class MedicineOrder(models.Model):
     estimated_delivery_days = models.IntegerField(default=2)
     dispatched_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
+    driver = models.ForeignKey('PharmacyDriver', on_delete=models.SET_NULL, null=True, blank=True, related_name='deliveries')
+    driver_name = models.CharField(max_length=120, blank=True)
+    driver_phone = models.CharField(max_length=15, blank=True)
+    issue_reported = models.BooleanField(default=False)
+    issue_type = models.CharField(max_length=50, blank=True)
+    patient_desired_resolution = models.CharField(max_length=20, blank=True, choices=[('refund', 'Refund'), ('redeliver', 'Redeliver')])
+    final_resolution = models.CharField(max_length=20, blank=True, choices=[('refunded', 'Refunded'), ('redelivered', 'Redelivered')])
     status_history = models.JSONField(default=list)
     # ─── Stock reservation (BookMyShow-style 10-min hold) ────────────────
     stock_reserved = models.BooleanField(default=False, help_text='Stock held pending payment')

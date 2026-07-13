@@ -2,7 +2,18 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { FiVideo, FiCalendar, FiUser, FiMessageCircle, FiSearch, FiClock } from 'react-icons/fi';
+import {
+  FiAlertTriangle,
+  FiCalendar,
+  FiCreditCard,
+  FiDownload,
+  FiMessageCircle,
+  FiSearch,
+  FiShoppingCart,
+  FiUser,
+  FiVideo,
+  FiXCircle,
+} from 'react-icons/fi';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
 import Modal from '../../components/common/Modal';
@@ -15,6 +26,7 @@ import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import { usePatientWS } from '../../context/PatientWebSocketContext';
 import { openRazorpay } from '../../utils/payment';
+import { downloadBillPdf } from '../../utils/pdf';
 import { cleanDoctorName } from '../../utils/nameUtils';
 
 const BOOK_STEPS = ['Select Doctor', 'Choose Slot', 'Confirm', 'Pay'];
@@ -35,10 +47,14 @@ const isPastEndedSlot = (c) => {
 };
 
 const bucketize = (c) => {
+  if (c.payment_status === 'pending' && c.status !== 'cancelled') return 'pending_payment';
   if (c.status === 'cancelled') return 'cancelled';
   if (c.status === 'completed') return 'past';
   if (c.status === 'missed' || isPastEndedSlot(c)) return 'missed';
-  if (isFutureSlot(c) || c.status === 'scheduled' || c.status === 'ongoing') return 'upcoming';
+  if (
+    c.payment_status === 'paid'
+    && (isFutureSlot(c) || c.status === 'scheduled' || c.status === 'ongoing')
+  ) return 'upcoming';
   return 'upcoming';
 };
 
@@ -49,6 +65,19 @@ const TABS = [
   { key: 'cancelled', label: '✕ Cancelled' },
 ];
 
+const TAB_LABELS = {
+  upcoming: 'Upcoming',
+  missed: 'Missed',
+  past: 'Completed',
+  cancelled: 'Cancelled',
+  pending_payment: 'Pending Payment',
+};
+
+const CONSULTATION_TABS = [
+  { key: 'pending_payment', label: TAB_LABELS.pending_payment },
+  ...TABS,
+].map((tab) => ({ ...tab, label: TAB_LABELS[tab.key] || tab.label }));
+
 const fmtSlotDate = (iso) => {
   if (!iso) return '—';
   try {
@@ -58,16 +87,9 @@ const fmtSlotDate = (iso) => {
   } catch { return iso; }
 };
 
-// Group raw slots into Morning / Afternoon / Evening buckets.
-const groupSlots = (slots) => {
-  const buckets = { Morning: [], Afternoon: [], Evening: [] };
-  slots.forEach((s) => {
-    const hr = parseInt((s.start_time || '0').split(':')[0], 10);
-    if (hr < 12) buckets.Morning.push(s);
-    else if (hr < 17) buckets.Afternoon.push(s);
-    else buckets.Evening.push(s);
-  });
-  return buckets;
+const toDateInputValue = (date = new Date()) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
 };
 
 // A slot is bookable only until the moment it starts. Once today's start_time
@@ -85,6 +107,23 @@ const isSlotAvailable = (slot, now = new Date()) => {
 // Avoid the "Dr. Dr." double prefix when a name already starts with "Dr.".
 const withDr = (name) => cleanDoctorName(name) || 'Doctor';
 
+const doctorPhoto = (doctor) => doctor?.profile_photo || doctor?.doctor_profile_photo || '';
+
+const departmentPhoto = (doctor) => doctor?.department_photo || doctor?.dept_photo || '';
+
+const typeLabel = (value) => {
+  if (value === 'both') return 'Online or offline';
+  if (value === 'offline' || value === 'in_person') return 'Offline';
+  return 'Online';
+};
+
+const formatRemaining = (seconds) => {
+  const safe = Math.max(0, Number(seconds || 0));
+  const minutes = Math.floor(safe / 60);
+  const rest = safe % 60;
+  return `${minutes}:${String(rest).padStart(2, '0')}`;
+};
+
 const ConsultationsPage = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -99,6 +138,8 @@ const ConsultationsPage = () => {
   doctorsRef.current = doctors;
   const consultsRef = useRef(consults);
   consultsRef.current = consults;
+  const expiredHoldRefreshRef = useRef(new Set());
+  const pendingAutoFocusDoneRef = useRef(false);
   // Tracks the doctor whose slot picker is open, so a live slot update can
   // refresh just those slots. Synced from `slotDoctor` state below.
   const slotDoctorRef = useRef(null);
@@ -134,9 +175,14 @@ const ConsultationsPage = () => {
   const [slotDoctor, setSlotDoctor] = useState(null);
   const [slots, setSlots] = useState([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [selectedSlotDate, setSelectedSlotDate] = useState(toDateInputValue());
+  const [selectedBookingSlot, setSelectedBookingSlot] = useState(null);
   // Keep the ref in sync so the 'slots' WS handler reads the latest open doctor.
   useEffect(() => { slotDoctorRef.current = slotDoctor; }, [slotDoctor]);
   const [booking, setBooking] = useState(false);
+  const [payingPending, setPayingPending] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
+  const [cancellingPendingId, setCancellingPendingId] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
   const [chatConsult, setChatConsult] = useState(null);
 
@@ -148,14 +194,64 @@ const ConsultationsPage = () => {
     return () => clearInterval(id);
   }, []);
 
+  const getHoldSecondsRemaining = (consultation) => {
+    if (consultation?.payment_hold_expires_at) {
+      const expiresAt = new Date(consultation.payment_hold_expires_at).getTime();
+      if (!Number.isNaN(expiresAt)) {
+        return Math.max(0, Math.floor((expiresAt - currentTime.getTime()) / 1000));
+      }
+    }
+    return Math.max(0, Number(consultation?.hold_seconds_remaining || 0));
+  };
+
   // Bookable slots, recomputed on each tick so started slots drop off live.
   const availableSlots = useMemo(
     () => (slots || []).filter((s) => isSlotAvailable(s, currentTime)),
     [slots, currentTime],
   );
 
-  const doctorList = doctors.data?.doctors || [];
-  const allConsults = consults.data?.consultations || [];
+  const availableSlotDates = useMemo(
+    () => Array.from(new Set(availableSlots.map((slot) => slot.slot_date))).filter(Boolean).sort(),
+    [availableSlots],
+  );
+
+  const selectedDateSlots = useMemo(
+    () => availableSlots
+      .filter((slot) => slot.slot_date === selectedSlotDate)
+      .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || ''))),
+    [availableSlots, selectedSlotDate],
+  );
+
+  useEffect(() => {
+    if (!slotDoctor || availableSlotDates.length === 0) return;
+    if (!availableSlotDates.includes(selectedSlotDate)) {
+      setSelectedSlotDate(availableSlotDates[0]);
+    }
+  }, [availableSlotDates, selectedSlotDate, slotDoctor]);
+
+  useEffect(() => {
+    if (!selectedBookingSlot) return;
+    const stillVisible = selectedDateSlots.some((slot) => slot.slot_id === selectedBookingSlot.slot_id);
+    if (selectedBookingSlot.slot_date !== selectedSlotDate || !stillVisible) {
+      setSelectedBookingSlot(null);
+    }
+  }, [selectedBookingSlot, selectedDateSlots, selectedSlotDate]);
+
+  const doctorList = useMemo(() => doctors.data?.doctors || [], [doctors.data]);
+  const allConsults = useMemo(() => consults.data?.consultations || [], [consults.data]);
+
+  useEffect(() => {
+    const expired = allConsults.find((consultation) => {
+      if (consultation.payment_status !== 'pending' || !consultation.payment_hold_expires_at) return false;
+      if (expiredHoldRefreshRef.current.has(consultation.consultation_id)) return false;
+      const expiresAt = new Date(consultation.payment_hold_expires_at).getTime();
+      return !Number.isNaN(expiresAt) && expiresAt <= currentTime.getTime();
+    });
+    if (!expired) return;
+    expiredHoldRefreshRef.current.add(expired.consultation_id);
+    consults.refetch();
+    doctors.refetch(true);
+  }, [allConsults, currentTime, consults, doctors]);
 
   const specializations = useMemo(() => {
     const set = new Set(doctorList.map((d) => d.specialization).filter(Boolean));
@@ -177,7 +273,7 @@ const ConsultationsPage = () => {
   // Group every consultation into one of the four tabs once, so we can show
   // tab counts AND filter the visible list off the same source of truth.
   const buckets = useMemo(() => {
-    const out = { upcoming: [], missed: [], past: [], cancelled: [] };
+    const out = { upcoming: [], missed: [], past: [], cancelled: [], pending_payment: [] };
     allConsults.forEach((c) => {
       out[bucketize(c)].push(c);
     });
@@ -190,8 +286,22 @@ const ConsultationsPage = () => {
     out.missed.sort(byDate(false));
     out.past.sort(byDate(false));
     out.cancelled.sort(byDate(false));
+    out.pending_payment.sort((a, b) => {
+      const aCreated = new Date(a.created_at || 0).getTime();
+      const bCreated = new Date(b.created_at || 0).getTime();
+      if (aCreated !== bCreated) return bCreated - aCreated;
+      const aExpiry = new Date(a.payment_hold_expires_at || 0).getTime();
+      const bExpiry = new Date(b.payment_hold_expires_at || 0).getTime();
+      return aExpiry - bExpiry;
+    });
     return out;
   }, [allConsults]);
+
+  useEffect(() => {
+    if (pendingAutoFocusDoneRef.current || buckets.pending_payment.length === 0) return;
+    pendingAutoFocusDoneRef.current = true;
+    setTab('pending_payment');
+  }, [buckets.pending_payment.length]);
 
   const filtered = buckets[tab] || [];
 
@@ -228,10 +338,14 @@ const ConsultationsPage = () => {
     setSlotDoctor(doctor);
     setSlots([]);
     setSlotsLoading(true);
+    setSelectedSlotDate(toDateInputValue());
+    setSelectedBookingSlot(null);
     try {
       const { data } = await API.get(`/api/patient/doctor-slots/${doctor.doctor_id}/`);
       // Store the raw list; availableSlots filters it live (and re-filters each minute).
-      setSlots(data?.data?.slots || []);
+      const loadedSlots = data?.data?.slots || [];
+      setSlots(loadedSlots);
+      if (loadedSlots[0]?.slot_date) setSelectedSlotDate(loadedSlots[0].slot_date);
     } catch {
       toast.error('Could not load slots');
     } finally {
@@ -240,16 +354,18 @@ const ConsultationsPage = () => {
   };
 
   const bookSlot = async (slot) => {
-    if (!slotDoctor) return;
+    if (!slotDoctor || !slot) return;
     setBooking(true);
     try {
       const { data } = await API.post('/api/patient/book-consultation/', {
         doctor_id: slotDoctor.doctor_id,
         slot_id: slot.slot_id,
+        consult_type: slot.consult_type === 'both' ? 'online' : slot.consult_type,
       });
       const res = data?.data || {};
       const doctorName = slotDoctor.full_name;
       setSlotDoctor(null);
+      setSelectedBookingSlot(null);
       const fee = Number(res.fee || 0);
       if (fee > 0) {
         if (!res.razorpay_order_id || !res.key_id) {
@@ -265,27 +381,124 @@ const ConsultationsPage = () => {
           objectId: res.consultation_id,
           user,
           description: `Consultation with ${withDr(doctorName)}`,
-          onSuccess: () => { setConfirmation(res); consults.refetch(); },
+          onSuccess: () => {
+            setTab('upcoming');
+            setConfirmation(res);
+            consults.refetch();
+            doctors.refetch(true);
+          },
           onFailure: async () => {
-            // Payment cancelled/failed → release the held booking + slot.
+            // Payment dismissed or failed: keep the 10-minute reservation hold.
             try {
               await API.post('/api/patient/consultation-payment-failed/', {
                 consultation_id: res.consultation_id,
                 reason: 'Payment cancelled',
               });
-              toast.error('❌ Booking cancelled — payment not completed');
+              toast.error('Payment pending. This slot is reserved for 10 minutes.');
             } catch { /* best-effort; refetch still reflects server state */ }
+            setTab('pending_payment');
             consults.refetch();
+            doctors.refetch(true);
           },
         });
       } else {
+        setTab('upcoming');
         setConfirmation(res);
         consults.refetch();
+        doctors.refetch(true);
       }
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Booking failed');
     } finally {
       setBooking(false);
+    }
+  };
+
+  const payPendingConsultation = async (consultation) => {
+    if (!consultation?.consultation_id) return;
+    const holdRemaining = getHoldSecondsRemaining(consultation);
+    if (holdRemaining <= 0) {
+      toast.error('Payment hold expired. Please book a slot again.');
+      consults.refetch();
+      doctors.refetch(true);
+      return;
+    }
+    if (!consultation.razorpay_order_id || !consultation.razorpay_key_id) {
+      toast.error('Payment is not ready. Please refresh.');
+      return;
+    }
+
+    setPayingPending(consultation.consultation_id);
+    await openRazorpay({
+      orderId: consultation.razorpay_order_id,
+      amount: consultation.razorpay_amount || Math.round(Number(consultation.amount || 0) * 100),
+      keyId: consultation.razorpay_key_id,
+      paymentType: 'consultation',
+      objectId: consultation.consultation_id,
+      user,
+      description: `Consultation with ${withDr(consultation.doctor_name)}`,
+      onSuccess: () => {
+        setPayingPending(null);
+        setTab('upcoming');
+        setConfirmation({
+          ...consultation,
+          slot_time: `${consultation.start_time || ''}${consultation.end_time ? ` - ${consultation.end_time}` : ''}`,
+        });
+        consults.refetch();
+        doctors.refetch(true);
+      },
+      onFailure: () => {
+        setPayingPending(null);
+        toast.error('Payment pending. Complete it before the hold expires.');
+        setTab('pending_payment');
+        consults.refetch();
+      },
+    });
+  };
+
+  const cancelPendingPayment = async (consultation) => {
+    if (!consultation?.consultation_id) return;
+    const okToCancel = window.confirm(
+      'Cancel this pending payment and release the reserved slot?',
+    );
+    if (!okToCancel) return;
+
+    setCancellingPendingId(consultation.consultation_id);
+    try {
+      await API.post('/api/patient/consultation-payment-failed/', {
+        consultation_id: consultation.consultation_id,
+        reason: 'Patient cancelled pending payment',
+        force_cancel: true,
+      });
+      toast.success('Pending payment cancelled. Slot released.');
+      setTab('cancelled');
+      consults.refetch();
+      doctors.refetch(true);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not cancel pending payment');
+    } finally {
+      setCancellingPendingId(null);
+    }
+  };
+
+  const cancelUpcomingConsultation = async (consultation) => {
+    if (!consultation?.consultation_id) return;
+    const okToCancel = window.confirm(
+      'No refund will be issued if you cancel this paid consultation. Do you want to continue?',
+    );
+    if (!okToCancel) return;
+
+    setCancellingId(consultation.consultation_id);
+    try {
+      await API.post(`/api/patient/consultations/${consultation.consultation_id}/cancel/`);
+      toast.success('Consultation cancelled. No refund will be issued.');
+      setTab('cancelled');
+      consults.refetch();
+      doctors.refetch(true);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not cancel consultation');
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -346,21 +559,41 @@ const ConsultationsPage = () => {
             <div className="dashboard-card text-sm text-muted text-center py-8">No doctors match your search.</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredDoctors.map((doc) => (
+              {filteredDoctors.map((doc) => {
+                const profileImage = doctorPhoto(doc);
+                const bannerImage = departmentPhoto(doc);
+                return (
                 <motion.div
                   key={doc.doctor_id}
                   variants={cardVariants}
                   whileHover={cardHover}
-                  className="rounded-2xl border border-hairline bg-white overflow-hidden hover:border-orange-400 transition-colors"
+                  className="rounded-2xl border border-hairline bg-white overflow-hidden hover:border-gray-300 transition-colors"
                 >
-                  <div className="h-16 bg-gradient-to-r from-orange-400 to-orange-600 relative">
-                    <div className="absolute -bottom-6 left-5 w-14 h-14 rounded-2xl bg-white border-4 border-white shadow flex items-center justify-center">
-                      <span className="w-full h-full rounded-xl bg-orange-500 text-white flex items-center justify-center font-bricolage font-extrabold text-lg">
-                        {(doc.full_name || 'D').slice(0, 1).toUpperCase()}
-                      </span>
+                  <div className="h-20 bg-gray-100 relative overflow-visible">
+                    {bannerImage ? (
+                      <img
+                        src={bannerImage}
+                        alt={doc.dept_name || doc.specialization || 'Department'}
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 bg-gray-100" />
+                    )}
+                    <div className="absolute -bottom-6 left-5 w-14 h-14 rounded-2xl bg-white border-4 border-white shadow flex items-center justify-center overflow-hidden">
+                      {profileImage ? (
+                        <img
+                          src={profileImage}
+                          alt={withDr(doc.full_name)}
+                          className="w-full h-full rounded-xl object-cover"
+                        />
+                      ) : (
+                        <span className="w-full h-full rounded-xl bg-gray-900 text-white flex items-center justify-center font-bricolage font-extrabold text-lg">
+                          {(doc.full_name || 'D').slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
                     </div>
-                    <span className="absolute top-3 right-3 inline-flex items-center gap-1.5 text-xs text-white/90">
-                      <span className={`w-2 h-2 rounded-full ${doc.is_online ? 'bg-green-400' : 'bg-white/50'}`} />
+                    <span className="absolute top-3 right-3 inline-flex items-center gap-1.5 text-xs text-gray-800 bg-white/90 border border-white/70 rounded-full px-2 py-1 shadow-sm">
+                      <span className={`w-2 h-2 rounded-full ${doc.is_online ? 'bg-green-400' : 'bg-gray-400'}`} />
                       {doc.is_online ? 'Online' : 'Offline'}
                     </span>
                   </div>
@@ -369,6 +602,9 @@ const ConsultationsPage = () => {
                     <span className="inline-block mt-1 text-xs bg-orange-50 text-orange-600 px-2.5 py-0.5 rounded-full font-medium">
                       {doc.specialization}
                     </span>
+                    {doc.dept_name && doc.dept_name !== doc.specialization && (
+                      <div className="text-xs text-orange-500 mt-1 truncate">{doc.dept_name}</div>
+                    )}
                     <div className="text-xs text-muted mt-1.5 truncate">{doc.hospital_name}</div>
                     <div className="flex items-center justify-between mt-4">
                       <div>
@@ -388,7 +624,8 @@ const ConsultationsPage = () => {
                     </button>
                   </div>
                 </motion.div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -397,7 +634,7 @@ const ConsultationsPage = () => {
         <section>
           <h2 className="dash-h2">My Consultations</h2>
           <AnimatedTabs
-            tabs={TABS.map((t) => ({ key: t.key, label: `${t.label} (${buckets[t.key].length})` }))}
+            tabs={CONSULTATION_TABS.map((t) => ({ key: t.key, label: `${t.label} (${buckets[t.key].length})` }))}
             active={tab}
             onChange={setTab}
             layoutId="consult-tab"
@@ -416,18 +653,24 @@ const ConsultationsPage = () => {
               ) : filtered.length === 0 ? (
                 <div className="dashboard-card text-center py-10 text-muted">
                   <FiCalendar className="w-8 h-8 mx-auto text-gray-300 mb-2" />
-                  <div className="text-sm">No {tab} consultations.</div>
+                  <div className="text-sm">No {TAB_LABELS[tab] || tab} consultations.</div>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {filtered.map((c) => {
                     const statusPill = (() => {
+                      if (tab === 'pending_payment') return { bg: 'bg-amber-100', color: 'text-amber-700', label: 'Pending Payment' };
                       if (tab === 'missed') return { bg: 'bg-red-100', color: 'text-red-700', label: '⚠️ Missed' };
                       if (tab === 'past') return { bg: 'bg-green-100', color: 'text-green-700', label: '✓ Completed' };
                       if (tab === 'cancelled') return { bg: 'bg-gray-100', color: 'text-gray-600', label: '✕ Cancelled' };
                       return { bg: 'bg-orange-100', color: 'text-orange-700', label: '📅 Upcoming' };
                     })();
                     const joinState = tab === 'upcoming' ? getJoinButtonStatus(c) : null;
+                    const visibleStatusPill = {
+                      ...statusPill,
+                      label: TAB_LABELS[tab] || statusPill.label,
+                    };
+                    const holdRemaining = getHoldSecondsRemaining(c);
 
                     return (
                       <div
@@ -451,9 +694,9 @@ const ConsultationsPage = () => {
                             </div>
                           </div>
                           <span
-                            className={`text-xs px-3 py-1 rounded-full font-semibold whitespace-nowrap ${statusPill.bg} ${statusPill.color}`}
+                            className={`text-xs px-3 py-1 rounded-full font-semibold whitespace-nowrap ${visibleStatusPill.bg} ${visibleStatusPill.color}`}
                           >
-                            {statusPill.label}
+                            {visibleStatusPill.label}
                           </span>
                         </div>
 
@@ -502,7 +745,71 @@ const ConsultationsPage = () => {
                             >
                               <FiMessageCircle className="w-3.5 h-3.5" /> Chat
                             </button>
+                            {c.can_cancel && (
+                              <button
+                                onClick={() => cancelUpcomingConsultation(c)}
+                                disabled={cancellingId === c.consultation_id}
+                                className="flex-1 py-2 rounded-full text-sm font-medium bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-60 inline-flex items-center justify-center gap-1"
+                              >
+                                <FiXCircle className="w-3.5 h-3.5" />
+                                {cancellingId === c.consultation_id ? 'Cancelling...' : 'Cancel'}
+                              </button>
+                            )}
+                            {c.can_cancel && (
+                              <p className="w-full text-xs text-red-600 flex items-center gap-1">
+                                <FiAlertTriangle className="w-3.5 h-3.5" /> No refund if cancelled.
+                              </p>
+                            )}
                           </div>
+                        )}
+
+                        {tab === 'pending_payment' && (
+                          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Payment hold</p>
+                                <p className="text-sm text-gray-700 mt-1">
+                                  Slot reserved for {formatRemaining(holdRemaining)} more.
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  onClick={() => payPendingConsultation(c)}
+                                  disabled={payingPending === c.consultation_id || holdRemaining <= 0}
+                                  className="px-4 py-2 rounded-full text-sm font-semibold bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-60 inline-flex items-center gap-1.5"
+                                >
+                                  <FiCreditCard className="w-4 h-4" />
+                                  {payingPending === c.consultation_id ? 'Opening...' : 'Pay Now'}
+                                </button>
+                                <button
+                                  onClick={() => cancelPendingPayment(c)}
+                                  disabled={cancellingPendingId === c.consultation_id}
+                                  className="px-4 py-2 rounded-full text-sm font-semibold bg-white text-red-700 border border-red-200 hover:bg-red-50 disabled:opacity-60 inline-flex items-center gap-1.5"
+                                >
+                                  <FiXCircle className="w-4 h-4" />
+                                  {cancellingPendingId === c.consultation_id ? 'Cancelling...' : 'Cancel'}
+                                </button>
+                              </div>
+                            </div>
+                            <p className="text-xs text-amber-700 mt-2">
+                              If payment is not completed in 10 minutes, this slot becomes available to other patients.
+                            </p>
+                          </div>
+                        )}
+
+                        {['paid', 'refunded'].includes(c.payment_status) && (
+                          <button
+                            type="button"
+                            onClick={() => downloadBillPdf(
+                              `/api/patient/consultations/${c.consultation_id}/bill/`,
+                              `consultation-bill-${String(c.consultation_id || '').slice(0, 8)}.pdf`,
+                            )}
+                            className="mt-3 w-full sm:w-auto px-4 py-2 rounded-full text-sm font-semibold border-2 inline-flex items-center justify-center gap-1.5"
+                            style={{ borderColor: '#F97316', color: '#F97316', backgroundColor: '#FFFFFF' }}
+                          >
+                            <FiDownload className="w-4 h-4" />
+                            Download Bill
+                          </button>
                         )}
 
                         {tab === 'missed' && (
@@ -550,39 +857,109 @@ const ConsultationsPage = () => {
       {/* Slot picker modal */}
       <Modal
         isOpen={Boolean(slotDoctor)}
-        onClose={() => setSlotDoctor(null)}
-        title={slotDoctor ? `Slots — ${withDr(slotDoctor.full_name)}` : ''}
+        onClose={() => {
+          setSlotDoctor(null);
+          setSelectedBookingSlot(null);
+        }}
+        title={(
+          <span className="inline-flex items-center gap-2 text-ink">
+            <FiShoppingCart className="w-5 h-5 text-orange-500" /> Your Booking
+          </span>
+        )}
+        size="sm"
       >
         {slotsLoading ? (
-          <p className="text-sm text-muted">Loading slots…</p>
+          <div className="py-10 text-center text-sm text-muted">Loading slots...</div>
         ) : availableSlots.length === 0 ? (
-          <p className="text-sm text-muted">No open slots for this doctor.</p>
+          <div className="py-10 text-center">
+            <FiCalendar className="w-10 h-10 mx-auto text-gray-300 mb-3" />
+            <p className="text-sm text-muted">No open slots for this doctor.</p>
+          </div>
         ) : (
-          <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
-            {Object.entries(groupSlots(availableSlots)).map(([period, list]) =>
-              list.length === 0 ? null : (
-                <div key={period}>
-                  <p className="text-xs uppercase tracking-wide text-muted mb-2 flex items-center gap-1">
-                    <FiClock className="w-3 h-3" /> {period}
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {list.map((s) => (
-                      <button
-                        key={s.slot_id}
-                        onClick={() => bookSlot(s)}
-                        disabled={booking}
-                        className="p-3 rounded-xl border border-hairline text-left text-sm hover:border-orange-500 hover:bg-orange-50 transition disabled:opacity-60"
-                      >
-                        <div className="font-semibold text-ink">{s.start_display || s.start_time}</div>
-                        <div className="text-xs text-muted">{s.date_display || s.slot_date}</div>
-                        <div className="text-[11px] text-orange-500 capitalize mt-0.5">{s.consult_type}</div>
-                      </button>
-                    ))}
-                  </div>
+          <div className="space-y-5">
+            <div className="text-center py-2">
+              <FiCalendar className="w-10 h-10 mx-auto text-gray-300 mb-2" />
+              <p className="text-gray-400">
+                {selectedBookingSlot ? 'Slot selected.' : 'No slot selected yet.'}
+              </p>
+              <p className="text-sm text-gray-400">
+                {selectedBookingSlot
+                  ? `${fmtSlotDate(selectedBookingSlot.slot_date)} at ${selectedBookingSlot.start_display || selectedBookingSlot.start_time}`
+                  : 'Select a time slot from the list'}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-600 mb-2">Hospital</label>
+              <select
+                value={slotDoctor?.hospital_name || ''}
+                disabled
+                className="w-full h-12 rounded-2xl border border-gray-200 bg-white px-4 text-sm text-ink focus:outline-none"
+              >
+                <option value={slotDoctor?.hospital_name || ''}>{slotDoctor?.hospital_name || 'Hospital'}</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-600 mb-2">Date</label>
+              <div className="relative">
+                <input
+                  type="date"
+                  value={selectedSlotDate}
+                  min={toDateInputValue()}
+                  onChange={(e) => setSelectedSlotDate(e.target.value)}
+                  className="w-full h-[52px] rounded-2xl border border-orange-500 bg-white px-4 pr-11 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-orange-100"
+                />
+                <FiCalendar className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+              </div>
+              <p className="mt-2 text-xs text-orange-500 flex items-center gap-1">
+                <FiAlertTriangle className="w-3.5 h-3.5" /> Only future time slots are shown for today
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-gray-600 mb-2">Time slot</p>
+              {selectedDateSlots.length === 0 ? (
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-5 text-center text-sm text-gray-500">
+                  No slots available for this date.
                 </div>
-              )
-            )}
-            {booking && <p className="text-sm text-orange-500 text-center">Booking…</p>}
+              ) : (
+                <div className="grid grid-cols-3 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                  {selectedDateSlots.map((slot) => {
+                    const isSelected = selectedBookingSlot?.slot_id === slot.slot_id;
+                    return (
+                      <button
+                        key={slot.slot_id}
+                        onClick={() => setSelectedBookingSlot(slot)}
+                        disabled={booking}
+                        className={`min-h-[52px] rounded-2xl border px-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-100 transition disabled:opacity-60 ${
+                          isSelected
+                            ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-[0_0_0_1px_rgba(249,115,22,0.22)]'
+                            : 'border-gray-200 bg-white text-ink hover:border-orange-500 hover:bg-orange-50'
+                        }`}
+                      >
+                        {slot.start_display || slot.start_time}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl bg-orange-50 border border-orange-100 px-4 py-3 text-sm">
+              <div className="font-semibold text-ink">{withDr(slotDoctor?.full_name)}</div>
+              <div className="text-gray-500 mt-1">
+                {selectedDateSlots[0] ? `${typeLabel(selectedDateSlots[0].consult_type)} · ₹${selectedDateSlots[0].consultation_fee}` : 'Choose a time'}
+              </div>
+            </div>
+
+            <button
+              onClick={() => bookSlot(selectedBookingSlot)}
+              disabled={!selectedBookingSlot || booking}
+              className="w-full h-12 rounded-full bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
+            >
+              {booking ? 'Booking...' : 'Book Slot'}
+            </button>
           </div>
         )}
       </Modal>
@@ -599,14 +976,16 @@ const ConsultationsPage = () => {
               </div>
             </div>
             <p className="text-muted">A confirmation email with the video link has been sent to you.</p>
-            {confirmation.jitsi_room_id && (
-              <button
-                onClick={() => handleJoinConsultation(confirmation)}
-                className="btn-orange w-full"
-              >
-                <FiUser className="w-4 h-4" /> Open Video Room
-              </button>
-            )}
+            <button
+              onClick={() => {
+                setConfirmation(null);
+                setTab('upcoming');
+                consults.refetch();
+              }}
+              className="btn-orange w-full"
+            >
+              <FiUser className="w-4 h-4" /> Consultation
+            </button>
           </div>
         )}
       </Modal>

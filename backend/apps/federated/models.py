@@ -86,6 +86,7 @@ class EpidemicTrend(models.Model):
     region = models.CharField(max_length=150, blank=True)
     case_count = models.IntegerField(default=0)
     spike_detected = models.BooleanField(default=False)
+    is_auto_detected = models.BooleanField(default=False)
     heatmap_data = models.JSONField(default=list, blank=True)
     alert_level = models.CharField(max_length=10, choices=ALERT_LEVELS, default='low')
     recorded_date = models.DateField()

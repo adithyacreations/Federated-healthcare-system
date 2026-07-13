@@ -33,6 +33,63 @@ export default function FederCareChatbot() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
+  // Drag logic for the chatbot button
+  const [btnPos, setBtnPos] = useState({ right: 24, bottom: 24 });
+  const [isDraggingBtn, setIsDraggingBtn] = useState(false);
+  const dragRef = useRef({ isDragging: false, wasDragged: false, startX: 0, startY: 0, initRight: 24, initBottom: 24 });
+
+  const handlePointerDown = (e) => {
+    dragRef.current.isDragging = false;
+    dragRef.current.wasDragged = false;
+    dragRef.current.startX = e.clientX;
+    dragRef.current.startY = e.clientY;
+    dragRef.current.initRight = btnPos.right;
+    dragRef.current.initBottom = btnPos.bottom;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    if (!dragRef.current.isDragging && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+      dragRef.current.isDragging = true;
+      dragRef.current.wasDragged = true;
+      setIsDraggingBtn(true);
+    }
+    if (dragRef.current.isDragging) {
+      setBtnPos({
+        right: Math.max(0, Math.min(dragRef.current.initRight - dx, window.innerWidth - 64)),
+        bottom: Math.max(0, Math.min(dragRef.current.initBottom - dy, window.innerHeight - 64))
+      });
+    }
+  };
+
+  const handlePointerUp = (e) => {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (dragRef.current.isDragging) {
+      const PADDING = 24;
+      const maxRight = Math.max(PADDING, window.innerWidth - 64 - PADDING);
+      const maxBottom = Math.max(PADDING, window.innerHeight - 64 - PADDING);
+
+      const targetRight = btnPos.right > (maxRight / 2) ? maxRight : PADDING;
+      const targetBottom = btnPos.bottom > (maxBottom / 2) ? maxBottom : PADDING;
+
+      setBtnPos({ right: targetRight, bottom: targetBottom });
+      dragRef.current.isDragging = false;
+      setIsDraggingBtn(false);
+    }
+  };
+
+  const handleClick = (e) => {
+    if (dragRef.current.wasDragged) {
+      e.preventDefault();
+      dragRef.current.wasDragged = false;
+      return;
+    }
+    setIsOpen(true);
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
@@ -137,8 +194,17 @@ export default function FederCareChatbot() {
     <>
       {!isOpen && (
         <button
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 w-16 h-16 rounded-full bg-orange-500 text-white shadow-2xl hover:bg-orange-600 transition-all duration-300 hover:scale-110 flex items-center justify-center"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onClick={handleClick}
+          className="fixed z-50 w-16 h-16 rounded-full bg-orange-500 text-white shadow-2xl hover:bg-orange-600 hover:scale-110 flex items-center justify-center touch-none"
+          style={{ 
+            right: `${btnPos.right}px`, 
+            bottom: `${btnPos.bottom}px`,
+            transition: isDraggingBtn ? 'none' : 'all 0.3s ease'
+          }}
           title="Chat with FederCare Assistant"
         >
           <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">

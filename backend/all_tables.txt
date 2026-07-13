@@ -331,16 +331,39 @@ TABLE: doctor_registrations
   created_at|DateTimeField|NOT NULL
   updated_at|DateTimeField|NOT NULL
 ---
+MODEL: DoctorSchedule
+TABLE: doctor_schedules
+  schedule_id|UUIDField|Primary Key, NOT NULL
+  hospital|ForeignKey|FK to HospitalRegistration, NOT NULL
+  doctor|ForeignKey|FK to DoctorRegistration, NOT NULL
+  working_days|JSONField|NOT NULL
+  start_time|TimeField|NOT NULL
+  end_time|TimeField|NOT NULL
+  slot_duration_minutes|PositiveIntegerField|NOT NULL
+  consultation_type|CharField|NOT NULL
+  consultation_fee|DecimalField|NOT NULL
+  is_active|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
+---
 MODEL: DoctorSlot
 TABLE: doctor_slots
   slot_id|UUIDField|Primary Key, NOT NULL
   doctor_id|ForeignKey|FK to DoctorRegistration, NOT NULL
+  hospital|ForeignKey|FK to HospitalRegistration, NULL
+  schedule|ForeignKey|FK to DoctorSchedule, NULL
   slot_date|DateField|NOT NULL
   start_time|TimeField|NOT NULL
   end_time|TimeField|NOT NULL
   consult_type|CharField|NOT NULL
+  consultation_fee|DecimalField|NOT NULL
+  status|CharField|NOT NULL
   is_booked|BooleanField|NOT NULL
+  is_blocked|BooleanField|NOT NULL
+  blocked_by|CharField|NULL
+  block_reason|TextField|NOT NULL
   created_at|DateTimeField|NOT NULL
+  updated_at|DateTimeField|NOT NULL
 ---
 MODEL: Consultation
 TABLE: consultations
@@ -359,6 +382,7 @@ TABLE: consultations
   razorpay_payment_id|CharField|NOT NULL
   razorpay_signature|CharField|NOT NULL
   payment_status|CharField|NOT NULL
+  payment_hold_expires_at|DateTimeField|NULL
   started_at|DateTimeField|NULL
   ended_at|DateTimeField|NULL
   created_at|DateTimeField|NOT NULL
@@ -386,6 +410,15 @@ TABLE: consultation_chats
   message|TextField|NOT NULL
   sent_at|DateTimeField|NOT NULL
   is_read|BooleanField|NOT NULL
+---
+MODEL: PharmacyDriver
+TABLE: pharmacy_drivers
+  driver_id|UUIDField|Primary Key, NOT NULL
+  pharmacist|ForeignKey|FK to PharmacistRegistration, NOT NULL
+  name|CharField|NOT NULL
+  phone|CharField|NOT NULL
+  is_active|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
 ---
 MODEL: PharmacistRegistration
 TABLE: pharmacist_registrations
@@ -430,6 +463,13 @@ TABLE: medicine_orders
   estimated_delivery_days|IntegerField|NOT NULL
   dispatched_at|DateTimeField|NULL
   delivered_at|DateTimeField|NULL
+  driver|ForeignKey|FK to PharmacyDriver, NULL
+  driver_name|CharField|NOT NULL
+  driver_phone|CharField|NOT NULL
+  issue_reported|BooleanField|NOT NULL
+  issue_type|CharField|NOT NULL
+  patient_desired_resolution|CharField|NOT NULL
+  final_resolution|CharField|NOT NULL
   status_history|JSONField|NOT NULL
   stock_reserved|BooleanField|NOT NULL
   reserved_at|DateTimeField|NULL
@@ -626,9 +666,19 @@ TABLE: equipment_catalog
   specifications|JSONField|NOT NULL
   price|DecimalField|NOT NULL
   stock_qty|IntegerField|NOT NULL
+  max_order_qty|IntegerField|NOT NULL
   image_url|CharField|NOT NULL
   listed_at|DateTimeField|NOT NULL
   updated_at|DateTimeField|NOT NULL
+---
+MODEL: VendorDriver
+TABLE: vendor_drivers
+  driver_id|UUIDField|Primary Key, NOT NULL
+  vendor_id|ForeignKey|FK to VendorRegistration, NOT NULL
+  name|CharField|NOT NULL
+  phone|CharField|NOT NULL
+  is_available|BooleanField|NOT NULL
+  created_at|DateTimeField|NOT NULL
 ---
 MODEL: EquipmentOrder
 TABLE: equipment_orders
@@ -644,6 +694,11 @@ TABLE: equipment_orders
   razorpay_signature|CharField|NOT NULL
   payment_status|CharField|NOT NULL
   tracking_info|TextField|NOT NULL
+  driver_id|ForeignKey|FK to VendorDriver, NULL
+  hospital_desired_resolution|CharField|NOT NULL
+  final_resolution|CharField|NOT NULL
+  driver_name|CharField|NOT NULL
+  driver_phone|CharField|NOT NULL
   installed_at|DateTimeField|NULL
   delivery_otp|CharField|NOT NULL
   otp_expiry|DateTimeField|NULL
@@ -736,6 +791,7 @@ TABLE: epidemic_trends
   region|CharField|NOT NULL
   case_count|IntegerField|NOT NULL
   spike_detected|BooleanField|NOT NULL
+  is_auto_detected|BooleanField|NOT NULL
   heatmap_data|JSONField|NOT NULL
   alert_level|CharField|NOT NULL
   recorded_date|DateField|NOT NULL

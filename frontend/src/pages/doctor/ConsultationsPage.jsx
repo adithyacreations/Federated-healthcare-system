@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { FiCalendar, FiPlus, FiFileText, FiHome, FiSearch, FiUser } from 'react-icons/fi';
+import { FiCalendar, FiFileText, FiHome, FiSearch, FiUser } from 'react-icons/fi';
 
 import DoctorLayout from '../../components/doctor/DoctorLayout';
 import { T, DoctorAvatar } from '../../components/doctor/ui';
@@ -145,7 +145,7 @@ const ConsultationsPage = () => {
   // ─── Active / upcoming card ───────────────────────────────────
   const renderActiveCard = (c) => {
     const isOffline = c.consult_mode === 'offline';
-    const isOnline = !isOffline && c.consult_type !== 'in_person';
+    const isOnline = !isOffline && !['offline', 'in_person'].includes(c.consult_type);
     const btn = getButtonStatus(c);
     const target = isOffline ? `/doctor/offline-consultation/${c.consultation_id}` : `/doctor/consultation/${c.consultation_id}`;
     const label = isOffline ? '🏥 Open Visit' : isOnline ? '📹 Start Call' : '▶ Start';
@@ -224,7 +224,7 @@ const ConsultationsPage = () => {
               <FiHome className="w-4 h-4" /> New Physical Visit
             </button>
             <Link to="/doctor/slots" className="inline-flex items-center gap-1.5 text-white px-4 py-2 rounded-full text-sm font-semibold" style={{ backgroundColor: T.dark }}>
-              <FiPlus className="w-4 h-4" /> Add Slot
+              <FiCalendar className="w-4 h-4" /> View Schedule
             </Link>
           </div>
         </div>

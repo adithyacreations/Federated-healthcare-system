@@ -27,11 +27,11 @@ const SuspendedBadge = () => (
 );
 
 const StaffActions = ({ canSetDept, onSetDept, isActive = true, onSuspend, onResume, onTerminate }) => (
-  <div className="flex gap-2 flex-wrap">
+  <div className="flex flex-col gap-2 w-full min-w-[120px]">
     {canSetDept && (
       <button
         onClick={onSetDept}
-        className="px-3 py-1 rounded-md text-xs font-semibold whitespace-nowrap"
+        className="w-full px-3 py-1.5 rounded-md text-xs font-semibold text-center whitespace-nowrap"
         style={{ backgroundColor: '#FFF7ED', color: '#F97316', border: '1px solid #FED7AA' }}
       >
         🏥 Set Dept
@@ -40,7 +40,7 @@ const StaffActions = ({ canSetDept, onSetDept, isActive = true, onSuspend, onRes
     {isActive ? (
       <button
         onClick={onSuspend}
-        className="px-3 py-1 rounded-md text-xs font-semibold whitespace-nowrap"
+        className="w-full px-3 py-1.5 rounded-md text-xs font-semibold text-center whitespace-nowrap"
         style={{ backgroundColor: '#FFF7ED', color: '#F97316', border: '1px solid #FED7AA' }}
       >
         🔴 Suspend
@@ -48,7 +48,7 @@ const StaffActions = ({ canSetDept, onSetDept, isActive = true, onSuspend, onRes
     ) : (
       <button
         onClick={onResume}
-        className="px-3 py-1 rounded-md text-xs font-semibold whitespace-nowrap"
+        className="w-full px-3 py-1.5 rounded-md text-xs font-semibold text-center whitespace-nowrap"
         style={{ backgroundColor: '#F0FDF4', color: '#16A34A', border: '1px solid #86EFAC' }}
       >
         ✅ Resume
@@ -56,7 +56,7 @@ const StaffActions = ({ canSetDept, onSetDept, isActive = true, onSuspend, onRes
     )}
     <button
       onClick={onTerminate}
-      className="px-3 py-1 rounded-md text-xs font-semibold whitespace-nowrap"
+      className="w-full px-3 py-1.5 rounded-md text-xs font-semibold text-center whitespace-nowrap"
       style={{ backgroundColor: '#FEF2F2', color: '#EF4444', border: '1.5px solid #FCA5A5' }}
     >
       ⛔ Terminate
@@ -182,19 +182,19 @@ const StaffPage = () => {
 
   return (
     <DashboardLayout>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-primary-500">Staff Management</h1>
           <p className="text-sm text-gray-500">Manage doctors, lab technicians, and ambulance drivers</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setModal('doctor')} className="inline-flex items-center gap-1.5 bg-orange-500 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-orange-600 transition">
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setModal('doctor')} className="inline-flex items-center gap-1.5 bg-orange-500 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-orange-600 transition whitespace-nowrap">
             <FiPlus className="w-4 h-4" /> Doctor
           </button>
-          <button onClick={() => setModal('lab')} className="inline-flex items-center gap-1.5 bg-black text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-black/80 transition">
+          <button onClick={() => setModal('lab')} className="inline-flex items-center gap-1.5 bg-black text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-black/80 transition whitespace-nowrap">
             <FiPlus className="w-4 h-4" /> Lab Tech
           </button>
-          <button onClick={() => setModal('driver')} className="inline-flex items-center gap-1.5 bg-black text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-black/80 transition">
+          <button onClick={() => setModal('driver')} className="inline-flex items-center gap-1.5 bg-black text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-black/80 transition whitespace-nowrap">
             <FiPlus className="w-4 h-4" /> Driver
           </button>
         </div>

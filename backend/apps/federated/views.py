@@ -851,6 +851,7 @@ class CreateEpidemicTrendView(APIView):
             region=d.get('region', ''),
             case_count=d['case_count'],
             spike_detected=d.get('spike_detected', False),
+            is_auto_detected=d.get('is_auto_detected', False),
             heatmap_data=d.get('heatmap_data', []),
             alert_level=d['alert_level'],
             recorded_date=d['recorded_date'],
@@ -964,6 +965,40 @@ class ResolveEpidemicView(APIView):
             f'{epidemic.disease_name} epidemic resolved! All staff notified.',
             EpidemicTrendSerializer(epidemic).data,
         )
+
+
+class DeleteEpidemicView(APIView):
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+
+    def delete(self, request, trend_id):
+        try:
+            epidemic = EpidemicTrend.objects.get(trend_id=trend_id)
+        except EpidemicTrend.DoesNotExist:
+            return err('Epidemic not found.', status_code=404)
+
+        epidemic_name = epidemic.disease_name
+        epidemic.delete()
+
+        log_audit(
+            login_id=request.user,
+            action='delete_epidemic_trend',
+            module='federated',
+            entity_type='EpidemicTrend',
+            entity_id=str(trend_id),
+            new_value={'disease_name': epidemic_name},
+        )
+
+        # Update frontend quietly
+        try:
+            broadcast_fl_update('epidemic_deleted', {
+                'trend_id': str(trend_id),
+                'message': f'Epidemic {epidemic_name} has been removed quietly.',
+            })
+        except Exception:
+            pass
+
+        return ok(f'{epidemic_name} epidemic removed quietly.')
+
 
 
 # ─── 10. Hospital FL Status ─────────────────────────────────────────────────
@@ -1360,6 +1395,7 @@ class AutoDetectEpidemicView(APIView):
                     'region': alert['region'],
                     'case_count': alert['current_week_cases'],
                     'spike_detected': True,
+                    'is_auto_detected': True,
                     'alert_level': alert['alert_level'],
                     'heatmap_data': [],
                 },

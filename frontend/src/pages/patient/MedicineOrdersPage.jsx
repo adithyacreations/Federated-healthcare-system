@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { FiUpload } from 'react-icons/fi';
+import { FiDownload, FiUpload } from 'react-icons/fi';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
 import Modal from '../../components/common/Modal';
 import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import { openRazorpay } from '../../utils/payment';
+import { downloadBillPdf } from '../../utils/pdf';
 
 // Map raw backend statuses → simplified buckets used by the tab UI and the
 // progress tracker. Backend uses a richer set (prescription_uploaded etc.) so
@@ -17,6 +18,9 @@ const simplifyStatus = (s) => {
   if (!s) return 'pending';
   if (s === 'cancelled' || s === 'delivered' || s === 'dispatched') return s;
   if (s === 'pending' || s === 'awaiting_prescription' || s === 'prescription_required') return 'pending';
+  if (s === 'resolved') return 'delivered';
+  if (s === 'wrong_product') return 'processing';
+  if (s === 'refunded') return 'cancelled';
   return 'processing'; // confirmed, prescription_uploaded/approved, verified, payment_pending
 };
 
@@ -24,6 +28,8 @@ const STATUS_BADGE = {
   delivered:  { cls: 'bg-green-100 text-green-700',   label: '✓ Delivered' },
   dispatched: { cls: 'bg-blue-100 text-blue-700',     label: '🚚 Dispatched' },
   processing: { cls: 'bg-orange-100 text-orange-700', label: '⚙️ Processing' },
+  wrong_product: { cls: 'bg-red-100 text-red-700',    label: '⚠️ Issue Reported' },
+  refunded:   { cls: 'bg-red-100 text-red-800',       label: '💸 Refunded' },
   cancelled:  { cls: 'bg-red-100 text-red-700',       label: '✕ Cancelled' },
   pending:    { cls: 'bg-yellow-100 text-yellow-700', label: '⏳ Pending' },
 };
@@ -109,6 +115,9 @@ const MedicineOrdersPage = () => {
   const [otpOrder, setOtpOrder] = useState(null);
   const [otp, setOtp] = useState('');
   const [confirming, setConfirming] = useState(false);
+  const [reportingIssue, setReportingIssue] = useState(false);
+  const [issueType, setIssueType] = useState('Wrong medicine');
+  const [desiredResolution, setDesiredResolution] = useState('refund');
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -174,6 +183,25 @@ const MedicineOrdersPage = () => {
       fetchOrders();
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Invalid or expired OTP');
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const reportIssue = async () => {
+    if (!otpOrder) return;
+    setConfirming(true);
+    try {
+      await API.post(`/api/pharmacy/orders/${otpOrder.order_id}/report-issue/`, {
+        issue_type: issueType,
+        desired_resolution: desiredResolution
+      });
+      toast.success('Issue reported! The pharmacist will contact you soon.');
+      setOtpOrder(null);
+      setReportingIssue(false);
+      fetchOrders();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to report issue');
     } finally {
       setConfirming(false);
     }
@@ -415,6 +443,21 @@ const MedicineOrdersPage = () => {
                     </div>
                   )}
 
+                  {['paid', 'refunded'].includes(order.payment_status) && (
+                    <button
+                      type="button"
+                      onClick={() => downloadBillPdf(
+                        `/api/patient/medicine/orders/${order.order_id}/bill/`,
+                        `medicine-bill-${String(order.order_id || '').slice(0, 8)}.pdf`,
+                      )}
+                      className="mt-3 px-4 py-2 rounded-full text-sm font-semibold border-2 inline-flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                      style={{ borderColor: '#F97316', color: '#F97316', backgroundColor: '#FFFFFF' }}
+                    >
+                      <FiDownload className="w-4 h-4" />
+                      Download Bill
+                    </button>
+                  )}
+
                   {/* Cancelled / rejected with reason */}
                   {order.status === 'cancelled' && order.prescription_rejection_reason && (
                     <div
@@ -440,14 +483,23 @@ const MedicineOrdersPage = () => {
                       <p className="text-sm text-gray-700 mb-2">
                         🚚 On the way! Check your email for the delivery OTP.
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => { setOtpOrder(order); setOtp(''); }}
-                        className="px-4 py-2 rounded-full text-sm font-medium text-white"
-                        style={{ backgroundColor: '#F97316' }}
-                      >
-                        Confirm Receipt
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setOtpOrder(order); setOtp(''); setReportingIssue(false); }}
+                          className="px-4 py-2 rounded-full text-sm font-medium text-white flex-1"
+                          style={{ backgroundColor: '#F97316' }}
+                        >
+                          Confirm Receipt
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setOtpOrder(order); setReportingIssue(true); }}
+                          className="px-4 py-2 rounded-full text-sm font-medium text-red-600 bg-red-50 border border-red-200 whitespace-nowrap"
+                        >
+                          Wrong Product?
+                        </button>
+                      </div>
                     </div>
                   )}
                 </motion.div>
@@ -458,28 +510,67 @@ const MedicineOrdersPage = () => {
       </div>
 
       {/* OTP delivery-confirmation modal */}
-      <Modal isOpen={Boolean(otpOrder)} onClose={() => setOtpOrder(null)} title="Confirm Delivery">
+      <Modal isOpen={Boolean(otpOrder)} onClose={() => { setOtpOrder(null); setReportingIssue(false); }} title={reportingIssue ? "Report Issue" : "Confirm Delivery"}>
         <div className="space-y-3">
-          <p className="text-sm text-gray-500">
-            Enter the 6-digit OTP sent to your email to confirm you received the medicines.
-          </p>
-          <input
-            className="w-full text-center text-lg tracking-[0.4em] font-mono border rounded-xl px-4 py-3 focus:outline-none"
-            style={{ borderColor: '#E5E5E5' }}
-            maxLength={6}
-            value={otp}
-            onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-            placeholder="------"
-          />
-          <button
-            type="button"
-            onClick={confirmDelivery}
-            disabled={confirming}
-            className="w-full px-4 py-2 rounded-full text-sm font-semibold text-white disabled:opacity-60"
-            style={{ backgroundColor: '#F97316' }}
-          >
-            {confirming ? 'Confirming…' : 'Confirm Delivery'}
-          </button>
+          {reportingIssue ? (
+            <>
+              <p className="text-sm text-gray-500">
+                Did you receive the wrong product? Please select the issue below, and the pharmacist will resolve it.
+              </p>
+              <select
+                className="w-full border rounded-xl px-4 py-3 focus:outline-none"
+                style={{ borderColor: '#E5E5E5' }}
+                value={issueType}
+                onChange={(e) => setIssueType(e.target.value)}
+              >
+                <option value="Wrong medicine">Wrong medicine delivered</option>
+                <option value="Missing items">Missing items</option>
+                <option value="Damaged products">Damaged products</option>
+              </select>
+              <label className="text-xs text-gray-500 mt-2 block">What would you like us to do?</label>
+              <select
+                className="w-full border rounded-xl px-4 py-3 focus:outline-none"
+                style={{ borderColor: '#E5E5E5' }}
+                value={desiredResolution}
+                onChange={(e) => setDesiredResolution(e.target.value)}
+              >
+                <option value="refund">I want a Refund</option>
+                <option value="redeliver">I want the correct items (Redeliver)</option>
+              </select>
+              <button
+                type="button"
+                onClick={reportIssue}
+                disabled={confirming}
+                className="w-full px-4 py-2 rounded-full text-sm font-semibold text-white disabled:opacity-60"
+                style={{ backgroundColor: '#EF4444' }}
+              >
+                {confirming ? 'Submitting…' : 'Submit Complaint'}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-500">
+                Enter the 6-digit OTP sent to your email to confirm you received the medicines.
+              </p>
+              <input
+                className="w-full text-center text-lg tracking-[0.4em] font-mono border rounded-xl px-4 py-3 focus:outline-none"
+                style={{ borderColor: '#E5E5E5' }}
+                maxLength={6}
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                placeholder="------"
+              />
+              <button
+                type="button"
+                onClick={confirmDelivery}
+                disabled={confirming}
+                className="w-full px-4 py-2 rounded-full text-sm font-semibold text-white disabled:opacity-60"
+                style={{ backgroundColor: '#F97316' }}
+              >
+                {confirming ? 'Confirming…' : 'Confirm Delivery'}
+              </button>
+            </>
+          )}
         </div>
       </Modal>
     </DashboardLayout>

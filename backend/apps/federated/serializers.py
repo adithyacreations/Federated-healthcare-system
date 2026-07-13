@@ -61,6 +61,7 @@ class CreateEpidemicSerializer(serializers.Serializer):
     region = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
     case_count = serializers.IntegerField(min_value=0)
     spike_detected = serializers.BooleanField(default=False)
+    is_auto_detected = serializers.BooleanField(default=False)
     alert_level = serializers.ChoiceField(choices=['low', 'moderate', 'high', 'critical'])
     heatmap_data = serializers.ListField(required=False, default=list)
     recorded_date = serializers.DateField()

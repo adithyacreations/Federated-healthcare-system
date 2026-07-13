@@ -64,7 +64,7 @@ const TripHistoryPage = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 min-h-screen" style={{ backgroundColor: '#FAF7F2' }}>
+      <div className="p-4 sm:p-6 min-h-screen min-w-0 w-full overflow-x-hidden" style={{ backgroundColor: '#FAF7F2' }}>
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-black">📊 Trip Statistics</h1>
           <p className="text-gray-500 text-sm">Your emergency response record</p>
@@ -79,28 +79,28 @@ const TripHistoryPage = () => {
         {stats && (
           <>
             {/* ─── Hero stats ────────────────────────────────────── */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white rounded-2xl p-5 border border-gray-100 text-center">
-                <p className="text-4xl font-bold text-black">{stats.total_trips}</p>
-                <p className="text-gray-500 text-sm mt-1">🚑 Total Trips</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6">
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100 text-center">
+                <p className="text-3xl sm:text-4xl font-bold text-black">{stats.total_trips}</p>
+                <p className="text-gray-500 text-xs sm:text-sm mt-1">🚑 Total Trips</p>
               </div>
-              <div className="rounded-2xl p-5 text-center" style={{ backgroundColor: '#FFF7ED' }}>
-                <p className="text-4xl font-bold" style={{ color: '#F97316' }}>{stats.today_trips}</p>
-                <p className="text-sm mt-1" style={{ color: '#EA580C' }}>📅 Today</p>
+              <div className="rounded-2xl p-4 sm:p-5 text-center" style={{ backgroundColor: '#FFF7ED' }}>
+                <p className="text-3xl sm:text-4xl font-bold" style={{ color: '#F97316' }}>{stats.today_trips}</p>
+                <p className="text-xs sm:text-sm mt-1" style={{ color: '#EA580C' }}>📅 Today</p>
               </div>
-              <div className="bg-white rounded-2xl p-5 border border-gray-100 text-center">
-                <p className="text-4xl font-bold text-black">{stats.weekly_trips}</p>
-                <p className="text-gray-500 text-sm mt-1">📆 This Week</p>
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100 text-center">
+                <p className="text-3xl sm:text-4xl font-bold text-black">{stats.weekly_trips}</p>
+                <p className="text-gray-500 text-xs sm:text-sm mt-1">📆 This Week</p>
               </div>
-              <div className="bg-white rounded-2xl p-5 border border-gray-100 text-center">
-                <p className="text-4xl font-bold text-black">{stats.monthly_trips}</p>
-                <p className="text-gray-500 text-sm mt-1">🗓️ This Month</p>
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100 text-center">
+                <p className="text-3xl sm:text-4xl font-bold text-black">{stats.monthly_trips}</p>
+                <p className="text-gray-500 text-xs sm:text-sm mt-1">🗓️ This Month</p>
               </div>
             </div>
 
             {/* ─── Performance cards ────────────────────────────── */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-white rounded-2xl p-5 border border-gray-100">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-6">
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100">
                 <p className="text-xs text-gray-500 mb-1">⚡ Avg Response Time</p>
                 <p className="text-3xl font-bold text-black">
                   {stats.avg_response_time}
@@ -110,7 +110,7 @@ const TripHistoryPage = () => {
                   {badge.label}
                 </span>
               </div>
-              <div className="bg-white rounded-2xl p-5 border border-gray-100">
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100">
                 <p className="text-xs text-gray-500 mb-1">🗺️ Total Distance</p>
                 <p className="text-3xl font-bold text-black">
                   {stats.total_km}
@@ -121,7 +121,7 @@ const TripHistoryPage = () => {
             </div>
 
             {/* ─── Weekly chart ─────────────────────────────────── */}
-            <div className="bg-white rounded-2xl p-5 border border-gray-100 mb-6">
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100 mb-6">
               <h3 className="font-bold mb-4">📈 Last 7 Days</h3>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart
@@ -142,7 +142,7 @@ const TripHistoryPage = () => {
 
             {/* ─── Severity breakdown ───────────────────────────── */}
             {Object.keys(stats.severity_breakdown).length > 0 && (
-              <div className="bg-white rounded-2xl p-5 border border-gray-100 mb-6">
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100 mb-6">
                 <h3 className="font-bold mb-4">🚨 By Severity</h3>
                 <div className="space-y-3">
                   {Object.entries(stats.severity_breakdown).map(([severity, count]) => (
@@ -171,11 +171,11 @@ const TripHistoryPage = () => {
             )}
 
             {/* ─── Recent trips ─────────────────────────────────── */}
-            <div className="bg-white rounded-2xl p-5 border border-gray-100">
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100">
               <h3 className="font-bold mb-4">🕐 Recent Trips</h3>
 
               {/* Status filter tabs */}
-              <div className="flex gap-2 mb-4 overflow-x-auto">
+              <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
                 {[
                   { key: 'all', label: 'All' },
                   { key: 'completed', label: '✅ Completed' },

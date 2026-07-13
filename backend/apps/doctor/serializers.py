@@ -1,7 +1,9 @@
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from django.utils import timezone
 from rest_framework import serializers
-from .models import DoctorRegistration, DoctorSlot, Consultation, Prescription
+from .models import DoctorRegistration, DoctorSchedule, DoctorSlot, Consultation, Prescription
+from .utils import normalize_working_days
 
 
 class DoctorProfileSerializer(serializers.ModelSerializer):
@@ -16,10 +18,93 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         return obj.dept_id.dept_name if obj.dept_id else None
 
 
+class DoctorScheduleSerializer(serializers.ModelSerializer):
+    hospital_name = serializers.CharField(source='hospital.hospital_name', read_only=True)
+    doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
+    specialization = serializers.CharField(source='doctor.specialization', read_only=True)
+
+    class Meta:
+        model = DoctorSchedule
+        fields = [
+            'schedule_id', 'hospital', 'hospital_name', 'doctor', 'doctor_name',
+            'specialization', 'working_days', 'start_time', 'end_time',
+            'slot_duration_minutes', 'consultation_type', 'consultation_fee',
+            'is_active', 'created_at', 'updated_at',
+        ]
+
+
+class DoctorScheduleWriteSerializer(serializers.Serializer):
+    doctor_id = serializers.UUIDField()
+    working_days = serializers.ListField(
+        child=serializers.CharField(max_length=20),
+        allow_empty=False,
+    )
+    start_time = serializers.TimeField()
+    end_time = serializers.TimeField()
+    slot_duration_minutes = serializers.IntegerField(min_value=1)
+    consultation_type = serializers.ChoiceField(choices=['online', 'offline', 'both'])
+    consultation_fee = serializers.DecimalField(max_digits=8, decimal_places=2, min_value=Decimal('0'))
+    is_active = serializers.BooleanField(required=False, default=True)
+    days_ahead = serializers.IntegerField(required=False, min_value=1, max_value=180, default=30)
+
+    def validate_working_days(self, value):
+        try:
+            return normalize_working_days(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+
+    def validate(self, data):
+        if data['end_time'] <= data['start_time']:
+            raise serializers.ValidationError(
+                {'end_time': 'End time must be greater than start time.'}
+            )
+
+        hospital = self.context.get('hospital')
+        try:
+            doctor = DoctorRegistration.objects.get(
+                doctor_id=data['doctor_id'],
+                approval_status='approved',
+            )
+        except DoctorRegistration.DoesNotExist:
+            raise serializers.ValidationError({'doctor_id': 'Doctor not found.'})
+
+        if hospital and doctor.hospital_id_id != hospital.hospital_id:
+            raise serializers.ValidationError(
+                {'doctor_id': 'Doctor must belong to the selected hospital.'}
+            )
+
+        data['_doctor'] = doctor
+        return data
+
+
 class DoctorSlotSerializer(serializers.ModelSerializer):
+    doctor = serializers.UUIDField(source='doctor_id.doctor_id', read_only=True)
+    doctor_name = serializers.CharField(source='doctor_id.full_name', read_only=True)
+    hospital_name = serializers.CharField(source='hospital.hospital_name', read_only=True)
+    schedule_id = serializers.UUIDField(source='schedule.schedule_id', read_only=True)
+    date = serializers.DateField(source='slot_date', read_only=True)
+    consultation_type = serializers.CharField(source='consult_type', read_only=True)
+    availability_status = serializers.CharField(source='status', read_only=True)
+
     class Meta:
         model = DoctorSlot
-        fields = '__all__'
+        fields = [
+            'slot_id', 'doctor_id', 'doctor', 'doctor_name',
+            'hospital', 'hospital_name', 'schedule', 'schedule_id',
+            'slot_date', 'date', 'start_time', 'end_time',
+            'consult_type', 'consultation_type', 'consultation_fee',
+            'status', 'availability_status', 'is_booked', 'is_blocked',
+            'blocked_by', 'block_reason', 'created_at', 'updated_at',
+        ]
+
+
+class BlockDoctorSlotSerializer(serializers.Serializer):
+    block_reason = serializers.CharField(
+        max_length=500,
+        required=False,
+        allow_blank=True,
+        default='Unavailable',
+    )
 
 
 class ConsultationSerializer(serializers.ModelSerializer):
@@ -106,7 +191,7 @@ class CreateSlotSerializer(serializers.Serializer):
     start_time = serializers.TimeField()
     end_time = serializers.TimeField()
     consult_type = serializers.ChoiceField(
-        choices=['online', 'in_person'], default='online', required=False
+        choices=['online', 'offline', 'both', 'in_person'], default='online', required=False
     )
 
     def validate_slot_date(self, value):

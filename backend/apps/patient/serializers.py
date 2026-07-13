@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 from .models import PatientRegistration, EHRRecord, Allergy, EHRConsentLog, RiskAssessment
 
 
@@ -36,11 +37,12 @@ class BookConsultationSerializer(serializers.Serializer):
     doctor_id = serializers.UUIDField()
     slot_id = serializers.UUIDField()
     consult_type = serializers.ChoiceField(
-        choices=['online', 'in_person'], default='online', required=False
+        choices=['online', 'offline', 'in_person'], default='online', required=False
     )
 
     def validate(self, data):
         from apps.doctor.models import DoctorRegistration, DoctorSlot
+        from apps.doctor.utils import get_current_schedule_for_doctor
 
         try:
             doctor = DoctorRegistration.objects.get(
@@ -51,13 +53,23 @@ class BookConsultationSerializer(serializers.Serializer):
                 {'doctor_id': 'Doctor not found or not approved.'}
             )
 
+        current_schedule = get_current_schedule_for_doctor(doctor)
+        if not current_schedule:
+            raise serializers.ValidationError(
+                {'slot_id': 'Slot not found or not available.'}
+            )
+
         try:
-            slot = DoctorSlot.objects.select_related('doctor_id').get(
-                slot_id=data['slot_id'], is_booked=False
+            slot = DoctorSlot.objects.select_related('doctor_id', 'schedule').get(
+                slot_id=data['slot_id'],
+                schedule=current_schedule,
+                is_booked=False,
+                is_blocked=False,
+                status='available',
             )
         except DoctorSlot.DoesNotExist:
             raise serializers.ValidationError(
-                {'slot_id': 'Slot not found or already booked.'}
+                {'slot_id': 'Slot not found or not available.'}
             )
 
         if str(slot.doctor_id.doctor_id) != str(data['doctor_id']):
@@ -65,8 +77,26 @@ class BookConsultationSerializer(serializers.Serializer):
                 {'slot_id': 'Slot does not belong to this doctor.'}
             )
 
+        now = timezone.localtime(timezone.now())
+        if slot.slot_date < now.date() or (
+            slot.slot_date == now.date() and slot.start_time <= now.time()
+        ):
+            raise serializers.ValidationError(
+                {'slot_id': 'Slot is no longer available.'}
+            )
+
+        slot_type = slot.consult_type
+        requested = data.get('consult_type') or 'online'
+        if slot_type == 'both':
+            consult_mode = 'offline' if requested in ('offline', 'in_person') else 'online'
+        elif slot_type in ('offline', 'in_person'):
+            consult_mode = 'offline'
+        else:
+            consult_mode = 'online'
+
         data['_doctor'] = doctor
         data['_slot'] = slot
+        data['_consult_mode'] = consult_mode
         return data
 
 

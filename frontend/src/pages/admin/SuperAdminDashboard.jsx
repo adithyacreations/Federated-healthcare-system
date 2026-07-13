@@ -81,7 +81,7 @@ const SuperAdminDashboard = () => {
   const totalHospitals = stats.data?.total_hospitals ?? 0;
   const totalDoctors = stats.data?.total_doctors ?? 0;
   const totalPatients = stats.data?.total_patients ?? 0;
-  const activeUsers = totalDoctors + totalPatients;
+  const activeUsers = stats.data?.active_users ?? 0;
   const pendingCount = stats.data?.pending_approvals ?? 0;
   const flRoundsCompleted = accuracyTrend.length;
 
@@ -144,7 +144,7 @@ const SuperAdminDashboard = () => {
         </div>
 
         {/* Two-column: Recent activity + Active alerts */}
-        <div className="v-two-col" style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16, marginBottom: 24 }}>
+        <div className="v-two-col">
           {/* Recent activity */}
           <motion.div variants={cardVariants} className="v-card">
             <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--v-line-2)' }}>

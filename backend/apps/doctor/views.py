@@ -4,6 +4,7 @@ import io
 from datetime import date, datetime, timezone, timedelta
 
 from django.conf import settings
+from django.db.models import Q
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -12,16 +13,19 @@ from rest_framework import status
 from apps.auth_app.permissions import IsDoctor
 from utils import log_audit, send_notification, broadcast_new_slots_to_patients
 from email_utils import send_prescription_email
-from .models import DoctorRegistration, DoctorSlot, Consultation, Prescription
+from .models import DoctorRegistration, DoctorSchedule, DoctorSlot, Consultation, Prescription
 from .serializers import (
     DoctorProfileSerializer,
+    DoctorScheduleSerializer,
     DoctorSlotSerializer,
     ConsultationSerializer,
     PrescriptionSerializer,
     CreateSlotSerializer,
+    BlockDoctorSlotSerializer,
     CreatePrescriptionSerializer,
     CreateLabOrderSerializer,
 )
+from .utils import AUTO_OBSOLETE_BLOCK_REASONS, block_doctor_slot
 
 
 def ok(message, data=None, status_code=200):
@@ -214,7 +218,14 @@ class DoctorDashboardView(APIView):
             doctor_id=doctor,
             slot_date__gte=today,
             is_booked=False,
+            is_blocked=False,
+            status='available',
+            schedule__isnull=False,
         ).order_by('slot_date', 'start_time')[:5]
+
+        schedules = DoctorSchedule.objects.filter(
+            doctor=doctor,
+        ).order_by('-is_active', 'start_time')
 
         recent_prescriptions = Prescription.objects.filter(
             doctor_id=doctor
@@ -228,6 +239,7 @@ class DoctorDashboardView(APIView):
             'today_consultations': today_consultations,
             'pending_lab_results': pending_lab,
             'total_patients_seen': total_patients,
+            'schedules': DoctorScheduleSerializer(schedules, many=True).data,
             'upcoming_slots': DoctorSlotSerializer(upcoming_slots, many=True).data,
             'recent_prescriptions': PrescriptionSerializer(recent_prescriptions, many=True).data,
         })
@@ -309,44 +321,7 @@ class CreateSlotView(APIView):
         doctor = get_doctor(request)
         if not doctor:
             return err('Doctor profile not found.', status_code=404)
-
-        ser = CreateSlotSerializer(data=request.data)
-        if not ser.is_valid():
-            return err('Validation failed.', errors=ser.errors)
-
-        d = ser.validated_data
-
-        has_overlap, msg = check_slot_overlap(
-            doctor, d['slot_date'], d['start_time'], d['end_time']
-        )
-        if has_overlap:
-            return err(msg, status_code=400)
-
-        slot = DoctorSlot.objects.create(
-            doctor_id=doctor,
-            slot_date=d['slot_date'],
-            start_time=d['start_time'],
-            end_time=d['end_time'],
-            consult_type=d.get('consult_type', 'online'),
-        )
-        log_audit(
-            login_id=request.user,
-            action='Doctor created slot',
-            module='doctor',
-            entity_type='DoctorSlot',
-            entity_id=str(slot.slot_id),
-        )
-
-        # Real-time: nudge every patient's notification socket so their
-        # "Book a Doctor" list (and any open slot picker) refreshes live.
-        try:
-            broadcast_new_slots_to_patients(
-                doctor_name=doctor.full_name, doctor_id=doctor.doctor_id,
-            )
-        except Exception as exc:
-            print(f'[WS] Slot broadcast error: {exc}')
-
-        return ok('Slot created.', DoctorSlotSerializer(slot).data, status_code=201)
+        return err('Doctor cannot modify hospital-created schedule', status_code=403)
 
 
 class ListSlotsView(APIView):
@@ -361,6 +336,10 @@ class ListSlotsView(APIView):
         cutoff = date.today() - timedelta(days=7)
         slots_qs = DoctorSlot.objects.filter(
             doctor_id=doctor, slot_date__gte=cutoff
+        ).exclude(
+            Q(is_booked=False)
+            & (Q(is_blocked=True) | Q(status='blocked'))
+            & Q(block_reason__in=AUTO_OBSOLETE_BLOCK_REASONS)
         ).order_by('-slot_date', 'start_time')
 
         filter_date = request.query_params.get('date')
@@ -368,6 +347,56 @@ class ListSlotsView(APIView):
             slots_qs = slots_qs.filter(slot_date=filter_date)
 
         return ok('Slots retrieved.', DoctorSlotSerializer(slots_qs, many=True).data)
+
+
+class DoctorSchedulesView(APIView):
+    permission_classes = [IsAuthenticated, IsDoctor]
+
+    def get(self, request):
+        doctor = get_doctor(request)
+        if not doctor:
+            return err('Doctor profile not found.', status_code=404)
+
+        schedules = DoctorSchedule.objects.filter(doctor=doctor).order_by(
+            '-is_active', 'start_time',
+        )
+        return ok('Doctor schedules retrieved.', DoctorScheduleSerializer(schedules, many=True).data)
+
+
+class BlockSlotView(APIView):
+    permission_classes = [IsAuthenticated, IsDoctor]
+
+    def post(self, request, slot_id):
+        doctor = get_doctor(request)
+        if not doctor:
+            return err('Doctor profile not found.', status_code=404)
+
+        ser = BlockDoctorSlotSerializer(data=request.data)
+        if not ser.is_valid():
+            return err('Validation failed.', errors=ser.errors)
+
+        try:
+            slot = DoctorSlot.objects.get(slot_id=slot_id, doctor_id=doctor)
+        except DoctorSlot.DoesNotExist:
+            return err('Slot not found.', status_code=404)
+
+        try:
+            block_doctor_slot(
+                slot,
+                blocked_by='doctor',
+                reason=ser.validated_data.get('block_reason') or 'Doctor unavailable',
+            )
+        except ValueError as exc:
+            return err(str(exc), status_code=400)
+
+        log_audit(
+            login_id=request.user,
+            action='Doctor blocked slot',
+            module='doctor',
+            entity_type='DoctorSlot',
+            entity_id=str(slot.slot_id),
+        )
+        return ok('Slot blocked successfully', DoctorSlotSerializer(slot).data)
 
 
 class ConsultationChatView(APIView):

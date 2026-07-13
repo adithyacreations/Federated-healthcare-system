@@ -73,6 +73,7 @@ const VendorDashboard = () => {
 
   const recent = orders.slice(0, 3);
   const company = stats?.company_name || 'Vendor';
+  const issuesList = orders.filter((o) => o.order_status === 'wrong_product');
 
   return (
     <DashboardLayout>
@@ -95,6 +96,36 @@ const VendorDashboard = () => {
           </div>
         </div>
 
+        {issuesList.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-red-200 overflow-hidden mb-6">
+            <div className="bg-red-50 px-6 py-4 border-b border-red-100 flex items-center justify-between">
+              <h2 className="font-bricolage text-lg font-bold text-red-900 flex items-center gap-2">
+                <FiPackage /> Attention: Reported Issues ({issuesList.length})
+              </h2>
+              <Link to="/vendor/orders" className="text-sm font-semibold text-red-700 hover:text-red-800">
+                Go to Orders &rarr;
+              </Link>
+            </div>
+            <div className="divide-y divide-red-100">
+              {issuesList.map((o) => (
+                <div key={o.eq_order_id} className="p-4 px-6 flex items-center justify-between hover:bg-red-50/50 transition-colors">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900 mb-0.5">
+                      Order #{o.eq_order_id.slice(0, 8)} • {o.hospital_name}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Product: {o.product_name} | Requested Resolution: <span className="font-bold uppercase text-red-600">{o.hospital_desired_resolution}</span>
+                    </div>
+                  </div>
+                  <Link to="/vendor/orders" className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-all">
+                    Resolve Issue
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Stats */}
         <div className="v-stats">
           <StatCard label="Total Products"    value={totalProducts}                          icon={FiBox}          sparkColor="var(--v-orange)" />
@@ -104,7 +135,7 @@ const VendorDashboard = () => {
         </div>
 
         {/* Two-column: recent orders + unread messages */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16, marginBottom: 24 }} className="v-two-col">
+        <div className="v-two-col">
           <motion.div variants={cardVariants} className="v-card">
             <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--v-line-2)' }}>
               <div>
@@ -126,14 +157,13 @@ const VendorDashboard = () => {
                 return (
                   <div
                     key={o.eq_order_id}
+                    className="flex items-center flex-wrap gap-3 sm:gap-4 p-3 sm:p-4"
                     style={{
-                      display: 'grid', gridTemplateColumns: '1fr 110px 120px', alignItems: 'center', gap: 12,
-                      padding: '12px 20px',
                       borderBottom: i < recent.length - 1 ? '1px solid var(--v-line-2)' : 'none',
                       animation: `vRowIn 380ms var(--v-ease) ${i * 60}ms both`,
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-[120px]">
                       <div
                         className="v-hosp-mark"
                         style={{ background: `linear-gradient(135deg, ${c1}, ${c2})`, width: 30, height: 30, borderRadius: 8, fontSize: 11 }}
@@ -149,10 +179,10 @@ const VendorDashboard = () => {
                         </div>
                       </div>
                     </div>
-                    <div style={{ fontFamily: 'Bricolage Grotesque, system-ui, sans-serif', fontWeight: 700, fontSize: 14 }}>
+                    <div className="font-bricolage font-bold text-sm whitespace-nowrap min-w-[80px] text-right">
                       ₹{Number(o.total_price || 0).toLocaleString('en-IN')}
                     </div>
-                    <span className={`v-status ${o.order_status}`}>
+                    <span className={`v-status ${o.order_status} whitespace-nowrap shrink-0`}>
                       <span className="pip" />
                       {STATUS_LABEL[o.order_status] || o.order_status}
                     </span>

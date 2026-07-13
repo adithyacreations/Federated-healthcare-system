@@ -2,13 +2,14 @@ import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import {
   FiShoppingCart, FiRefreshCw, FiCheckCircle, FiPackage,
-  FiTruck, FiClock, FiMapPin, FiFilter,
+  FiTruck, FiClock, FiMapPin, FiFilter, FiDownload,
 } from 'react-icons/fi';
 import DashboardLayout from '../../components/common/DashboardLayout';
 import Modal from '../../components/common/Modal';
 import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
 import HospitalChatWindow from '../../components/chat/HospitalChatWindow';
+import { downloadBillPdf } from '../../utils/pdf';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ const PAY_BADGE = {
   pending: 'bg-gray-100   text-gray-600',
   paid:    'bg-green-100  text-green-700',
   failed:  'bg-red-100    text-red-700',
+  refunded: 'bg-purple-100 text-purple-700',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -245,6 +247,12 @@ const EquipmentOrdersPage = () => {
   const [vendorComplaintSubject, setVendorComplaintSubject]   = useState('');
   const [vendorComplaintDesc, setVendorComplaintDesc]         = useState('');
 
+  // Wrong Equipment reporting
+  const [reportIssueModal, setReportIssueModal] = useState(null);
+  const [issueResolution, setIssueResolution] = useState('redeliver');
+  const [issueDescription, setIssueDescription] = useState('');
+  const [reportingIssue, setReportingIssue] = useState(false);
+
   // Vendor chat — opened from inside Contact Vendor modal.
   const [chatLoading, setChatLoading] = useState(false);
   const [activeChatId, setActiveChatId] = useState(null);
@@ -289,6 +297,28 @@ const EquipmentOrdersPage = () => {
       }
     } catch {
       toast.error('Failed to submit complaint!');
+    }
+  };
+
+  const submitReportIssue = async () => {
+    if (!reportIssueModal) return;
+    setReportingIssue(true);
+    try {
+      await API.post('/api/vendor/report-issue/', {
+        order_id: reportIssueModal.eq_order_id,
+        desired_resolution: issueResolution,
+        subject: 'Wrong Equipment Delivered',
+        description: issueDescription,
+      });
+      toast.success('Issue reported successfully!');
+      setReportIssueModal(null);
+      setIssueResolution('redeliver');
+      setIssueDescription('');
+      orders.refetch();
+    } catch {
+      toast.error('Failed to report issue.');
+    } finally {
+      setReportingIssue(false);
     }
   };
 
@@ -609,30 +639,64 @@ const EquipmentOrdersPage = () => {
                   </div>
                 )}
 
+                {/* Wrong Product info */}
+                {o.order_status === 'wrong_product' && (
+                  <div className="mt-2 bg-red-50 border border-red-200 rounded-xl p-3 text-sm">
+                    <p className="font-semibold text-red-800">Issue Reported: Wrong Equipment</p>
+                    <p className="text-red-700">Requested Resolution: <span className="font-bold capitalize">{o.hospital_desired_resolution}</span></p>
+                    <p className="text-xs text-red-600 mt-1">Vendor has been notified and will process this request.</p>
+                  </div>
+                )}
+
+                {/* Refunded info */}
+                {o.order_status === 'refunded' && (
+                  <div className="mt-2 bg-purple-50 border border-purple-200 rounded-xl p-3 text-sm">
+                    <p className="font-semibold text-purple-800">Order Refunded</p>
+                    <p className="text-purple-700 text-xs">The vendor has refunded your payment.</p>
+                  </div>
+                )}
+
                 {/* Action buttons */}
                 <div className="flex gap-2 mt-3 flex-wrap">
                   <button onClick={() => setTrackModal(o)}
-                    className="inline-flex items-center gap-1.5 text-xs text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition">
+                    className="inline-flex items-center justify-center gap-1.5 text-xs text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition w-full sm:w-auto">
                     <FiPackage className="w-3.5 h-3.5" /> Track Order
                   </button>
+                  {['paid', 'refunded'].includes(o.payment_status) && (
+                    <button
+                      type="button"
+                      onClick={() => downloadBillPdf(
+                        `/api/hospital/equipment-orders/${o.eq_order_id}/bill/`,
+                        `equipment-bill-${String(o.eq_order_id || '').slice(0, 8)}.pdf`,
+                      )}
+                      className="inline-flex items-center justify-center gap-1.5 text-xs text-orange-600 border border-orange-200 px-3 py-1.5 rounded-lg hover:bg-orange-50 transition w-full sm:w-auto"
+                    >
+                      <FiDownload className="w-3.5 h-3.5" /> Download Bill
+                    </button>
+                  )}
                   <button
                     onClick={() => { setSelectedOrder(o); setShowContactModal(true); }}
-                    className="px-4 py-2 rounded-full text-sm font-medium border-2 border-black text-black hover:bg-black hover:text-white transition-all"
+                    className="px-4 py-2 rounded-full text-sm font-medium border-2 border-black text-black hover:bg-black hover:text-white transition-all w-full sm:w-auto text-center"
                   >
                     📞 Contact Vendor
                   </button>
                   <button
                     onClick={() => { setSelectedOrder(o); setShowVendorComplaintModal(true); }}
-                    className="px-4 py-2 rounded-full text-sm font-medium text-white transition-all"
-                    style={{ backgroundColor: '#F97316' }}
+                    className="px-4 py-2 rounded-full text-sm font-medium text-white transition-all bg-orange-500 border-2 border-orange-500 hover:bg-orange-600 hover:border-orange-600 w-full sm:w-auto text-center"
                   >
                     🚩 File Complaint
                   </button>
                   {o.order_status === 'dispatched' && (
-                    <button onClick={() => openOTPModal(o)}
-                      className="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 font-medium text-xs inline-flex items-center gap-1.5">
-                      <FiCheckCircle className="w-3.5 h-3.5" /> Confirm Receipt
-                    </button>
+                    <>
+                      <button onClick={() => setReportIssueModal(o)}
+                        className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg hover:bg-red-100 font-medium text-xs w-full sm:w-auto text-center">
+                        Wrong Equipment?
+                      </button>
+                      <button onClick={() => openOTPModal(o)}
+                        className="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 font-medium text-xs inline-flex items-center justify-center gap-1.5 w-full sm:w-auto">
+                        <FiCheckCircle className="w-3.5 h-3.5" /> Confirm Receipt
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -654,9 +718,26 @@ const EquipmentOrdersPage = () => {
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
-              <input type="number" min={1} max={orderModal.stock_qty} value={qty}
-                onChange={(e) => setQty(Math.max(1, Math.min(orderModal.stock_qty, parseInt(e.target.value) || 1)))}
-                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300" />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setQty(Math.max(1, qty - 1))}
+                  disabled={qty <= 1}
+                  className="w-10 h-10 flex items-center justify-center border border-gray-200 rounded-xl text-gray-600 font-bold hover:bg-gray-50 disabled:opacity-50"
+                >
+                  −
+                </button>
+                <input type="number" min={1} max={Math.min(orderModal.max_order_qty || 100, orderModal.stock_qty)} value={qty}
+                  onChange={(e) => setQty(Math.max(1, Math.min(Math.min(orderModal.max_order_qty || 100, orderModal.stock_qty), parseInt(e.target.value) || 1)))}
+                  className="flex-1 text-center border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 font-semibold" />
+                <button
+                  onClick={() => setQty(Math.min(Math.min(orderModal.max_order_qty || 100, orderModal.stock_qty), qty + 1))}
+                  disabled={qty >= Math.min(orderModal.max_order_qty || 100, orderModal.stock_qty)}
+                  className="w-10 h-10 flex items-center justify-center border border-gray-200 rounded-xl text-gray-600 font-bold hover:bg-gray-50 disabled:opacity-50"
+                >
+                  +
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1.5">Max limit: {orderModal.max_order_qty || 100} units per order</p>
             </div>
 
             <div className="bg-blue-50 rounded-xl p-3 mb-5 flex items-center justify-between">
@@ -825,6 +906,47 @@ const EquipmentOrdersPage = () => {
           </div>
         </div>
       )}
+
+      {/* ─── Report Issue Modal ─────────────────────────────── */}
+      <Modal isOpen={Boolean(reportIssueModal)} onClose={() => setReportIssueModal(null)} title="Report Wrong Equipment">
+        {reportIssueModal && (
+          <div className="space-y-4">
+            <div className="bg-red-50 rounded-xl p-4 text-sm text-red-800 mb-2">
+              Please let us know if you received the wrong equipment. A complaint will be automatically created and linked to the vendor and driver.
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-ink mb-1.5 block">What do you want the vendor to do?</label>
+              <select
+                className="input"
+                value={issueResolution}
+                onChange={(e) => setIssueResolution(e.target.value)}
+              >
+                <option value="redeliver">Redeliver the correct equipment</option>
+                <option value="refund">Cancel and issue a full refund</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-ink mb-1.5 block">Describe what you received</label>
+              <textarea
+                value={issueDescription}
+                onChange={(e) => setIssueDescription(e.target.value)}
+                placeholder="E.g. We ordered a GE MRI Machine but received a bed."
+                rows={3}
+                className="input"
+              />
+            </div>
+
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setReportIssueModal(null)} className="btn-secondary w-full">Cancel</button>
+              <button onClick={submitReportIssue} disabled={reportingIssue || !issueDescription.trim()} className="btn-orange w-full disabled:opacity-60" style={{ backgroundColor: '#EF4444' }}>
+                {reportingIssue ? 'Reporting…' : 'Report Issue'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* ─── Tracking Timeline Modal ──────────────────────────── */}
       {trackModal && <TimelineModal order={trackModal} onClose={() => setTrackModal(null)} />}

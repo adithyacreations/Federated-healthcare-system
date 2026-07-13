@@ -3,8 +3,8 @@ import { NavLink, Link } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
-  FiGrid, FiCalendar, FiUsers, FiFilePlus, FiClipboard, FiPlusCircle,
-  FiFolder, FiHome, FiBell, FiSearch, FiLogOut, FiUser, FiMenu, FiX,
+  FiGrid, FiCalendar, FiUsers, FiFilePlus, FiClipboard,
+  FiBell, FiSearch, FiLogOut, FiUser, FiMenu, FiX,
 } from 'react-icons/fi';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../api/axios';
@@ -25,9 +25,7 @@ const NAV = [
   {
     section: 'MANAGEMENT',
     items: [
-      { to: '/doctor/slots', label: 'Add Slot', icon: FiPlusCircle },
-      { to: '/doctor/patients', label: 'EHR Access', icon: FiFolder },
-      { to: '/doctor/consultations', label: 'Offline Visit', icon: FiHome },
+      { to: '/doctor/slots', label: 'Schedule', icon: FiCalendar },
     ],
   },
 ];

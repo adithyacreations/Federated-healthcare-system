@@ -1,10 +1,21 @@
 from rest_framework import serializers
-from .models import PharmacistRegistration, MedicineOrder
+from .models import (
+    PharmacistRegistration,
+    MedicineOrder,
+    PharmacyDriver,
+    PharmacyInventory,
+)
 
 
 class PharmacistProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = PharmacistRegistration
+        fields = '__all__'
+
+
+class PharmacyDriverSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PharmacyDriver
         fields = '__all__'
 
 
@@ -26,6 +37,8 @@ class MedicineOrderSerializer(serializers.ModelSerializer):
             'prescription_verified', 'prescription_rejection_reason', 'payment_enabled',
             'status_history', 'estimated_delivery_days',
             'razorpay_order_id', 'ordered_at', 'updated_at',
+            'driver', 'driver_name', 'driver_phone', 'issue_reported', 'issue_type',
+            'patient_desired_resolution', 'final_resolution',
         ]
 
     def _absolute(self, path):

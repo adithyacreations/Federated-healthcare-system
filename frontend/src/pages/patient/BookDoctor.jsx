@@ -10,6 +10,16 @@ import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
 import { cleanDoctorName } from '../../utils/nameUtils';
 
+const typeLabel = (value) => {
+  if (value === 'both') return 'Online or offline';
+  if (value === 'offline' || value === 'in_person') return 'Offline';
+  return 'Online';
+};
+
+const doctorPhoto = (doctor) => doctor?.profile_photo || doctor?.doctor_profile_photo || '';
+
+const departmentPhoto = (doctor) => doctor?.department_photo || doctor?.dept_photo || '';
+
 const BookDoctor = () => {
   const doctors = useApi('/api/patient/doctors/');
   const [search, setSearch] = useState('');
@@ -43,6 +53,7 @@ const BookDoctor = () => {
   const openDoctor = async (d) => {
     setActiveDoctor(d);
     setSelectedSlot(null);
+    setConsultType('online');
     setBooking(null);
     setSlots({ loading: true, items: [] });
     try {
@@ -67,17 +78,20 @@ const BookDoctor = () => {
       const { data } = await API.post('/api/patient/book-consultation/', {
         doctor_id: activeDoctor.doctor_id,
         slot_id: selectedSlot.slot_id,
-        consult_type: consultType,
+        consult_type: selectedSlot.consult_type === 'both' ? consultType : selectedSlot.consult_type,
       });
       const d = data?.data || {};
       setBooking({
         consultation_id: d.consultation_id,
-        amount: d.amount || 0,
+        amount: d.fee || 0,
         doctor_name: d.doctor_name,
         slot_date: d.slot_date,
         slot_time: d.slot_time,
+        consult_mode: d.consult_mode,
+        payment_hold_expires_at: d.payment_hold_expires_at,
+        hold_seconds_remaining: d.hold_seconds_remaining,
       });
-      toast.success('Consultation booked. Complete payment to confirm.');
+      toast.success('Slot reserved for 10 minutes. Complete payment to confirm.');
       doctors.refetch();
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Booking failed');
@@ -125,19 +139,50 @@ const BookDoctor = () => {
         <div className="card text-center text-gray-500 py-8">No doctors found.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((d) => (
-            <div key={d.doctor_id} className="card flex flex-col">
+          {filtered.map((d) => {
+            const profileImage = doctorPhoto(d);
+            const bannerImage = departmentPhoto(d);
+            return (
+            <div key={d.doctor_id} className="card flex flex-col overflow-hidden p-0">
+              <div className="h-20 bg-gray-100 relative">
+                {bannerImage ? (
+                  <img
+                    src={bannerImage}
+                    alt={d.dept_name || d.specialization || 'Department'}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 bg-gray-100" />
+                )}
+                <div className="absolute -bottom-6 left-5 w-14 h-14 rounded-2xl bg-white border-4 border-white shadow flex items-center justify-center overflow-hidden">
+                  {profileImage ? (
+                    <img
+                      src={profileImage}
+                      alt={cleanDoctorName(d.full_name)}
+                      className="w-full h-full rounded-xl object-cover"
+                    />
+                  ) : (
+                    <span className="w-full h-full rounded-xl bg-gray-900 text-white flex items-center justify-center font-bold text-lg">
+                      {(d.full_name || 'D').slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <span className="absolute top-3 right-3 inline-flex items-center gap-1.5 text-xs text-gray-800 bg-white/90 border border-white/70 rounded-full px-2 py-1 shadow-sm">
+                  <span className={`w-2 h-2 rounded-full ${d.is_online ? 'bg-success' : 'bg-gray-400'}`} />
+                  {d.is_online ? 'Online' : 'Offline'}
+                </span>
+              </div>
+              <div className="p-5 pt-8 flex flex-col flex-1">
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="min-w-0">
                   <div className="font-semibold text-primary-500 truncate">{cleanDoctorName(d.full_name)}</div>
                   <div className="text-xs text-gray-500 truncate">{d.hospital_name}</div>
                 </div>
-                <span className="inline-flex items-center gap-1.5 text-xs">
-                  <span className={`w-2 h-2 rounded-full ${d.is_online ? 'bg-success' : 'bg-gray-400'}`} />
-                  {d.is_online ? 'Online' : 'Offline'}
-                </span>
               </div>
               <Badge status="info" text={d.specialization} />
+              {d.dept_name && d.dept_name !== d.specialization && (
+                <div className="text-xs text-orange-500 mt-1 truncate">{d.dept_name}</div>
+              )}
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div className="text-xs text-gray-500">Fee</div>
@@ -155,8 +200,10 @@ const BookDoctor = () => {
               >
                 {d.available_slots_count === 0 ? 'No Slots' : 'Book Appointment'}
               </button>
+              </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -173,7 +220,9 @@ const BookDoctor = () => {
                   </div>
                   <div>
                     <div className="text-xs text-gray-500">Fee</div>
-                    <div className="font-medium">₹{activeDoctor.consultation_fee}</div>
+                    <div className="font-medium">
+                      ₹{selectedSlot?.consultation_fee ?? activeDoctor.consultation_fee}
+                    </div>
                   </div>
                 </div>
 
@@ -197,9 +246,13 @@ const BookDoctor = () => {
                                 : 'border-gray-200 hover:border-primary-300'
                             }`}
                           >
-                            <div className="font-semibold">{s.slot_date}</div>
-                            <div className="text-xs text-gray-500">{s.start_time}</div>
-                            <div className="text-xs text-gray-400 mt-0.5">{s.consult_type}</div>
+                            <div className="font-semibold">{s.date_display || s.slot_date}</div>
+                            <div className="text-xs text-gray-500">
+                              {s.start_display || s.start_time} - {s.end_display || s.end_time}
+                            </div>
+                            <div className="text-xs text-gray-400 mt-0.5">{typeLabel(s.consult_type)}</div>
+                            <div className="text-xs font-semibold text-gray-700 mt-1">₹{s.consultation_fee}</div>
+                            <div className="text-[11px] text-green-600 mt-0.5 capitalize">{s.availability_status || 'available'}</div>
                           </button>
                         );
                       })}
@@ -207,10 +260,11 @@ const BookDoctor = () => {
                   )}
                 </div>
 
+                {selectedSlot?.consult_type === 'both' ? (
                 <div>
                   <div className="text-xs uppercase text-gray-500 mb-2">Consultation type</div>
                   <div className="flex gap-2">
-                    {['online', 'in_person'].map((t) => (
+                    {['online', 'offline'].map((t) => (
                       <button
                         key={t}
                         onClick={() => setConsultType(t)}
@@ -220,11 +274,17 @@ const BookDoctor = () => {
                             : 'border-gray-200 text-gray-600 hover:border-primary-300'
                         }`}
                       >
-                        {t === 'online' ? 'Online (Jitsi)' : 'In Person'}
+                        {t === 'online' ? 'Online (Jitsi)' : 'Offline visit'}
                       </button>
                     ))}
                   </div>
                 </div>
+                ) : selectedSlot ? (
+                  <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm">
+                    <div className="text-xs uppercase text-gray-500 mb-1">Consultation type</div>
+                    <div className="font-medium">{typeLabel(selectedSlot.consult_type)}</div>
+                  </div>
+                ) : null}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <button onClick={closeModal} className="btn-secondary">Cancel</button>
@@ -241,6 +301,11 @@ const BookDoctor = () => {
                   <div className="text-gray-500">{booking.slot_date} · {booking.slot_time}</div>
                   <div className="mt-2 text-lg font-bold text-primary-500">₹{booking.amount}</div>
                 </div>
+                {booking.hold_seconds_remaining > 0 && (
+                  <div className="rounded-xl border border-orange-100 bg-orange-50 px-3 py-2 text-xs text-orange-700">
+                    Hold expires in about {Math.ceil(booking.hold_seconds_remaining / 60)} minutes.
+                  </div>
+                )}
                 {booking.amount > 0 ? (
                   <RazorpayButton
                     amount={booking.amount}
@@ -250,6 +315,9 @@ const BookDoctor = () => {
                     buttonText="Pay & Confirm"
                     className="w-full"
                     onSuccess={onPaymentSuccess}
+                    onFailure={() => {
+                      toast.error('Payment pending. This slot is reserved for 10 minutes.');
+                    }}
                   />
                 ) : (
                   <button onClick={onPaymentSuccess} className="btn-primary w-full">Confirm Booking (Free)</button>

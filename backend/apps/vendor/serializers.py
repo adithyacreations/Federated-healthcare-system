@@ -1,10 +1,16 @@
 from rest_framework import serializers
-from .models import VendorRegistration, EquipmentCatalog, EquipmentOrder
+from .models import VendorRegistration, EquipmentCatalog, EquipmentOrder, VendorDriver
 
 
 class VendorProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = VendorRegistration
+        fields = '__all__'
+
+
+class VendorDriverSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VendorDriver
         fields = '__all__'
 
 
@@ -22,6 +28,7 @@ class CreateProductSerializer(serializers.Serializer):
     specifications = serializers.DictField(required=False, default=dict)
     price = serializers.DecimalField(max_digits=12, decimal_places=2)
     stock_qty = serializers.IntegerField(default=0)
+    max_order_qty = serializers.IntegerField(default=100)
     image_url = serializers.CharField(max_length=500, required=False, allow_blank=True, default='')
 
     def validate_price(self, value):
@@ -53,6 +60,8 @@ class EquipmentOrderSerializer(serializers.ModelSerializer):
             'product_name',
             'quantity', 'total_price', 'order_status',
             'payment_status', 'razorpay_order_id', 'tracking_info',
+            'driver_id', 'driver_name', 'driver_phone',
+            'hospital_desired_resolution', 'final_resolution',
             'estimated_delivery_days', 'otp_expiry',
             'dispatched_at', 'delivered_at', 'status_history',
             'ordered_at', 'updated_at',

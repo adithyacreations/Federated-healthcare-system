@@ -150,6 +150,7 @@ class CreateProductView(APIView):
             specifications=d.get('specifications', {}),
             price=d['price'],
             stock_qty=d.get('stock_qty', 0),
+            max_order_qty=d.get('max_order_qty', 100),
             image_url=d.get('image_url', ''),
         )
 
@@ -176,7 +177,7 @@ class UpdateProductView(APIView):
         except EquipmentCatalog.DoesNotExist:
             return err('Product not found.', status_code=404)
 
-        updatable = ['product_name', 'category', 'specifications', 'price', 'stock_qty', 'image_url']
+        updatable = ['product_name', 'category', 'specifications', 'price', 'stock_qty', 'max_order_qty', 'image_url']
         for field in updatable:
             if field in request.data:
                 setattr(product, field, request.data[field])
@@ -582,6 +583,15 @@ class DispatchOrderView(APIView):
 
         estimated_days = int(request.data.get('estimated_delivery_days', 3))
         tracking_info = request.data.get('tracking_info', '').strip()
+        driver_id = request.data.get('driver_id')
+
+        if not driver_id:
+            return err('Driver is required to dispatch.')
+        
+        try:
+            driver = VendorDriver.objects.get(driver_id=driver_id, vendor_id=vendor, is_available=True)
+        except VendorDriver.DoesNotExist:
+            return err('Available driver not found.', status_code=404)
 
         otp = generate_otp()
         otp_expiry = dj_tz.now() + timedelta(days=estimated_days)
@@ -598,13 +608,20 @@ class DispatchOrderView(APIView):
         order.otp_expiry = otp_expiry
         order.estimated_delivery_days = estimated_days
         order.tracking_info = tracking_info
+        order.driver_id = driver
+        order.driver_name = driver.name
+        order.driver_phone = driver.phone
         order.dispatched_at = dj_tz.now()
         order.status_history = history
         order.save(update_fields=[
             'order_status', 'delivery_otp', 'otp_expiry',
             'estimated_delivery_days', 'tracking_info',
+            'driver_id', 'driver_name', 'driver_phone',
             'dispatched_at', 'status_history',
         ])
+
+        driver.is_available = False
+        driver.save(update_fields=['is_available'])
 
         hospital_email = order.hospital_id.login_id.email
         hospital_name = order.hospital_id.hospital_name
@@ -957,3 +974,263 @@ class VendorChatsListView(APIView):
             'data': data,
             'total_unread': sum(d['unread_count'] for d in data),
         })
+
+# ─── Drivers & Issue Resolution ──────────────────────────────────────────────
+
+from apps.vendor.models import VendorDriver
+from apps.vendor.serializers import VendorDriverSerializer
+
+class ListCreateVendorDriverView(APIView):
+    permission_classes = [IsAuthenticated, IsVendor]
+
+    def get(self, request):
+        vendor = get_vendor(request)
+        if not vendor:
+            return err('Vendor profile not found.', status_code=404)
+        drivers = VendorDriver.objects.filter(vendor_id=vendor).order_by('-created_at')
+        return ok('Drivers retrieved.', VendorDriverSerializer(drivers, many=True).data)
+
+    def post(self, request):
+        vendor = get_vendor(request)
+        if not vendor:
+            return err('Vendor profile not found.', status_code=404)
+        
+        name = request.data.get('name')
+        phone = request.data.get('phone')
+        if not name or not phone:
+            return err('Driver name and phone are required.')
+        
+        driver = VendorDriver.objects.create(
+            vendor_id=vendor,
+            name=name,
+            phone=phone,
+            is_available=True
+        )
+        return ok('Driver added.', VendorDriverSerializer(driver).data, status_code=201)
+
+
+class ReportEquipmentIssueView(APIView):
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def post(self, request):
+        from apps.hospital.models import HospitalRegistration
+        try:
+            hospital = HospitalRegistration.objects.get(login_id=request.user)
+        except HospitalRegistration.DoesNotExist:
+            return err('Hospital profile not found.', status_code=404)
+        
+        order_id = request.data.get('order_id')
+        desired_resolution = request.data.get('desired_resolution')  # 'redeliver' or 'refund'
+        subject = request.data.get('subject', 'Wrong Equipment')
+        description = request.data.get('description', '')
+
+        if not order_id or not desired_resolution:
+            return err('order_id and desired_resolution are required.')
+
+        try:
+            order = EquipmentOrder.objects.get(eq_order_id=order_id, hospital_id=hospital, order_status='dispatched')
+        except EquipmentOrder.DoesNotExist:
+            return err('Dispatched order not found.', status_code=404)
+
+        order.order_status = 'wrong_product'
+        order.hospital_desired_resolution = desired_resolution
+        
+        history = list(order.status_history or [])
+        history.append({
+            'status': 'wrong_product',
+            'timestamp': dj_tz.now().strftime('%Y-%m-%d %H:%M'),
+            'note': f'Hospital reported an issue. Desired resolution: {desired_resolution}',
+        })
+        order.status_history = history
+        order.save(update_fields=['order_status', 'hospital_desired_resolution', 'status_history'])
+
+        # Free up the driver
+        if order.driver_id:
+            order.driver_id.is_available = True
+            order.driver_id.save(update_fields=['is_available'])
+
+        # Create a complaint
+        from apps.patient.models import Complaint
+        Complaint.objects.create(
+            patient_id=None,
+            filed_by_hospital=hospital,
+            complaint_type='vendor',
+            vendor_id=order.vendor_id,
+            subject=f"Equipment Issue: {subject} (Order {str(order.eq_order_id)[:8]})",
+            description=f"Order ID: {order.eq_order_id}\nProduct: {order.product_id.product_name}\nDriver: {order.driver_id.name if order.driver_id else ''} ({order.driver_id.phone if order.driver_id else ''})\nDesired Resolution: {desired_resolution}\n\n{description}"
+        )
+
+        send_notification(
+            login_id=order.vendor_id.login_id,
+            title='Equipment Issue Reported',
+            message=f'{hospital.hospital_name} reported an issue with order {order.product_id.product_name}.',
+            notif_type='alert',
+            related_id=str(order.eq_order_id),
+        )
+
+        return ok('Issue reported successfully. The vendor will process your request.')
+
+
+class ResolveEquipmentIssueView(APIView):
+    permission_classes = [IsAuthenticated, IsVendor]
+
+    def put(self, request, order_id):
+        vendor = get_vendor(request)
+        if not vendor:
+            return err('Vendor profile not found.', status_code=404)
+
+        resolution = request.data.get('resolution') # 'redeliver' or 'refund'
+        new_driver_id = request.data.get('new_driver_id')
+
+        if not resolution:
+            return err('Resolution type is required.')
+
+        try:
+            order = EquipmentOrder.objects.get(eq_order_id=order_id, vendor_id=vendor, order_status='wrong_product')
+        except EquipmentOrder.DoesNotExist:
+            return err('Order not found or not in wrong_product state.', status_code=404)
+
+        history = list(order.status_history or [])
+
+        if resolution == 'redeliver':
+            if not new_driver_id:
+                return err('A new driver is required for redelivery.')
+            try:
+                new_driver = VendorDriver.objects.get(driver_id=new_driver_id, vendor_id=vendor, is_available=True)
+            except VendorDriver.DoesNotExist:
+                return err('Available driver not found.', status_code=404)
+            
+            new_driver.is_available = False
+            new_driver.save(update_fields=['is_available'])
+
+            order.driver_id = new_driver
+            order.driver_name = new_driver.name
+            order.driver_phone = new_driver.phone
+            order.order_status = 'dispatched'
+            order.final_resolution = 'redeliver'
+
+            history.append({
+                'status': 'resolved',
+                'timestamp': dj_tz.now().strftime('%Y-%m-%d %H:%M'),
+                'note': f'Resolved via Redelivery. Assigned to {new_driver.name}.',
+            })
+
+            send_notification(
+                login_id=order.hospital_id.login_id,
+                title='Equipment Issue Resolved',
+                message=f'Your order for {order.product_id.product_name} is being redelivered.',
+                notif_type='info',
+                related_id=str(order.eq_order_id),
+            )
+
+        elif resolution == 'refund':
+            order.order_status = 'refunded'
+            order.payment_status = 'refunded'
+            order.final_resolution = 'refund'
+            
+            history.append({
+                'status': 'refunded',
+                'timestamp': dj_tz.now().strftime('%Y-%m-%d %H:%M'),
+                'note': 'Resolved via Refund.',
+            })
+
+            # Return stock
+            order.product_id.stock_qty += order.quantity
+            order.product_id.save(update_fields=['stock_qty'])
+
+            send_notification(
+                login_id=order.hospital_id.login_id,
+                title='Equipment Order Refunded',
+                message=f'Your order for {order.product_id.product_name} has been refunded.',
+                notif_type='info',
+                related_id=str(order.eq_order_id),
+            )
+        else:
+            return err('Invalid resolution type.')
+
+        order.status_history = history
+        order.save(update_fields=[
+            'order_status', 'payment_status', 'driver_id', 'driver_name', 'driver_phone',
+            'final_resolution', 'status_history'
+        ])
+
+        return ok('Issue resolved.', EquipmentOrderSerializer(order).data)
+
+
+class VendorMonthlyReportView(APIView):
+    """Monthly analytics for the logged-in vendor — order counts, revenue
+    and a per-equipment breakdown (orders / quantity sold / revenue).
+    Powers the Monthly Report page + CSV export."""
+    permission_classes = [IsAuthenticated, IsVendor]
+
+    def get(self, request):
+        import calendar
+        from django.db.models import Sum
+        from django.utils import timezone as dj_tz
+        from .models import EquipmentOrder
+
+        vendor = get_vendor(request)
+        if not vendor:
+            return err('Vendor profile not found.', status_code=404)
+
+        now = dj_tz.now()
+        try:
+            month = int(request.GET.get('month', now.month))
+            year = int(request.GET.get('year', now.year))
+        except (TypeError, ValueError):
+            month, year = now.month, now.year
+
+        orders = EquipmentOrder.objects.filter(
+            vendor_id=vendor,
+            ordered_at__year=year, ordered_at__month=month,
+        ).select_related('product_id')
+
+        total_orders = orders.count()
+        delivered = orders.filter(order_status='delivered').count()
+        cancelled = orders.filter(order_status='cancelled').count()
+        pending = orders.exclude(order_status__in=['delivered', 'cancelled']).count()
+        
+        # calculate revenue - only for paid orders
+        revenue = float(
+            orders.filter(payment_status='paid')
+            .aggregate(total=Sum('total_price'))['total'] or 0
+        )
+        
+        refunded_qs = orders.filter(payment_status='refunded')
+        refunded_amount = float(refunded_qs.aggregate(total=Sum('total_price'))['total'] or 0)
+
+        equipment_map = {}  # name -> {orders, quantity, revenue}
+        for o in orders:
+            paid = (o.payment_status == 'paid')
+            name = o.product_id.product_name if o.product_id else 'Unknown Equipment'
+            qty = o.quantity
+            price = float(o.total_price)
+            
+            entry = equipment_map.setdefault(name, {'orders': 0, 'quantity': 0, 'revenue': 0.0})
+            entry['orders'] += 1
+            entry['quantity'] += qty
+            if paid:
+                entry['revenue'] += price
+
+        equipment_breakdown = sorted(
+            [{'equipment_name': n, 'orders': v['orders'],
+              'quantity_sold': v['quantity'], 'revenue': round(v['revenue'], 2)}
+             for n, v in equipment_map.items()],
+            key=lambda x: x['orders'], reverse=True,
+        )
+
+        return ok('Monthly report generated.', {
+            'month': calendar.month_name[month],
+            'year': year,
+            'vendor': vendor.company_name,
+            'summary': {
+                'total_orders': total_orders,
+                'delivered': delivered,
+                'pending': pending,
+                'cancelled': cancelled,
+                'total_revenue': revenue,
+                'refunded_amount': refunded_amount,
+            },
+            'equipment_breakdown': equipment_breakdown,
+        })
+

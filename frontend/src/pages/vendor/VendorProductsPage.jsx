@@ -38,7 +38,7 @@ const stockLevel = (qty) => {
   return { cls: '', label: 'In stock' };
 };
 
-const emptyForm = { product_name: '', category: '', specifications: '', price: '', stock_qty: '', image_url: '' };
+const emptyForm = { product_name: '', category: '', specifications: '', price: '', stock_qty: '', max_order_qty: 100, image_url: '' };
 
 const VendorProductsPage = () => {
   const location = useLocation();
@@ -126,6 +126,7 @@ const VendorProductsPage = () => {
         : p.specifications || '',
       price: p.price || '',
       stock_qty: p.stock_qty || '',
+      max_order_qty: p.max_order_qty || 100,
       image_url: p.image_url || '',
     });
     setImageFile(null);
@@ -294,6 +295,7 @@ const VendorProductsPage = () => {
             { label: 'Category', key: 'category', placeholder: 'e.g. Diagnostic' },
             { label: 'Price (₹)', key: 'price', placeholder: '0.00', type: 'number' },
             { label: 'Stock Qty', key: 'stock_qty', placeholder: '0', type: 'number' },
+            { label: 'Max Order Limit', key: 'max_order_qty', placeholder: '100', type: 'number' },
           ].map(({ label, key, placeholder, type = 'text' }) => (
             <div key={key}>
               <label className="text-xs text-muted">{label}</label>

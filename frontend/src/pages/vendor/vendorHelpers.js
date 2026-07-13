@@ -33,4 +33,5 @@ export const STATUS_LABEL = {
   dispatched: 'Dispatched',
   delivered: 'Delivered',
   cancelled: 'Cancelled',
+  wrong_product: 'Reported Issue',
 };

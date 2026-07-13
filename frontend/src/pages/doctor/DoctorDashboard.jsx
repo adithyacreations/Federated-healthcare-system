@@ -4,8 +4,8 @@ import { motion } from 'framer-motion';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
-  FiCalendar, FiClipboard, FiUsers, FiPlus, FiFilePlus, FiActivity,
-  FiVideo, FiUser, FiArrowRight, FiFileText,
+  FiCalendar, FiClipboard, FiUsers, FiFilePlus, FiActivity,
+  FiVideo, FiArrowRight, FiFileText,
 } from 'react-icons/fi';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -14,8 +14,6 @@ import {
 import DoctorLayout from '../../components/doctor/DoctorLayout';
 import { pageVariants, cardVariants } from '../../components/dashboard/variants';
 import { T, DoctorAvatar, SparkStatCard, SectionHead } from '../../components/doctor/ui';
-import Modal from '../../components/common/Modal';
-import FormInput from '../../components/auth/FormInput';
 import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
 import { cleanDoctorName } from '../../utils/nameUtils';
@@ -33,9 +31,6 @@ const DoctorDashboard = () => {
   const consultations = useApi('/api/doctor/consultations/');
 
   const [toggling, setToggling] = useState(false);
-  const [slotModal, setSlotModal] = useState(false);
-  const [slotForm, setSlotForm] = useState({ slot_date: '', start_time: '', end_time: '', consult_type: 'online' });
-  const [savingSlot, setSavingSlot] = useState(false);
 
   const [criticalAlerts, setCriticalAlerts] = useState([]);
   useEffect(() => {
@@ -54,7 +49,7 @@ const DoctorDashboard = () => {
 
   const d = dash.data || {};
   const today = format(new Date(), 'yyyy-MM-dd');
-  const allConsults = consultations.data || [];
+  const allConsults = useMemo(() => consultations.data || [], [consultations.data]);
 
   // Start button unlocks 10 min before slot start, locks 15 min after end.
   const getTimeStatus = (c) => {
@@ -116,27 +111,6 @@ const DoctorDashboard = () => {
       toast.error(err?.response?.data?.message || 'Toggle failed');
     } finally {
       setToggling(false);
-    }
-  };
-
-  const submitSlot = async (e) => {
-    e.preventDefault();
-    if (!slotForm.slot_date || !slotForm.start_time || !slotForm.end_time) {
-      return toast.error('All slot fields are required');
-    }
-    setSavingSlot(true);
-    try {
-      await API.post('/api/doctor/slots/create/', slotForm);
-      toast.success('Slot added');
-      setSlotModal(false);
-      setSlotForm({ slot_date: '', start_time: '', end_time: '', consult_type: 'online' });
-      dash.refetch();
-    } catch (err) {
-      const data = err?.response?.data;
-      const msg = data?.errors ? Object.values(data.errors).flat().join(' · ') : data?.message || 'Could not create slot';
-      toast.error(msg);
-    } finally {
-      setSavingSlot(false);
     }
   };
 
@@ -373,22 +347,15 @@ const DoctorDashboard = () => {
                   <span className="text-xs font-medium" style={{ color: T.dark }}>{a.label}</span>
                 </Link>
               ))}
-              <button
-                onClick={() => setSlotModal(true)}
+              <Link
+                to="/doctor/slots"
                 className="rounded-2xl p-4 bg-white border flex flex-col items-center justify-center text-center gap-2 transition-all hover:bg-orange-50"
                 style={{ borderColor: T.border, minHeight: 92 }}
               >
-                <FiPlus className="w-5 h-5" style={{ color: T.orange }} />
-                <span className="text-xs font-medium" style={{ color: T.dark }}>Add Slot</span>
-              </button>
-              <Link
-                to="/doctor/consultations"
-                className="rounded-2xl p-4 border flex flex-col items-center justify-center text-center gap-2 transition-all text-white"
-                style={{ background: `linear-gradient(135deg, ${T.orange}, ${T.orangeDark})`, borderColor: T.orange, minHeight: 92 }}
-              >
-                <FiUser className="w-5 h-5" />
-                <span className="text-xs font-medium">Offline Visit</span>
+                <FiCalendar className="w-5 h-5" style={{ color: T.orange }} />
+                <span className="text-xs font-medium" style={{ color: T.dark }}>View Schedule</span>
               </Link>
+
             </div>
           </motion.div>
         </div>
@@ -463,24 +430,6 @@ const DoctorDashboard = () => {
       </motion.div>
 
       {/* ─── Add slot modal ──────────────────────────────────── */}
-      <Modal isOpen={slotModal} onClose={() => setSlotModal(false)} title="Add Time Slot">
-        <form onSubmit={submitSlot} className="space-y-4">
-          <FormInput label="Date" type="date" value={slotForm.slot_date} onChange={(e) => setSlotForm({ ...slotForm, slot_date: e.target.value })} required />
-          <div className="grid grid-cols-2 gap-4">
-            <FormInput label="Start Time" type="time" value={slotForm.start_time} onChange={(e) => setSlotForm({ ...slotForm, start_time: e.target.value })} required />
-            <FormInput label="End Time" type="time" value={slotForm.end_time} onChange={(e) => setSlotForm({ ...slotForm, end_time: e.target.value })} required />
-          </div>
-          <FormInput label="Consultation Type" as="select" value={slotForm.consult_type}
-            onChange={(e) => setSlotForm({ ...slotForm, consult_type: e.target.value })}
-            options={[{ value: 'online', label: 'Online (Jitsi)' }, { value: 'in_person', label: 'In Person' }]} />
-          <div className="flex justify-end gap-3 pt-1">
-            <button type="button" onClick={() => setSlotModal(false)} className="btn-orange-outline">Cancel</button>
-            <button type="submit" disabled={savingSlot} className="btn-orange disabled:opacity-60">
-              {savingSlot ? 'Adding…' : 'Add Slot'}
-            </button>
-          </div>
-        </form>
-      </Modal>
     </DoctorLayout>
   );
 };

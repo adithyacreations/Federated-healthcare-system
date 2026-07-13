@@ -611,20 +611,29 @@ const OrderMedicinePage = () => {
             transition={{ type: 'spring', stiffness: 200, damping: 24 }}
             className="fixed bottom-0 left-0 right-0 bg-white border-t border-hairline shadow-[0_-8px_30px_rgba(0,0,0,0.08)] p-4 z-40"
           >
-            <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
-              <div>
-                <p className="font-semibold text-ink">{cartCount} items</p>
-                <p className="font-bricolage text-orange-500 font-extrabold text-lg">₹{cartTotal.toFixed(2)}</p>
+            <div className="max-w-4xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  <p className="font-semibold text-ink text-sm sm:text-base whitespace-nowrap">{cartCount} items</p>
+                  {cartHasRx && (
+                    <>
+                      <span className="hidden sm:inline-block text-xs text-red-500 font-medium whitespace-nowrap">⚠️ Prescription required</span>
+                      <span className="sm:hidden text-[10px] sm:text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-bold">⚠️ Rx</span>
+                    </>
+                  )}
+                </div>
+                <p className="font-bricolage text-orange-500 font-extrabold text-lg sm:text-xl">₹{cartTotal.toFixed(2)}</p>
               </div>
-              {cartHasRx && <span className="text-xs text-red-500 font-medium">⚠️ Prescription required</span>}
-              <button onClick={() => setShowCartModal(true)} className="btn-orange">Checkout →</button>
+              <button onClick={() => setShowCartModal(true)} className="btn-orange px-4 py-2 sm:px-6 sm:py-2.5 text-sm sm:text-base whitespace-nowrap flex-shrink-0">
+                Checkout →
+              </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Cart modal */}
-      <Modal isOpen={showCartModal} onClose={() => setShowCartModal(false)} title="Your Cart">
+      <Modal isOpen={showCartModal} onClose={() => setShowCartModal(false)} title="Your Cart" size="sm">
         <div className="space-y-4">
           {cart.filter((m) => m.requires_prescription).length > 1 && (
             <div style={{ backgroundColor: '#FFF7ED', border: '1.5px solid #FED7AA', borderRadius: 12, padding: 16 }}>

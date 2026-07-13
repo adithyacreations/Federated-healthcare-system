@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiAlertTriangle, FiPlus, FiBell, FiRefreshCw, FiSearch, FiCpu, FiCheckCircle, FiX } from 'react-icons/fi';
+import { FiAlertTriangle, FiPlus, FiBell, FiRefreshCw, FiSearch, FiCpu, FiCheckCircle, FiX, FiTrash2 } from 'react-icons/fi';
 import DashboardLayout from '../../components/common/DashboardLayout';
 import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
@@ -39,6 +39,7 @@ const EpidemicPage = () => {
   const [selectedEpidemic, setSelectedEpidemic] = useState(null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [resolving, setResolving] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const allTrends = epidemic.data?.trends || [];
   const activeEpidemics = epidemic.data?.active
@@ -71,6 +72,20 @@ const EpidemicPage = () => {
       toast.error(err?.response?.data?.message || 'Failed to resolve epidemic');
     } finally {
       setResolving(false);
+    }
+  };
+
+  const handleRemove = async (t) => {
+    if (!window.confirm(`Are you sure you want to quietly remove the alert for ${t.disease_name}? No notifications will be sent.`)) return;
+    setRemoving(true);
+    try {
+      const res = await API.delete(`/api/federated/epidemic/${t.trend_id}/`);
+      toast.success(res.data?.message || 'Epidemic removed quietly.');
+      epidemic.refetch();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to remove epidemic');
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -161,6 +176,27 @@ const EpidemicPage = () => {
     }
   };
 
+  const createSingleAutoAlert = async (a) => {
+    setCreatingAlerts(true);
+    try {
+      await API.post('/api/federated/epidemic/create/', {
+        disease_name: a.disease_name,
+        region: 'Kerala',
+        case_count: a.current_week_cases,
+        alert_level: a.alert_level,
+        spike_detected: true,
+        is_auto_detected: true,
+        recorded_date: new Date().toISOString().slice(0, 10),
+      });
+      toast.success(`${a.disease_name} alert created!`);
+      epidemic.refetch();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to create alert');
+    } finally {
+      setCreatingAlerts(false);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="flex items-center justify-between mb-6">
@@ -239,15 +275,33 @@ const EpidemicPage = () => {
                         </td>
                         <td className="px-4 py-2.5"><AlertBadge level={a.alert_level} /></td>
                         <td className="px-4 py-2.5">
-                          {a.is_spike ? (
-                            <button
-                              onClick={() => handleBroadcast(a)}
-                              disabled={broadcasting}
-                              className="text-xs font-semibold bg-danger text-white px-3 py-1 rounded-lg hover:bg-red-600 transition disabled:opacity-60"
-                            >
-                              Send Alert
-                            </button>
-                          ) : (
+                          {a.is_spike ? (() => {
+                            const isAlreadyActive = activeEpidemics.some((ep) => ep.disease_name === a.disease_name);
+                            return (
+                              <div className="flex items-center gap-2">
+                                {isAlreadyActive ? (
+                                  <span className="text-xs font-semibold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-lg">
+                                    Already Active
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => createSingleAutoAlert(a)}
+                                    disabled={creatingAlerts}
+                                    className="text-xs font-semibold bg-orange-500 text-white px-3 py-1 rounded-lg hover:bg-orange-600 transition disabled:opacity-60"
+                                  >
+                                    Create Alert
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleBroadcast(a)}
+                                  disabled={broadcasting || isAlreadyActive}
+                                  className="text-xs font-semibold bg-danger text-white px-3 py-1 rounded-lg hover:bg-red-600 transition disabled:opacity-60"
+                                >
+                                  Send Alert
+                                </button>
+                              </div>
+                            );
+                          })() : (
                             <span className="text-xs text-gray-400">No spike</span>
                           )}
                         </td>
@@ -303,7 +357,7 @@ const EpidemicPage = () => {
                   <div className="flex items-start justify-between mb-3 gap-2">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="font-bold text-xl text-gray-800">{t.disease_name}</h4>
-                      {t.spike_detected ? (
+                      {t.is_auto_detected ? (
                         <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-danger">
                           🤖 Auto-Detected
                         </span>
@@ -329,13 +383,13 @@ const EpidemicPage = () => {
                       <span>{t.recorded_date}</span>
                     </div>
                   </div>
-                  <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     {t.spike_detected ? (
-                      <span className="flex items-center gap-1 text-xs font-semibold text-danger">
+                      <span className="flex items-center gap-1 text-xs font-semibold text-danger shrink-0">
                         🚨 Spike Detected
                       </span>
                     ) : <span />}
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => handleBroadcast(t)}
                         disabled={broadcasting}
@@ -344,12 +398,22 @@ const EpidemicPage = () => {
                         <FiBell className="w-3.5 h-3.5" /> Send Alert
                       </button>
                       {!t.is_resolved && (
-                        <button
-                          onClick={() => openResolveModal(t)}
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold bg-orange-500 text-white px-3 py-1.5 rounded-lg hover:bg-orange-600 transition"
-                        >
-                          <FiCheckCircle className="w-3.5 h-3.5" /> Resolve
-                        </button>
+                        <>
+                          <button
+                            onClick={() => openResolveModal(t)}
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold bg-orange-500 text-white px-3 py-1.5 rounded-lg hover:bg-orange-600 transition"
+                          >
+                            <FiCheckCircle className="w-3.5 h-3.5" /> Resolve
+                          </button>
+                          <button
+                            onClick={() => handleRemove(t)}
+                            disabled={removing}
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-300 transition disabled:opacity-60"
+                            title="Remove quietly without notifying staff"
+                          >
+                            <FiTrash2 className="w-3.5 h-3.5" /> Remove
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

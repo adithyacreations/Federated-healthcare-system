@@ -86,13 +86,13 @@ const LabSettingsPage = () => {
         <div className="bg-white rounded-2xl p-6 border border-gray-100 mb-6 max-w-3xl">
           {/* Working days */}
           <h3 className="font-bold mb-3">📅 Working Days</h3>
-          <div className="flex flex-wrap gap-2 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 mb-6">
             {DAYS.map((day, index) => (
               <button
                 key={day}
                 type="button"
                 onClick={() => toggleDay(index)}
-                className="px-4 py-2 rounded-full text-sm font-medium transition-all"
+                className="w-full py-2 px-2 rounded-full text-sm font-medium transition-all text-center"
                 style={{
                   backgroundColor: (config.working_days || []).includes(index) ? '#F97316' : '#F3F4F6',
                   color: (config.working_days || []).includes(index) ? 'white' : '#666',

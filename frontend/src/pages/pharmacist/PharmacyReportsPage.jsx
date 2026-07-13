@@ -11,8 +11,8 @@ export default function PharmacyReportsPage() {
       summaryCards={(r) => [
         { label: 'Total Orders', value: r.summary.total_orders, icon: '💊', color: '#F97316' },
         { label: 'Delivered', value: r.summary.delivered, icon: '✅', color: '#22C55E' },
-        { label: 'Pending', value: r.summary.pending, icon: '⏳', color: '#3B82F6' },
         { label: 'Total Revenue', value: inr(r.summary.total_revenue), icon: '💰', color: '#8B5CF6' },
+        { label: 'Refunded', value: inr(r.summary.refunded_amount), icon: '💸', color: '#EF4444' },
       ]}
       breakdownTitle="💊 Medicine Breakdown"
       breakdownColumns={[
@@ -33,6 +33,7 @@ export default function PharmacyReportsPage() {
         ['Pending', r.summary.pending],
         ['Cancelled', r.summary.cancelled],
         ['Total Revenue', r.summary.total_revenue],
+        ['Refunded Amount', r.summary.refunded_amount],
         [],
         ['Medicine Breakdown'],
         ['Medicine Name', 'Orders', 'Strips Sold', 'Revenue'],

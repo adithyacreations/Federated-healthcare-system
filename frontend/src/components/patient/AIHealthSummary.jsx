@@ -15,10 +15,12 @@ Age: ${data.basic_info.age}
 Blood Group: ${data.basic_info.blood_group}
 Gender: ${data.basic_info.gender}
 
-Recent Activity (last 90 days):
-- Consultations: ${data.stats.total_consultations}
-- Prescriptions: ${data.stats.total_prescriptions}
-- Lab Tests: ${data.stats.total_lab_tests}
+Overall Health Activity:
+- Total Consultations: ${data.stats.total_consultations}
+- Total Prescriptions: ${data.stats.total_prescriptions}
+- Total Lab Tests: ${data.stats.total_lab_tests}
+
+Recent Activity details (last 90 days):
 
 ${data.consultations.length > 0 ? `Recent Consultations:
 ${data.consultations.map((c) => `- ${c.date}: Dr. ${c.doctor}${c.diagnosis ? ' (' + c.diagnosis.slice(0, 50) + ')' : ''}`).join('\n')}` : 'No recent consultations.'}
@@ -52,9 +54,9 @@ const generateDemoSummary = (data) => {
   const hasLabs = data.stats.total_lab_tests > 0;
 
   return `🌟 Overall Health Status
-Hi ${name}! Your health profile shows ${hasConsults ? 'active healthcare engagement' : 'room for more regular check-ups'} over the past 3 months.
+Hi ${name}! Your health profile shows ${hasConsults ? 'active healthcare engagement' : 'room for more regular check-ups'} with FederCare.
 
-📋 Recent Health Activity
+📋 Overall Health Activity
 - ${data.stats.total_consultations} doctor consultation(s) completed
 - ${data.stats.total_prescriptions} prescription(s) issued
 - ${data.stats.total_lab_tests} lab test(s) done

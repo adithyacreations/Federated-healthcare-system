@@ -14,12 +14,17 @@ ORDER_STATUS = [
     ('confirmed', 'Confirmed'),
     ('dispatched', 'Dispatched'),
     ('delivered', 'Delivered'),
+    ('wrong_product', 'Wrong Product Reported'),
+    ('resolved', 'Resolved'),
+    ('refunded', 'Refunded'),
+    ('cancelled', 'Cancelled'),
 ]
 
 PAYMENT_STATUS = [
     ('pending', 'Pending'),
     ('paid', 'Paid'),
     ('failed', 'Failed'),
+    ('refunded', 'Refunded'),
 ]
 
 
@@ -51,6 +56,7 @@ class EquipmentCatalog(models.Model):
     specifications = models.JSONField(default=dict, blank=True)
     price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     stock_qty = models.IntegerField(default=0)
+    max_order_qty = models.IntegerField(default=100)
     image_url = models.CharField(max_length=500, blank=True)
     listed_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -60,6 +66,21 @@ class EquipmentCatalog(models.Model):
 
     class Meta:
         db_table = 'equipment_catalog'
+
+
+class VendorDriver(models.Model):
+    driver_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    vendor_id = models.ForeignKey(VendorRegistration, on_delete=models.CASCADE, related_name='drivers')
+    name = models.CharField(max_length=100)
+    phone = models.CharField(max_length=15)
+    is_available = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.vendor_id.company_name})"
+
+    class Meta:
+        db_table = 'vendor_drivers'
 
 
 class EquipmentOrder(models.Model):
@@ -75,6 +96,11 @@ class EquipmentOrder(models.Model):
     razorpay_signature = models.CharField(max_length=200, blank=True)
     payment_status = models.CharField(max_length=10, choices=PAYMENT_STATUS, default='pending')
     tracking_info = models.TextField(blank=True)
+    driver_id = models.ForeignKey('VendorDriver', on_delete=models.SET_NULL, null=True, blank=True, related_name='equipment_orders')
+    hospital_desired_resolution = models.CharField(max_length=20, blank=True)
+    final_resolution = models.CharField(max_length=20, blank=True)
+    driver_name = models.CharField(max_length=100, blank=True)
+    driver_phone = models.CharField(max_length=15, blank=True)
     installed_at = models.DateTimeField(null=True, blank=True)
     delivery_otp = models.CharField(max_length=6, blank=True, default='')
     otp_expiry = models.DateTimeField(null=True, blank=True)

@@ -1,11 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FiDownload } from 'react-icons/fi';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
 import Modal from '../../components/common/Modal';
 import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import { openRazorpay } from '../../utils/payment';
+import { downloadBillPdf } from '../../utils/pdf';
 
 // Medically accurate international reference ranges, keyed by lowercased test
 // name (matched directly or by substring). `null` low/high = qualitative or
@@ -364,6 +366,21 @@ const TestRecordsPage = () => {
                     style={{ backgroundColor: '#F97316' }}
                   >
                     Pay ₹{record.total_fee} Now
+                  </button>
+                )}
+
+                {['paid', 'refunded'].includes(record.payment_status) && (
+                  <button
+                    type="button"
+                    onClick={() => downloadBillPdf(
+                      `/api/patient/lab/orders/${record.order_id}/bill/`,
+                      `lab-bill-${String(record.order_id || '').slice(0, 8)}.pdf`,
+                    )}
+                    className="w-full py-2 rounded-full text-sm font-semibold border-2 mb-3 inline-flex items-center justify-center gap-1.5"
+                    style={{ borderColor: '#F97316', color: '#F97316', backgroundColor: 'white' }}
+                  >
+                    <FiDownload className="w-4 h-4" />
+                    Download Bill
                   </button>
                 )}
 

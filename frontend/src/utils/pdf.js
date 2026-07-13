@@ -31,3 +31,39 @@ export async function openPrescriptionPdf(prescriptionId) {
     );
   }
 }
+
+async function readBlobError(err) {
+  const data = err?.response?.data;
+  if (!data || typeof data.text !== 'function') return null;
+  try {
+    const text = await data.text();
+    const parsed = JSON.parse(text);
+    return parsed?.message || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function downloadBillPdf(url, filename = 'federcare-bill.pdf') {
+  if (!url) {
+    toast.error('Bill not available');
+    return;
+  }
+  try {
+    const res = await API.get(url, { responseType: 'blob' });
+    const blobUrl = window.URL.createObjectURL(
+      new Blob([res.data], { type: 'application/pdf' }),
+    );
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+    toast.success('Bill downloaded');
+  } catch (err) {
+    const message = await readBlobError(err);
+    toast.error(message || 'Could not download bill.');
+  }
+}

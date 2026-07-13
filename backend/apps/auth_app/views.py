@@ -671,6 +671,7 @@ class SuperAdminDashboardView(APIView):
             'total_emergency_requests': EmergencyRequest.objects.count(),
             'total_prescriptions': Prescription.objects.count(),
             'total_lab_reports': LabReport.objects.count(),
+            'active_users': LoginCredentials.objects.filter(is_active=True).exclude(role='super_admin').count(),
         })
 
 

@@ -343,7 +343,7 @@ const EmergencyTracker = () => {
         <div className="card flex flex-col items-center justify-center">
           <FiClock className="w-8 h-8 text-accent mb-2" />
           <p className="text-xs text-gray-500">Estimated Arrival</p>
-          {emergency?.status === 'completed' ? (
+          {['arrived', 'pending_acknowledgment', 'completed'].includes(emergency?.dispatch?.status || emergency?.status) ? (
             <p className="text-3xl font-bold text-primary mt-1">Arrived</p>
           ) : acceptedAt ? (
             <>

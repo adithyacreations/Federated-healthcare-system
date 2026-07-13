@@ -29,6 +29,7 @@ const isPdf = (url) => url.toLowerCase().split('?')[0].endsWith('.pdf');
 const TABS = [
   { key: 'rx', label: 'Pending Prescription Verification' },
   { key: 'dispatch', label: 'Ready to Dispatch' },
+  { key: 'issues', label: 'Reported Issues' },
   { key: 'all', label: 'All Orders' },
 ];
 
@@ -41,6 +42,9 @@ const statusBadge = (s) => {
     confirmed: 'bg-blue-100 text-blue-700',
     dispatched: 'bg-purple-100 text-purple-700',
     delivered: 'bg-green-100 text-green-700',
+    wrong_product: 'bg-red-100 text-red-700',
+    resolved: 'bg-green-100 text-green-800',
+    refunded: 'bg-red-100 text-red-800',
     cancelled: 'bg-red-100 text-red-700',
   };
   return (
@@ -60,6 +64,7 @@ const PharmacistDashboard = () => {
   const { data: ordersRaw, loading, refetch, refreshing, lastUpdated } = useApi(
     '/api/pharmacy/orders/', { pollInterval: 30000 },
   );
+  const { data: driversRaw, refetch: refetchDrivers } = useApi('/api/pharmacy/drivers/', { pollInterval: 30000 });
 
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -148,15 +153,29 @@ const PharmacistDashboard = () => {
 
   const [dispatchOrder, setDispatchOrder] = useState(null);
   const [estDays, setEstDays] = useState(2);
+  const [driverName, setDriverName] = useState('');
+  const [driverPhone, setDriverPhone] = useState('');
   const [dispatching, setDispatching] = useState(false);
 
+  const [resolveOrder, setResolveOrder] = useState(null);
+  const [resolution, setResolution] = useState('redeliver');
+  const [resolving, setResolving] = useState(false);
+
+  const [showAddDriver, setShowAddDriver] = useState(false);
+  const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPhone, setNewDriverPhone] = useState('');
+  const [addingDriver, setAddingDriver] = useState(false);
+
   const orders = useMemo(() => ordersRaw || [], [ordersRaw]);
+  const drivers = useMemo(() => driversRaw || [], [driversRaw]);
 
   const rxPending = orders.filter(
     (o) => o.requires_prescription && !o.prescription_verified
       && o.order_status === 'prescription_uploaded');
   const readyDispatch = orders.filter(
     (o) => o.order_status === 'confirmed' && o.payment_status === 'paid');
+  const issuesList = orders.filter(
+    (o) => o.order_status === 'wrong_product');
   const allFiltered = orders.filter((o) => {
     const q = search.trim().toLowerCase();
     return !q || `${o.patient_name} ${medList(o.medicines)}`.toLowerCase().includes(q);
@@ -186,18 +205,65 @@ const PharmacistDashboard = () => {
 
   const dispatch = async () => {
     if (!dispatchOrder) return;
+    if (!driverName) {
+      return toast.error('Please select a driver');
+    }
     setDispatching(true);
     try {
       await API.put(`/api/pharmacy/orders/${dispatchOrder.med_order_id}/dispatch/`, {
         estimated_delivery_days: Number(estDays),
+        driver_id: driverName,
       });
       toast.success('Order dispatched — OTP sent to patient');
       setDispatchOrder(null);
+      setDriverName('');
+      setDriverPhone('');
       refetch();
+      refetchDrivers();
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Dispatch failed');
     } finally {
       setDispatching(false);
+    }
+  };
+
+  const resolveIssue = async () => {
+    if (!resolveOrder) return;
+    if (resolution === 'redeliver' && !driverName) {
+      return toast.error('Please select a driver for redelivery');
+    }
+    setResolving(true);
+    try {
+      await API.post(`/api/pharmacy/orders/${resolveOrder.med_order_id}/resolve-issue/`, {
+        resolution,
+        driver_id: resolution === 'redeliver' ? driverName : undefined,
+      });
+      toast.success('Issue marked as resolved');
+      setResolveOrder(null);
+      setDriverName('');
+      refetch();
+      refetchDrivers();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Resolution failed');
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const handleAddDriver = async () => {
+    if (!newDriverName.trim() || !newDriverPhone.trim()) return;
+    setAddingDriver(true);
+    try {
+      await API.post('/api/pharmacy/drivers/', { name: newDriverName, phone: newDriverPhone });
+      toast.success('Driver added!');
+      setShowAddDriver(false);
+      setNewDriverName('');
+      setNewDriverPhone('');
+      refetchDrivers();
+    } catch (err) {
+      toast.error('Failed to add driver');
+    } finally {
+      setAddingDriver(false);
     }
   };
 
@@ -326,17 +392,18 @@ const PharmacistDashboard = () => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatsCard icon={FiPackage}  title="Orders to Dispatch"    value={stats?.pending_orders ?? 0} />
           <StatsCard icon={FiFileText} title="Pending Prescription Verification" value={stats?.rx_pending_verification ?? rxPending.length} />
+          <StatsCard icon={FiAlertOctagon} title="Reported Issues"   value={issuesList.length} />
           <StatsCard icon={FiTruck}    title="Dispatched Orders"     value={stats?.dispatched_orders ?? 0} />
-          <StatsCard icon={FiAlertOctagon} title="Low Stock Items"   value={lowStock} />
         </div>
 
         {/* ─── Quick actions ─────────────────────────────────────── */}
         <section className="mb-8">
           <h2 className="dash-h2">Quick Actions</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <QuickActionCard icon={FiPackage}    onClick={() => setTab('all')}  title="View Orders"          description="Browse all medicine orders" />
             <QuickActionCard icon={FiFileText}   onClick={() => setTab('rx')}   title="Verify Prescriptions" description={`${rxPending.length} pending`} />
-            <QuickActionCard icon={FiCheckSquare} to="/pharmacist/inventory"    title="Manage Inventory"     description="Stock & medicine catalog" />
+            <QuickActionCard icon={FiCheckSquare} onClick={() => navigate('/pharmacist/inventory')} title="Manage Inventory"     description="Stock & medicine catalog" />
+            <QuickActionCard icon={FiTruck} onClick={() => setShowAddDriver(true)} title="Manage Drivers" description={`${drivers.length} registered`} />
           </div>
         </section>
 
@@ -352,7 +419,7 @@ const PharmacistDashboard = () => {
             >
               {t.label}
               <span className="ml-1.5 text-xs opacity-70">
-                ({t.key === 'rx' ? rxPending.length : t.key === 'dispatch' ? readyDispatch.length : orders.length})
+                ({t.key === 'rx' ? rxPending.length : t.key === 'dispatch' ? readyDispatch.length : t.key === 'issues' ? issuesList.length : orders.length})
               </span>
             </button>
           ))}
@@ -423,8 +490,33 @@ const PharmacistDashboard = () => {
                       )}
                       <div className="text-sm font-semibold text-ink mt-1">₹{o.total_amount} · paid</div>
                     </div>
-                    <button onClick={() => { setDispatchOrder(o); setEstDays(2); }} className="btn-orange text-sm">
+                    <button onClick={() => { setDispatchOrder(o); setEstDays(2); setDriverName(''); }} className="btn-orange text-sm">
                       <FiTruck className="w-4 h-4" /> Dispatch
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {tab === 'issues' && (
+              <div className="space-y-3">
+                {issuesList.length === 0 && (
+                  <div className="dashboard-card text-sm text-muted text-center py-8">No reported issues.</div>
+                )}
+                {issuesList.map((o) => (
+                  <div key={o.med_order_id} className="dashboard-card border border-red-200 bg-red-50/50 flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-red-700 flex items-center gap-2">
+                        ⚠️ Wrong Product Reported <span className="text-sm font-normal text-red-600">({o.issue_type})</span>
+                      </div>
+                      <div className="font-medium text-ink mt-1">Patient: {o.patient_name}</div>
+                      <div className="text-xs text-muted max-w-md mt-0.5">{medList(o.medicines)}</div>
+                      <div className="mt-2 text-sm font-semibold text-ink">Driver Details</div>
+                      <div className="text-xs text-muted">Name: {o.driver_name || 'N/A'}</div>
+                      <div className="text-xs text-muted">Phone: {o.driver_phone || 'N/A'}</div>
+                    </div>
+                    <button onClick={() => { setResolveOrder(o); setResolution('redelivered'); }} className="px-4 py-2 rounded-lg text-sm font-medium text-white" style={{ backgroundColor: '#EF4444' }}>
+                      Resolve Issue
                     </button>
                   </div>
                 ))}
@@ -515,18 +607,6 @@ const PharmacistDashboard = () => {
                     }}
                   />
                 )}
-                <div style={{ display: 'none' }} className="p-4 text-center">
-                  <p className="text-gray-500 text-sm">Cannot display prescription.</p>
-                  <a
-                    href={rxFileUrl(rxOrder)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm underline mt-2 inline-block"
-                    style={{ color: '#F97316' }}
-                  >
-                    Open in new tab →
-                  </a>
-                </div>
               </div>
             ) : (
               <p className="text-sm text-muted">No prescription file uploaded.</p>
@@ -562,8 +642,23 @@ const PharmacistDashboard = () => {
             </p>
             <div>
               <label className="text-xs text-muted">Estimated delivery days</label>
-              <select className="input-field" value={estDays} onChange={(e) => setEstDays(e.target.value)}>
+              <select className="input-field mb-2" value={estDays} onChange={(e) => setEstDays(e.target.value)}>
                 {[1, 2, 3, 4, 5].map((dd) => <option key={dd} value={dd}>{dd} day{dd > 1 ? 's' : ''}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted mb-1 block">Assign Delivery Driver</label>
+              <select
+                className="input-field mb-2"
+                value={driverName}
+                onChange={(e) => setDriverName(e.target.value)}
+              >
+                <option value="">Select an available driver...</option>
+                {drivers.map(d => (
+                  <option key={d.driver_id} value={d.driver_id} disabled={!d.is_available}>
+                    {d.name} ({d.phone}) {d.is_available ? '🟢' : '🔴 On Delivery'}
+                  </option>
+                ))}
               </select>
             </div>
             <button onClick={dispatch} disabled={dispatching} className="btn-orange w-full disabled:opacity-60">
@@ -572,6 +667,83 @@ const PharmacistDashboard = () => {
           </div>
         )}
       </Modal>
+
+      {/* Resolve Issue Modal */}
+      <Modal isOpen={Boolean(resolveOrder)} onClose={() => setResolveOrder(null)} title="Resolve Issue">
+        {resolveOrder && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">
+              Select how you want to resolve the "Wrong Product" issue for <strong>{resolveOrder.patient_name}</strong>.
+            </p>
+            <div>
+              <label className="text-xs text-muted mb-1 block">Resolution Action</label>
+              {resolveOrder.patient_desired_resolution && (
+                <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+                  <strong>Patient requested:</strong> <span className="capitalize">{resolveOrder.patient_desired_resolution}</span>
+                </div>
+              )}
+              <select className="input-field mb-2" value={resolution} onChange={(e) => setResolution(e.target.value)}>
+                <option value="redelivered">Redeliver the correct items</option>
+                <option value="refunded">Refund the order amount</option>
+              </select>
+            </div>
+            
+            {resolution === 'redelivered' && (
+              <div>
+                <label className="text-xs text-muted mb-1 block">Assign Driver for Redelivery</label>
+                <select
+                  className="input-field mb-2"
+                  value={driverName}
+                  onChange={(e) => setDriverName(e.target.value)}
+                >
+                  <option value="">Select an available driver...</option>
+                  {drivers.map(d => (
+                    <option key={d.driver_id} value={d.driver_id} disabled={!d.is_available}>
+                      {d.name} ({d.phone}) {d.is_available ? '🟢' : '🔴 On Delivery'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button onClick={resolveIssue} disabled={resolving} className="px-4 py-2 w-full rounded-lg text-sm font-medium text-white disabled:opacity-60" style={{ backgroundColor: '#EF4444' }}>
+              {resolving ? 'Resolving…' : 'Confirm Resolution'}
+            </button>
+          </div>
+        )}
+      </Modal>
+
+      {/* Add Driver Modal */}
+      <Modal isOpen={showAddDriver} onClose={() => setShowAddDriver(false)} title="Add Delivery Driver">
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-muted mb-1 block">Driver Name</label>
+            <input
+              className="input-field"
+              placeholder="E.g. John Doe"
+              value={newDriverName}
+              onChange={(e) => setNewDriverName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted mb-1 block">Phone Number</label>
+            <input
+              className="input-field"
+              placeholder="E.g. 9876543210"
+              maxLength={10}
+              value={newDriverPhone}
+              onChange={(e) => setNewDriverPhone(e.target.value.replace(/[^0-9]/g, ''))}
+            />
+          </div>
+          <button
+            onClick={handleAddDriver}
+            disabled={addingDriver || !newDriverName.trim() || !newDriverPhone.trim()}
+            className="w-full btn-primary"
+          >
+            {addingDriver ? 'Adding...' : 'Add Driver'}
+          </button>
+        </div>
+      </Modal>
+
     </DashboardLayout>
   );
 };

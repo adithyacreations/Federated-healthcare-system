@@ -618,11 +618,11 @@ const FLMonitor = () => {
       <div className="card mb-6">
         <h2 className="text-sm font-semibold text-gray-700 mb-4">FL Controls</h2>
 
-        <div className="flex flex-wrap gap-3 items-center">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {/* Step 1 */}
           <button
             onClick={() => setShowInit(true)}
-            className="inline-flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition"
+            className="flex w-full justify-center items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition"
           >
             <FiCpu className="w-4 h-4" /> Initialize New Model
           </button>
@@ -631,7 +631,7 @@ const FLMonitor = () => {
           <button
             onClick={handleStartRound}
             disabled={!activeModel}
-            className="inline-flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex w-full justify-center items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <FiPlay className="w-4 h-4" /> Start FL Round
           </button>
@@ -640,7 +640,7 @@ const FLMonitor = () => {
           <button
             onClick={handleSimulateAll}
             disabled={!activeRound || simulatingAll || activeRound?.status !== 'training'}
-            className="inline-flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex w-full justify-center items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <FiUsers className={`w-4 h-4 ${simulatingAll ? 'animate-pulse' : ''}`} />
             {simulatingAll ? 'Simulating… (real data)' : 'Simulate All Hospitals'}
@@ -650,7 +650,7 @@ const FLMonitor = () => {
           <button
             onClick={handleAggregate}
             disabled={!activeRound}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`flex w-full justify-center items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed ${
               simulateResults && simulateResults.length > 0
                 ? 'bg-orange-500 text-white hover:bg-orange-600 ring-2 ring-orange-300 ring-offset-1 animate-pulse'
                 : 'bg-orange-500 text-white hover:bg-orange-600'
@@ -664,7 +664,7 @@ const FLMonitor = () => {
             <button
               onClick={handleSendReminder}
               disabled={sendingReminder}
-              className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-amber-600 transition disabled:opacity-40"
+              className="flex w-full justify-center items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-amber-600 transition disabled:opacity-40"
             >
               <FiBell className={`w-4 h-4 ${sendingReminder ? 'animate-bounce' : ''}`} />
               {sendingReminder ? 'Sending…' : `Remind ${pendingHospitals.length} Pending`}
@@ -676,7 +676,7 @@ const FLMonitor = () => {
             <button
               onClick={handleForceAggregate}
               disabled={forcingAggregate}
-              className="inline-flex items-center gap-2 bg-danger text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-red-600 transition disabled:opacity-40"
+              className="flex w-full justify-center items-center gap-2 bg-danger text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-red-600 transition disabled:opacity-40"
             >
               <FiAlertTriangle className="w-4 h-4" />
               {forcingAggregate ? 'Forcing…' : 'Force Aggregate'}
@@ -690,7 +690,7 @@ const FLMonitor = () => {
                 setNewThreshold(String(activeRound.min_hospitals_threshold ?? ''));
                 setShowThresholdModal(true);
               }}
-              className="inline-flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition"
+              className="flex w-full justify-center items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition"
             >
               📉 Lower Threshold
             </button>
@@ -701,7 +701,7 @@ const FLMonitor = () => {
             <button
               onClick={handleCancelRound}
               disabled={cancellingRound}
-              className="inline-flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-50"
+              className="flex w-full justify-center items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-50"
             >
               <FiAlertTriangle className="w-4 h-4" />
               {cancellingRound ? 'Cancelling…' : 'Cancel Round'}
@@ -712,7 +712,7 @@ const FLMonitor = () => {
           <button
             onClick={handleReset}
             disabled={resetting}
-            className="inline-flex items-center gap-2 border border-red-200 text-red-500 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-red-50 transition ml-auto disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex w-full justify-center items-center gap-2 border border-red-200 text-red-500 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-red-50 transition sm:col-span-full md:col-span-1 md:ml-auto disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <FiTrash2 className={`w-4 h-4 ${resetting ? 'animate-pulse' : ''}`} />
             {resetting ? 'Resetting…' : 'Reset FL Data'}

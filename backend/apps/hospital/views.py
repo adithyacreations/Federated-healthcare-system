@@ -30,7 +30,7 @@ from .serializers import (
     AddLabTechSerializer,
     AddDriverSerializer,
 )
-from utils import log_audit, send_notification
+from utils import log_audit, send_notification, broadcast_new_slots_to_patients
 
 
 # ─── FL / Demo constants ──────────────────────────────────────────────────────
@@ -800,6 +800,10 @@ class StaffActionView(APIView):
         staff.login_id.is_active = (action == 'resume')
         staff.login_id.save(update_fields=['is_active', 'updated_at'])
 
+        if role == 'doctor' and action in ('suspend', 'terminate'):
+            staff.is_online = False
+            staff.save(update_fields=['is_online', 'updated_at'])
+
         hospital_email = getattr(hospital.login_id, 'email', 'federcaresupport@gmail.com')
 
         if action == 'resume':
@@ -936,24 +940,36 @@ class UpdateBedView(APIView):
                 status=400,
             )
 
-        new_status = request.data.get('status', '')
-        if new_status not in ['available', 'occupied', 'reserved']:
-            return err('status must be available, occupied, or reserved')
+        new_status = request.data.get('status')
+        new_ward_name = request.data.get('ward_name')
+        new_bed_type = request.data.get('bed_type')
 
         old_status = bed.status
-        bed.status = new_status
-        if new_status == 'available':
-            bed.reserved_for = None
-            bed.reserved_at = None
+        if new_status:
+            if new_status not in ['available', 'occupied', 'reserved']:
+                return err('status must be available, occupied, or reserved')
+            bed.status = new_status
+            if new_status == 'available':
+                bed.reserved_for = None
+                bed.reserved_at = None
+
+        if new_ward_name is not None:
+            bed.ward_name = new_ward_name.strip()
+
+        if new_bed_type:
+            valid_types = [c[0] for c in bed._meta.get_field('bed_type').choices]
+            if new_bed_type in valid_types:
+                bed.bed_type = new_bed_type
+
         bed.save()
 
         log_audit(
-            request.user, 'bed_status_updated', module='hospital',
+            request.user, 'bed_updated', module='hospital',
             entity_type='Bed', entity_id=bed_id,
-            old_value=old_status, new_value=new_status,
+            old_value=old_status, new_value=bed.status,
             ip_address=request.META.get('REMOTE_ADDR'),
         )
-        return ok('Bed status updated', serialize_bed(bed))
+        return ok('Bed updated', serialize_bed(bed))
 
 
 class UnlockEmergencyBedView(APIView):
@@ -2273,7 +2289,12 @@ class DoctorScheduleView(APIView):
     def get(self, request):
         from datetime import date as date_cls, datetime
         from django.utils import timezone
-        from apps.doctor.models import DoctorRegistration, DoctorSlot, Consultation
+        from apps.doctor.models import DoctorRegistration, DoctorSchedule, DoctorSlot, Consultation
+        from apps.doctor.utils import (
+            AUTO_OBSOLETE_BLOCK_REASONS,
+            generate_slots_for_schedule,
+            get_current_schedule_for_doctor,
+        )
 
         hospital = get_hospital(request)
         if not hospital:
@@ -2296,19 +2317,46 @@ class DoctorScheduleView(APIView):
 
         schedule = []
         for doctor in doctors:
+            current_schedule = get_current_schedule_for_doctor(doctor)
+            if current_schedule:
+                try:
+                    generate_slots_for_schedule(current_schedule, days_ahead=30, prune_available=False)
+                except ValueError:
+                    pass
             slots = DoctorSlot.objects.filter(
                 doctor_id=doctor,
                 slot_date=selected_date,
-            ).order_by('start_time')
+            )
+            if current_schedule:
+                slots = slots.filter(
+                    Q(schedule=current_schedule)
+                    | Q(is_booked=True)
+                    | Q(status='booked')
+                    | Q(schedule__isnull=True)
+                )
+            else:
+                slots = slots.filter(
+                    Q(is_booked=True)
+                    | Q(status='booked')
+                    | Q(schedule__isnull=True)
+                )
+            slots = slots.exclude(
+                Q(is_booked=False)
+                & (Q(is_blocked=True) | Q(status='blocked'))
+                & Q(block_reason__in=AUTO_OBSOLETE_BLOCK_REASONS)
+            )
+            slots = slots.select_related('schedule', 'hospital').order_by('start_time')
 
             slot_list = []
             for slot in slots:
                 consultation = Consultation.objects.filter(
                     slot_id=slot,
-                    status__in=['scheduled', 'active', 'completed'],
+                    status__in=['scheduled', 'ongoing', 'completed'],
                 ).select_related('patient_id').first()
 
-                if slot.is_booked and consultation:
+                if slot.is_blocked or slot.status == 'blocked':
+                    slot_status = 'blocked'
+                elif (slot.is_booked or slot.status == 'booked') and consultation:
                     if consultation.status == 'completed':
                         slot_status = 'completed'
                     elif is_today and slot.start_time <= current_time <= slot.end_time:
@@ -2324,10 +2372,16 @@ class DoctorScheduleView(APIView):
 
                 slot_list.append({
                     'slot_id': str(slot.slot_id),
+                    'schedule_id': str(slot.schedule.schedule_id) if slot.schedule else None,
                     'start_time': str(slot.start_time),
                     'end_time': str(slot.end_time),
                     'consult_type': slot.consult_type,
+                    'consultation_type': slot.consult_type,
+                    'consultation_fee': float(slot.consultation_fee),
                     'is_booked': slot.is_booked,
+                    'is_blocked': slot.is_blocked,
+                    'blocked_by': slot.blocked_by,
+                    'block_reason': slot.block_reason,
                     'status': slot_status,
                     'patient_name': consultation.patient_id.full_name if consultation else None,
                     'consultation_id': str(consultation.consultation_id) if consultation else None,
@@ -2338,7 +2392,7 @@ class DoctorScheduleView(APIView):
 
             if has_active:
                 availability = 'in_consultation'
-            elif has_upcoming:
+            elif has_upcoming or doctor.is_online:
                 availability = 'has_slots'
             elif slot_list:
                 availability = 'done_for_day'
@@ -2351,8 +2405,10 @@ class DoctorScheduleView(APIView):
                 'specialization': getattr(doctor, 'specialization', '') or '',
                 'availability': availability,
                 'total_slots': len(slot_list),
-                'booked_slots': sum(1 for s in slot_list if s['is_booked']),
+                'booked_slots': sum(1 for s in slot_list if s['status'] in ('booked', 'in_progress', 'completed', 'past')),
+                'blocked_slots': sum(1 for s in slot_list if s['status'] == 'blocked'),
                 'completed_slots': sum(1 for s in slot_list if s['status'] == 'completed'),
+                'active_schedules': 1 if current_schedule else 0,
                 'slots': slot_list,
             })
 
@@ -2378,6 +2434,301 @@ class DoctorScheduleView(APIView):
 
 
 # ─── Lab slot configuration (Option B+) ─────────────────────────────────────
+
+class DoctorScheduleConfigView(APIView):
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def get(self, request):
+        from apps.doctor.models import DoctorSchedule
+        from apps.doctor.serializers import DoctorScheduleSerializer
+
+        hospital = get_hospital(request)
+        if not hospital:
+            return err('Hospital profile not found.', status=404)
+
+        schedules = DoctorSchedule.objects.filter(hospital=hospital).select_related(
+            'doctor', 'hospital',
+        ).order_by('doctor__full_name', '-is_active', '-updated_at', '-created_at')
+        visible_schedules = []
+        seen_doctors = set()
+        for schedule in schedules:
+            doctor_id = str(schedule.doctor_id)
+            if doctor_id in seen_doctors:
+                continue
+            seen_doctors.add(doctor_id)
+            visible_schedules.append(schedule)
+
+        return ok('Doctor schedules fetched', {
+            'schedules': DoctorScheduleSerializer(visible_schedules, many=True).data,
+        })
+
+    def post(self, request):
+        from apps.doctor.models import DoctorSchedule
+        from apps.doctor.serializers import DoctorScheduleSerializer, DoctorScheduleWriteSerializer
+        from apps.doctor.utils import deactivate_duplicate_schedules, generate_slots_for_schedule
+
+        hospital = get_hospital(request)
+        if not hospital:
+            return err('Hospital profile not found.', status=404)
+
+        serializer = DoctorScheduleWriteSerializer(data=request.data, context={'hospital': hospital})
+        if not serializer.is_valid():
+            return err('Validation failed', serializer.errors)
+
+        data = serializer.validated_data
+        doctor = data['_doctor']
+        schedule = (
+            DoctorSchedule.objects
+            .filter(hospital=hospital, doctor=doctor)
+            .order_by('-is_active', '-updated_at', '-created_at')
+            .first()
+        )
+        created = schedule is None
+        if created:
+            schedule = DoctorSchedule(hospital=hospital, doctor=doctor)
+
+        schedule.working_days = data['working_days']
+        schedule.start_time = data['start_time']
+        schedule.end_time = data['end_time']
+        schedule.slot_duration_minutes = data['slot_duration_minutes']
+        schedule.consultation_type = data['consultation_type']
+        schedule.consultation_fee = data['consultation_fee']
+        schedule.is_active = data.get('is_active', True)
+        schedule.save()
+
+        try:
+            generation = generate_slots_for_schedule(
+                schedule,
+                days_ahead=data.get('days_ahead', 30),
+                prune_available=not created,
+            )
+            duplicate_cleanup = deactivate_duplicate_schedules(
+                schedule,
+                days_ahead=data.get('days_ahead', 30),
+            )
+        except ValueError as exc:
+            if created:
+                schedule.delete()
+            return err(str(exc), status=400)
+
+        send_notification(
+            doctor.login_id,
+            'Doctor Schedule Created' if created else 'Doctor Schedule Updated',
+            f'{hospital.hospital_name} {"created" if created else "updated"} your consultation schedule.',
+            notif_type='info',
+            related_id=str(schedule.schedule_id),
+        )
+        try:
+            broadcast_new_slots_to_patients(doctor_name=doctor.full_name, doctor_id=doctor.doctor_id)
+        except Exception as exc:
+            print(f'[WS] schedule slot broadcast error: {exc}')
+
+        log_audit(
+            request.user, 'doctor_schedule_created' if created else 'doctor_schedule_updated', module='hospital',
+            entity_type='DoctorSchedule', entity_id=schedule.schedule_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return ok('Doctor schedule created successfully' if created else 'Doctor schedule updated successfully', {
+            'schedule': DoctorScheduleSerializer(schedule).data,
+            'slot_generation': generation,
+            'duplicate_cleanup': duplicate_cleanup,
+            'slot_message': 'Slots generated successfully',
+        }, status=201 if created else 200)
+
+
+class DoctorScheduleConfigDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def put(self, request, schedule_id):
+        return self._update(request, schedule_id)
+
+    def patch(self, request, schedule_id):
+        return self._update(request, schedule_id)
+
+    def delete(self, request, schedule_id):
+        from django.db import transaction
+        from apps.doctor.models import DoctorSchedule
+
+        hospital = get_hospital(request)
+        if not hospital:
+            return err('Hospital profile not found.', status=404)
+
+        try:
+            schedule = DoctorSchedule.objects.select_related('doctor', 'hospital').get(
+                schedule_id=schedule_id,
+                hospital=hospital,
+            )
+        except DoctorSchedule.DoesNotExist:
+            return err('Doctor schedule not found.', status=404)
+
+        doctor = schedule.doctor
+        with transaction.atomic():
+            preserved_slot_ids = list(schedule.slots.filter(
+                Q(is_booked=True)
+                | Q(status='booked')
+                | Q(consultation__isnull=False)
+            ).values_list('slot_id', flat=True).distinct())
+            preserved_count = len(preserved_slot_ids)
+            schedule.slots.model.objects.filter(slot_id__in=preserved_slot_ids).update(schedule=None)
+            deleted_slots_count, _ = schedule.slots.all().delete()
+            schedule.delete()
+
+        send_notification(
+            doctor.login_id,
+            'Doctor Schedule Deleted',
+            f'{hospital.hospital_name} deleted your consultation schedule.',
+            notif_type='info',
+        )
+
+        log_audit(
+            request.user, 'doctor_schedule_deleted', module='hospital',
+            entity_type='DoctorSchedule', entity_id=schedule_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return ok('Doctor schedule deleted successfully', {
+            'deleted_slots': deleted_slots_count,
+            'preserved_booked_slots': preserved_count,
+        })
+
+    def _update(self, request, schedule_id):
+        from apps.doctor.models import DoctorSchedule
+        from apps.doctor.serializers import DoctorScheduleSerializer, DoctorScheduleWriteSerializer
+        from apps.doctor.utils import deactivate_duplicate_schedules, generate_slots_for_schedule
+
+        hospital = get_hospital(request)
+        if not hospital:
+            return err('Hospital profile not found.', status=404)
+
+        try:
+            schedule = DoctorSchedule.objects.select_related('doctor', 'hospital').get(
+                schedule_id=schedule_id,
+                hospital=hospital,
+            )
+        except DoctorSchedule.DoesNotExist:
+            return err('Doctor schedule not found.', status=404)
+
+        requested_doctor_id = request.data.get('doctor_id')
+        if requested_doctor_id and str(requested_doctor_id) != str(schedule.doctor.doctor_id):
+            return err('Doctor cannot be changed for an existing schedule. Create a new schedule instead.', status=400)
+
+        payload = {
+            'doctor_id': str(schedule.doctor.doctor_id),
+            'working_days': schedule.working_days,
+            'start_time': schedule.start_time.strftime('%H:%M'),
+            'end_time': schedule.end_time.strftime('%H:%M'),
+            'slot_duration_minutes': schedule.slot_duration_minutes,
+            'consultation_type': schedule.consultation_type,
+            'consultation_fee': str(schedule.consultation_fee),
+            'is_active': schedule.is_active,
+            'days_ahead': request.data.get('days_ahead', 30),
+        }
+        for key in [
+            'working_days', 'start_time', 'end_time',
+            'slot_duration_minutes', 'consultation_type', 'consultation_fee',
+            'is_active',
+        ]:
+            if key in request.data:
+                payload[key] = request.data[key]
+
+        serializer = DoctorScheduleWriteSerializer(data=payload, context={'hospital': hospital})
+        if not serializer.is_valid():
+            return err('Validation failed', serializer.errors)
+
+        data = serializer.validated_data
+        schedule.working_days = data['working_days']
+        schedule.start_time = data['start_time']
+        schedule.end_time = data['end_time']
+        schedule.slot_duration_minutes = data['slot_duration_minutes']
+        schedule.consultation_type = data['consultation_type']
+        schedule.consultation_fee = data['consultation_fee']
+        schedule.is_active = data.get('is_active', True)
+        schedule.save()
+
+        try:
+            generation = generate_slots_for_schedule(
+                schedule,
+                days_ahead=data.get('days_ahead', 30),
+                prune_available=True,
+            )
+            duplicate_cleanup = deactivate_duplicate_schedules(
+                schedule,
+                days_ahead=data.get('days_ahead', 30),
+            )
+        except ValueError as exc:
+            return err(str(exc), status=400)
+
+        send_notification(
+            schedule.doctor.login_id,
+            'Doctor Schedule Updated',
+            f'{hospital.hospital_name} updated your consultation schedule.',
+            notif_type='info',
+            related_id=str(schedule.schedule_id),
+        )
+        try:
+            broadcast_new_slots_to_patients(
+                doctor_name=schedule.doctor.full_name,
+                doctor_id=schedule.doctor.doctor_id,
+            )
+        except Exception as exc:
+            print(f'[WS] schedule slot broadcast error: {exc}')
+
+        log_audit(
+            request.user, 'doctor_schedule_updated', module='hospital',
+            entity_type='DoctorSchedule', entity_id=schedule.schedule_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return ok('Doctor schedule updated successfully', {
+            'schedule': DoctorScheduleSerializer(schedule).data,
+            'slot_generation': generation,
+            'duplicate_cleanup': duplicate_cleanup,
+            'slot_message': 'Slots generated successfully',
+        })
+
+
+class HospitalDoctorSlotBlockView(APIView):
+    permission_classes = [IsAuthenticated, IsHospitalAdmin]
+
+    def post(self, request, slot_id):
+        from apps.doctor.models import DoctorSlot
+        from apps.doctor.serializers import BlockDoctorSlotSerializer, DoctorSlotSerializer
+        from apps.doctor.utils import block_doctor_slot
+
+        hospital = get_hospital(request)
+        if not hospital:
+            return err('Hospital profile not found.', status=404)
+
+        serializer = BlockDoctorSlotSerializer(data=request.data)
+        if not serializer.is_valid():
+            return err('Validation failed', serializer.errors)
+
+        try:
+            slot = DoctorSlot.objects.select_related('doctor_id').get(
+                slot_id=slot_id,
+                doctor_id__hospital_id=hospital,
+            )
+        except DoctorSlot.DoesNotExist:
+            return err('Slot not found.', status=404)
+
+        try:
+            block_doctor_slot(
+                slot,
+                blocked_by='hospital_admin',
+                reason=serializer.validated_data.get('block_reason') or 'Blocked by hospital admin',
+            )
+        except ValueError as exc:
+            return err(str(exc), status=400)
+
+        log_audit(
+            request.user, 'hospital_admin_blocked_doctor_slot', module='hospital',
+            entity_type='DoctorSlot', entity_id=slot.slot_id,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return ok('Slot blocked successfully', DoctorSlotSerializer(slot).data)
+
 
 class HospitalLabConfigView(APIView):
     """Hospital admin reads/updates its lab availability config. Saving
@@ -2440,6 +2791,20 @@ class HospitalLabConfigView(APIView):
             config.working_days = d['working_days']
         if d.get('start_time'):
             config.start_time = parse_time(d['start_time'])
+        if d.get('end_time'):
+            config.end_time = parse_time(d['end_time'])
+        if 'slot_duration_minutes' in d:
+            config.slot_duration_minutes = int(d['slot_duration_minutes'])
+        if 'max_patients_per_slot' in d:
+            config.max_patients_per_slot = int(d['max_patients_per_slot'])
+        if d.get('lunch_break_start'):
+            config.lunch_break_start = parse_time(d['lunch_break_start'])
+        if d.get('lunch_break_end'):
+            config.lunch_break_end = parse_time(d['lunch_break_end'])
+        config.save()
+
+        generate_lab_slots(hospital, days_ahead=30)
+        return ok('Lab config updated! Slots regenerated.', {'config_id': str(config.config_id)})
         if d.get('end_time'):
             config.end_time = parse_time(d['end_time'])
         if 'slot_duration_minutes' in d:

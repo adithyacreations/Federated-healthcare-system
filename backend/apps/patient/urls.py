@@ -8,6 +8,7 @@ from .views import (
     BookConsultationView,
     ConsultationPaymentFailureView,
     PatientConsultationsView,
+    CancelConsultationView,
     PatientPrescriptionsView,
     EmergencySOSView,
     TrackEmergencyView,
@@ -41,6 +42,11 @@ from .views_extra import (
     HospitalListView,
     VendorListView,
 )
+from .billing_views import (
+    ConsultationBillView,
+    LabTestOrderBillView,
+    MedicineOrderBillView,
+)
 
 urlpatterns = [
     path('dashboard/', PatientDashboardView.as_view()),
@@ -51,6 +57,8 @@ urlpatterns = [
     path('book-consultation/', BookConsultationView.as_view()),
     path('consultation-payment-failed/', ConsultationPaymentFailureView.as_view()),
     path('consultations/', PatientConsultationsView.as_view()),
+    path('consultations/<uuid:consultation_id>/bill/', ConsultationBillView.as_view()),
+    path('consultations/<uuid:consultation_id>/cancel/', CancelConsultationView.as_view()),
     path('prescriptions/', PatientPrescriptionsView.as_view()),
     path('emergency/', EmergencySOSView.as_view()),
     path('emergency/history/', EmergencyHistoryView.as_view()),
@@ -72,12 +80,14 @@ urlpatterns = [
     path('medicine/order/', PlaceMedicineOrderView.as_view()),
     path('medicine/upload-prescription/', UploadPrescriptionView.as_view()),
     path('medicine/orders/', ListMedicineOrdersView.as_view()),
+    path('medicine/orders/<uuid:order_id>/bill/', MedicineOrderBillView.as_view()),
     path('medicine/monthly-usage/', MonthlyMedicineUsageView.as_view()),
     path('medicine/confirm-delivery/', ConfirmMedicineDeliveryView.as_view()),
 
     # ─── Lab tests ────────────────────────────────────────────────
     path('lab/book/', BookLabTestView.as_view()),
     path('lab/orders/', ListLabOrdersView.as_view()),
+    path('lab/orders/<uuid:order_id>/bill/', LabTestOrderBillView.as_view()),
     path('lab/catalog/', GetLabTestCatalogView.as_view()),
     path('lab/upload-prescription/', UploadLabPrescriptionView.as_view()),
     path('lab/booked-slots/', BookedLabSlotsView.as_view()),

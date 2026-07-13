@@ -3,6 +3,7 @@ import VendorDashboard from './VendorDashboard';
 import VendorProductsPage from './VendorProductsPage';
 import VendorOrdersPage from './VendorOrdersPage';
 import VendorMessagesPage from './VendorMessagesPage';
+import VendorReportsPage from './VendorReportsPage';
 import ProfilePage from '../profile/ProfilePage';
 
 // Each section now has its own page; "Add Product" reuses the products page
@@ -13,6 +14,7 @@ const VendorRouter = () => (
     <Route path="products" element={<VendorProductsPage />} />
     <Route path="products/add" element={<VendorProductsPage />} />
     <Route path="orders" element={<VendorOrdersPage />} />
+    <Route path="reports" element={<VendorReportsPage />} />
     <Route path="messages" element={<VendorMessagesPage />} />
     <Route path="profile" element={<ProfilePage />} />
     <Route path="*" element={<Navigate to="/vendor" replace />} />

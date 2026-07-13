@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -51,6 +52,19 @@ class CreatePaymentOrderView(APIView):
         record = _fetch_record(payment_type, object_id)
         if record is None:
             return err(f'No {payment_type} record found for object_id {object_id}.', status_code=404)
+
+        if payment_type == 'consultation':
+            from apps.doctor.utils import release_expired_consultation_holds
+
+            release_expired_consultation_holds()
+            record.refresh_from_db()
+            if record.payment_status == 'paid':
+                return err('This consultation is already paid.', status_code=400)
+            if record.status == 'cancelled' or record.payment_status == 'failed':
+                return err('Payment hold expired. Please book the slot again.', status_code=400)
+            if record.payment_hold_expires_at and record.payment_hold_expires_at <= timezone.now():
+                release_expired_consultation_holds()
+                return err('Payment hold expired. Please book the slot again.', status_code=400)
 
         result = create_razorpay_order(
             amount=amount,

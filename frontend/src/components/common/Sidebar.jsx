@@ -3,7 +3,7 @@ import {
   FiHome, FiUsers, FiCheckSquare, FiActivity, FiAlertTriangle, FiFileText, FiSettings,
   FiUserCheck, FiPackage, FiGrid, FiCpu, FiBriefcase, FiCalendar, FiShoppingCart,
   FiHeart, FiFilePlus, FiTruck, FiClipboard, FiBookOpen, FiPhoneCall, FiList,
-  FiMessageCircle, FiPlus, FiBarChart2,
+  FiMessageCircle, FiBarChart2,
 } from 'react-icons/fi';
 import { useAuth } from '../../context/AuthContext';
 import useApi from '../../hooks/useApi';
@@ -43,7 +43,7 @@ const MENUS = {
     { to: '/doctor/patients', icon: FiUsers, label: 'Patients', section: 'CLINICAL' },
     { to: '/doctor/prescriptions', icon: FiFilePlus, label: 'Prescriptions', section: 'CLINICAL' },
     { to: '/doctor/lab-orders', icon: FiClipboard, label: 'Lab Orders', section: 'CLINICAL' },
-    { to: '/doctor/slots', icon: FiCalendar, label: 'Slots', section: 'MANAGEMENT' },
+    { to: '/doctor/slots', icon: FiCalendar, label: 'Schedule', section: 'MANAGEMENT' },
   ],
   patient: [
     { to: '/patient', icon: FiHome, label: 'Dashboard', end: true, section: 'MAIN' },
@@ -82,6 +82,7 @@ const MENUS = {
     { to: '/vendor/messages', icon: FiMessageCircle, label: 'Messages', section: 'MAIN' },
     { to: '/vendor/products', icon: FiPackage, label: 'My Products', section: 'CATALOG' },
     { to: '/vendor/orders', icon: FiShoppingCart, label: 'Equipment Orders', section: 'ORDERS' },
+    { to: '/vendor/reports', icon: FiBarChart2, label: 'Monthly Report', section: 'ORDERS' },
     { to: '/vendor/profile', icon: FiUsers, label: 'Profile', section: 'OTHER' },
   ],
 };

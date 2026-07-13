@@ -111,7 +111,7 @@ const ComplaintsPage = () => {
           <p className="text-muted mt-1">Raise and track complaints about doctors.</p>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <div className="flex flex-col gap-6">
           {/* LEFT — File a complaint form */}
           <motion.div variants={cardVariants} style={cardStyle}>
             <div style={headerStyle}>

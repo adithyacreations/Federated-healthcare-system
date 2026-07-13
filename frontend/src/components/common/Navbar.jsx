@@ -138,7 +138,7 @@ const Navbar = ({ onToggleSidebar }) => {
                 </button>
 
                 {notifOpen && (
-                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden text-gray-700 z-50">
+                  <div className="fixed sm:absolute top-[72px] sm:top-auto right-4 sm:right-0 left-4 sm:left-auto mt-0 sm:mt-2 sm:w-80 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden text-gray-700 z-50">
                     <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
                       <span className="font-semibold text-ink text-sm">Notifications</span>
                       {unreadCount > 0 && (

@@ -41,8 +41,12 @@ from .views import (
     InventoryImageUploadView,
     FileVendorComplaintView,
     DoctorScheduleView,
+    DoctorScheduleConfigView,
+    DoctorScheduleConfigDetailView,
+    HospitalDoctorSlotBlockView,
     HospitalLabConfigView,
 )
+from .billing_views import EquipmentOrderBillView
 
 urlpatterns = [
     path('dashboard/', HospitalDashboardView.as_view()),
@@ -72,6 +76,7 @@ urlpatterns = [
     path('departments/add/', AddDepartmentView.as_view()),
     path('departments/<uuid:dept_id>/', UpdateDepartmentView.as_view()),
     path('equipment-orders/', ListHospitalEquipmentOrdersView.as_view()),
+    path('equipment-orders/<uuid:order_id>/bill/', EquipmentOrderBillView.as_view()),
     path('orders/<uuid:order_id>/confirm-delivery/', ConfirmDeliveryView.as_view()),
     path('orders/<uuid:order_id>/track/', TrackOrderView.as_view()),
     path('patients/', ListHospitalPatientsView.as_view()),
@@ -86,5 +91,8 @@ urlpatterns = [
     path('patients/<uuid:patient_id>/', GetHospitalPatientView.as_view()),
     path('upload-image/', UploadImageView.as_view()),
     path('doctor-schedule/', DoctorScheduleView.as_view()),
+    path('doctor-schedules/', DoctorScheduleConfigView.as_view()),
+    path('doctor-schedules/<uuid:schedule_id>/', DoctorScheduleConfigDetailView.as_view()),
+    path('doctor-slots/<uuid:slot_id>/block/', HospitalDoctorSlotBlockView.as_view()),
     path('lab-config/', HospitalLabConfigView.as_view()),
 ]

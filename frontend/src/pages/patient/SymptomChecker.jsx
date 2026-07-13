@@ -206,15 +206,28 @@ const SymptomChecker = () => {
 
             {/* Search */}
             <div className="card">
-              <div className="relative mb-4">
-                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search symptoms…"
-                  className="input-field pl-10"
-                />
+              <div className="flex gap-2 sm:gap-3 mb-4 items-center">
+                <div className="relative flex-1">
+                  <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search symptoms…"
+                    className="input-field pl-10"
+                  />
+                </div>
+                <button
+                  onClick={submit}
+                  disabled={busy || flMaintenance || selected.length === 0}
+                  className="btn-primary disabled:opacity-60 whitespace-nowrap shrink-0 px-3 sm:px-5"
+                >
+                  {flMaintenance
+                    ? '🔧 Maintenance'
+                    : busy
+                      ? 'Analyzing…'
+                      : `Check Symptoms (${selected.length})`}
+                </button>
               </div>
 
               {symptoms.loading ? (
@@ -244,19 +257,7 @@ const SymptomChecker = () => {
               )}
             </div>
 
-            <div className="mt-5 flex justify-end">
-              <button
-                onClick={submit}
-                disabled={busy || flMaintenance || selected.length === 0}
-                className="btn-primary disabled:opacity-60"
-              >
-                {flMaintenance
-                  ? '🔧 Under Maintenance'
-                  : busy
-                    ? 'Analyzing…'
-                    : `Check Symptoms (${selected.length})`}
-              </button>
-            </div>
+
           </motion.div>
         ) : (
           <motion.div key="result" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
@@ -281,7 +282,7 @@ const SymptomChecker = () => {
                 <p className="text-sm text-red-900 mb-3">
                   Please seek immediate medical attention. Don't delay.
                 </p>
-                <Link to="/patient" className="btn-danger inline-block">Go to Emergency SOS</Link>
+                <Link to="/patient/emergency" className="btn-danger inline-block">Go to Emergency SOS</Link>
               </div>
             )}
 
@@ -312,7 +313,7 @@ const SymptomChecker = () => {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Link to="/patient/doctors" className="btn-primary">Book a Doctor</Link>
+              <Link to="/patient/consultations" className="btn-primary">Book a Doctor</Link>
               <button onClick={reset} className="btn-secondary inline-flex items-center gap-2">
                 <FiRefreshCw /> Check Again
               </button>

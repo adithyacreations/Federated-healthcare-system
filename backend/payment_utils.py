@@ -122,6 +122,8 @@ def get_amount_for_record(payment_type, record):
         return None
     if payment_type == 'consultation':
         try:
+            if record.slot_id and record.slot_id.consultation_fee is not None:
+                return float(record.slot_id.consultation_fee or 0)
             return float(record.doctor_id.consultation_fee or 0)
         except Exception:
             return None
@@ -151,6 +153,21 @@ def process_payment_success(payment_type, object_id, razorpay_payment_id, actor_
     if record is None:
         return {'success': False, 'error': f'{payment_type} record not found'}
 
+    if payment_type == 'consultation':
+        from apps.doctor.utils import release_expired_consultation_holds
+
+        release_expired_consultation_holds()
+        record.refresh_from_db()
+        if record.status == 'cancelled' or record.payment_status == 'failed':
+            return {'success': False, 'error': 'Payment hold expired. Please book the slot again.'}
+        if (
+            record.payment_status == 'pending'
+            and record.payment_hold_expires_at
+            and record.payment_hold_expires_at <= timezone.now()
+        ):
+            release_expired_consultation_holds()
+            return {'success': False, 'error': 'Payment hold expired. Please book the slot again.'}
+
     record.razorpay_payment_id = razorpay_payment_id
     if razorpay_signature:
         record.razorpay_signature = razorpay_signature
@@ -162,6 +179,8 @@ def process_payment_success(payment_type, object_id, razorpay_payment_id, actor_
 
     # Per-type post-processing + notifications
     if payment_type == 'consultation':
+        record.payment_hold_expires_at = None
+        update_fields.append('payment_hold_expires_at')
         record.save(update_fields=update_fields)
         patient_login = record.patient_id.login_id
         doctor_login = record.doctor_id.login_id

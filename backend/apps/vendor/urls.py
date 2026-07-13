@@ -15,10 +15,15 @@ from .views import (
     GetOrCreateChatView,
     ChatMessagesView,
     VendorChatsListView,
+    ListCreateVendorDriverView,
+    ReportEquipmentIssueView,
+    ResolveEquipmentIssueView,
+    VendorMonthlyReportView,
 )
 
 urlpatterns = [
     path('dashboard/', VendorDashboardView.as_view()),
+    path('monthly-report/', VendorMonthlyReportView.as_view()),
     path('products/', ListProductsView.as_view()),
     path('products/create/', CreateProductView.as_view()),
     path('products/<uuid:product_id>/', UpdateProductView.as_view()),
@@ -27,9 +32,12 @@ urlpatterns = [
     path('orders/<uuid:order_id>/status/', UpdateOrderStatusView.as_view()),
     path('orders/<uuid:order_id>/dispatch/', DispatchOrderView.as_view()),
     path('orders/<uuid:order_id>/resend-otp/', ResendOTPView.as_view()),
+    path('orders/<uuid:order_id>/resolve-issue/', ResolveEquipmentIssueView.as_view()),
     path('verify-payment/', VerifyPaymentView.as_view()),
     path('catalog/', BrowseCatalogView.as_view()),
     path('place-order/', PlaceEquipmentOrderView.as_view()),
+    path('report-issue/', ReportEquipmentIssueView.as_view()),
+    path('drivers/', ListCreateVendorDriverView.as_view()),
 
     # Real-time chat between vendor and hospital admin.
     path('chat/get-or-create/', GetOrCreateChatView.as_view()),

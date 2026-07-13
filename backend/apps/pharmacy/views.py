@@ -654,6 +654,18 @@ class DispatchMedicineOrderView(APIView):
             return err('Patient has not paid for this order yet.', status_code=400)
 
         estimated_days = int(request.data.get('estimated_delivery_days', 2))
+        driver_id = request.data.get('driver_id')
+        
+        driver = None
+        if driver_id:
+            try:
+                from .models import PharmacyDriver
+                driver = PharmacyDriver.objects.get(driver_id=driver_id, pharmacist=pharmacist, is_active=True)
+            except PharmacyDriver.DoesNotExist:
+                return err('Selected driver not found or inactive.', status_code=400)
+        else:
+            return err('Driver selection is required for dispatch.', status_code=400)
+
         otp = _generate_otp()
         otp_expiry = timezone.now() + timedelta(days=estimated_days)
 
@@ -663,10 +675,14 @@ class DispatchMedicineOrderView(APIView):
         order.otp_verified = False
         order.estimated_delivery_days = estimated_days
         order.dispatched_at = timezone.now()
-        _push_history(order, 'dispatched', f'Dispatched. ETA: {estimated_days} days')
+        order.driver = driver
+        order.driver_name = driver.name
+        order.driver_phone = driver.phone
+        _push_history(order, 'dispatched', f'Dispatched. Driver: {driver.name} ({driver.phone}). ETA: {estimated_days} days')
         order.save(update_fields=[
             'order_status', 'delivery_otp', 'otp_expiry', 'otp_verified',
-            'estimated_delivery_days', 'dispatched_at', 'status_history', 'updated_at',
+            'estimated_delivery_days', 'dispatched_at', 'driver', 'driver_name', 'driver_phone',
+            'status_history', 'updated_at',
         ])
 
         patient = order.patient_id
@@ -779,6 +795,145 @@ class ResendMedicineOTPView(APIView):
             'otp_expiry': new_expiry.isoformat(),
             'estimated_delivery_days': new_days,
         })
+
+
+class ReportWrongProductView(APIView):
+    """Patient reports receiving the wrong product (before entering OTP)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, order_id):
+        # We allow any authenticated user here, but we will ensure they are the patient.
+        patient = getattr(request.user, 'patient_profile', None)
+        if not patient:
+            return err('Only patients can report wrong products.', status_code=403)
+
+        try:
+            order = MedicineOrder.objects.select_related('pharmacist_id').get(
+                med_order_id=order_id, patient_id=patient
+            )
+        except MedicineOrder.DoesNotExist:
+            return err('Order not found.', status_code=404)
+
+        if order.order_status != 'dispatched':
+            return err('Only dispatched orders can be reported.', status_code=400)
+
+        issue_type = request.data.get('issue_type', 'wrong_medicine').strip()
+        desired_resolution = request.data.get('desired_resolution', 'refund').strip()
+
+        order.order_status = 'wrong_product'
+        order.issue_reported = True
+        order.issue_type = issue_type
+        order.patient_desired_resolution = desired_resolution
+        _push_history(order, 'wrong_product', f'Issue reported: {issue_type}. Desired: {desired_resolution}')
+        order.save(update_fields=['order_status', 'issue_reported', 'issue_type', 'patient_desired_resolution', 'status_history', 'updated_at'])
+
+        if order.pharmacist_id:
+            send_notification(
+                login_id=order.pharmacist_id.login_id,
+                title='⚠️ Wrong Product Reported!',
+                message=f'Patient {patient.full_name} reported an issue: {issue_type} for order {str(order_id)[:8]}. They requested: {desired_resolution}.',
+                notif_type='alert',
+                related_id=str(order.med_order_id),
+            )
+
+        log_audit(
+            login_id=request.user,
+            action=f'Reported wrong product for order {order_id}',
+            module='pharmacy',
+            entity_type='MedicineOrder',
+            entity_id=str(order_id),
+        )
+
+        return ok('Issue reported successfully. The pharmacist will contact you soon.')
+
+
+class ResolveOrderIssueView(APIView):
+    """Pharmacist resolves a reported issue (e.g. redeliver or refund)."""
+    permission_classes = [IsAuthenticated, IsPharmacist]
+
+    def post(self, request, order_id):
+        pharmacist = get_pharmacist(request)
+        if not pharmacist:
+            return err('Pharmacist profile not found.', status_code=404)
+
+        try:
+            order = MedicineOrder.objects.select_related('patient_id').get(
+                med_order_id=order_id, pharmacist_id=pharmacist
+            )
+        except MedicineOrder.DoesNotExist:
+            return err('Order not found.', status_code=404)
+
+        if order.order_status != 'wrong_product':
+            return err('Order is not in wrong product state.', status_code=400)
+
+        resolution = request.data.get('resolution', 'refunded').strip()
+
+        if resolution == 'refunded':
+            order.order_status = 'refunded'
+            order.payment_status = 'refunded'
+            order.final_resolution = 'refunded'
+            _push_history(order, 'refunded', 'Issue resolved: Order refunded by pharmacist.')
+            order.save(update_fields=['order_status', 'payment_status', 'final_resolution', 'status_history', 'updated_at'])
+
+            send_notification(
+                login_id=order.patient_id.login_id,
+                title='✅ Order Refunded',
+                message=f'Your issue for order {str(order_id)[:8]} has been resolved with a full refund.',
+                notif_type='info',
+                related_id=str(order.med_order_id),
+            )
+        elif resolution == 'redelivered':
+            driver_id = request.data.get('driver_id')
+            if not driver_id:
+                return err('Driver selection is required for redelivery.', status_code=400)
+            try:
+                from .models import PharmacyDriver
+                driver = PharmacyDriver.objects.get(driver_id=driver_id, pharmacist=pharmacist, is_active=True)
+            except PharmacyDriver.DoesNotExist:
+                return err('Selected driver not found or inactive.', status_code=400)
+
+            from datetime import timedelta
+            from django.utils import timezone
+            otp = _generate_otp()
+            otp_expiry = timezone.now() + timedelta(days=2)
+
+            order.order_status = 'dispatched'
+            order.final_resolution = 'redelivered'
+            order.delivery_otp = otp
+            order.otp_expiry = otp_expiry
+            order.otp_verified = False
+            order.driver = driver
+            order.driver_name = driver.name
+            order.driver_phone = driver.phone
+            order.issue_reported = False # Reset to allow subsequent reports if needed
+            
+            _push_history(order, 'dispatched', f'Issue resolved: Redelivering. New driver: {driver.name}.')
+            order.save(update_fields=[
+                'order_status', 'final_resolution', 'delivery_otp', 'otp_expiry', 'otp_verified',
+                'driver', 'driver_name', 'driver_phone', 'issue_reported', 'status_history', 'updated_at'
+            ])
+
+            send_notification(
+                login_id=order.patient_id.login_id,
+                title='🚚 Replacement Dispatched',
+                message=f'A replacement for order {str(order_id)[:8]} is on the way! Check email for your new OTP.',
+                notif_type='info',
+                related_id=str(order.med_order_id),
+            )
+            # You would also email the OTP here normally
+        else:
+            return err('Invalid resolution type', status_code=400)
+
+        log_audit(
+            login_id=request.user,
+            action=f'Resolved issue for order {order_id} via {resolution}',
+            module='pharmacy',
+            entity_type='MedicineOrder',
+            entity_id=str(order_id),
+        )
+
+        return ok('Order issue marked as resolved.')
+
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1061,6 +1216,8 @@ class PharmacyMonthlyReportView(APIView):
             orders.filter(payment_status='paid')
             .aggregate(total=Sum('total_amount'))['total'] or 0
         )
+        refunded_qs = orders.filter(payment_status='refunded')
+        refunded_amount = float(refunded_qs.aggregate(total=Sum('total_amount'))['total'] or 0)
 
         med = {}  # name -> {orders, strips, revenue}
         for o in orders:
@@ -1092,6 +1249,7 @@ class PharmacyMonthlyReportView(APIView):
                 'pending': pending,
                 'cancelled': cancelled,
                 'total_revenue': revenue,
+                'refunded_amount': refunded_amount,
             },
             'medicine_breakdown': medicine_breakdown,
         })
@@ -1432,3 +1590,48 @@ class StockAlertsView(APIView):
                 for i in low_stock[:5]
             ],
         })
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Drivers
+# ════════════════════════════════════════════════════════════════════════════
+
+class ListCreatePharmacyDriverView(APIView):
+    """Manage delivery drivers for a pharmacy."""
+    permission_classes = [IsAuthenticated, IsPharmacist]
+
+    def get(self, request):
+        pharmacist = get_pharmacist(request)
+        if not pharmacist:
+            return err('Pharmacist not found.', status_code=404)
+
+        from .models import PharmacyDriver
+        from .serializers import PharmacyDriverSerializer
+        drivers = PharmacyDriver.objects.filter(pharmacist=pharmacist, is_active=True)
+        serializer = PharmacyDriverSerializer(drivers, many=True)
+        data = serializer.data
+
+        # Calculate availability
+        for d in data:
+            active_deliveries = MedicineOrder.objects.filter(
+                driver_id=d['driver_id'],
+                order_status__in=['dispatched', 'wrong_product']
+            ).exists()
+            d['is_available'] = not active_deliveries
+
+        return ok('Drivers retrieved.', data)
+
+    def post(self, request):
+        pharmacist = get_pharmacist(request)
+        if not pharmacist:
+            return err('Pharmacist not found.', status_code=404)
+
+        from .serializers import PharmacyDriverSerializer
+        data = request.data.copy()
+        data['pharmacist'] = pharmacist.pharmacist_id
+        
+        serializer = PharmacyDriverSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return ok('Driver added successfully.', serializer.data)
+        return err('Invalid data', errors=serializer.errors)

@@ -17,9 +17,9 @@ const DashboardLayout = ({ children }) => {
 
         {/* Mobile sidebar overlay */}
         {mobileOpen && (
-          <div className="lg:hidden fixed inset-0 z-30 flex">
+          <div className="lg:hidden fixed top-16 inset-x-0 bottom-0 z-20 flex">
             <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-            <div className="relative">
+            <div className="relative h-full">
               <Sidebar onClose={() => setMobileOpen(false)} />
             </div>
           </div>

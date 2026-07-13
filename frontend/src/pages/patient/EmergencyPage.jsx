@@ -53,10 +53,13 @@ const EmergencyPage = () => {
   const [countingDown, setCountingDown] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const countdownRef = useRef(null);
+  const emergencyRequestRef = useRef(false);
 
   const gpsSupported = typeof navigator !== 'undefined' && 'geolocation' in navigator;
 
   const submitEmergency = async (location) => {
+    if (emergencyRequestRef.current || sosTriggered) return;
+    emergencyRequestRef.current = true;
     setSosLoading(true);
     try {
       const { data } = await API.post('/api/patient/emergency/', {
@@ -77,9 +80,11 @@ const EmergencyPage = () => {
         }
         navigate(`/patient/emergency-tracker/${id}`);
       } else {
+        emergencyRequestRef.current = false;
         toast.error('Emergency could not be created');
       }
     } catch (err) {
+      emergencyRequestRef.current = false;
       toast.error(err?.response?.data?.message || 'Emergency dispatch failed');
     } finally {
       setSosLoading(false);
@@ -87,12 +92,13 @@ const EmergencyPage = () => {
   };
 
   const handleSOS = async () => {
+    if (emergencyRequestRef.current || sosTriggered) return;
     setDetecting(true);
     setShowManual(false);
     try {
       const location = await getLocation();
       setDetecting(false);
-      submitEmergency(location);
+      await submitEmergency(location);
     } catch {
       setDetecting(false);
       setShowManual(true);
@@ -105,20 +111,20 @@ const EmergencyPage = () => {
   // 5-second countdown before dispatch — gives the patient a window to cancel
   // an accidental SOS press.
   const startCountdown = () => {
-    if (busy || sosTriggered || countingDown) return;
+    if (busy || sosTriggered || countingDown || emergencyRequestRef.current) return;
+    if (countdownRef.current) clearInterval(countdownRef.current);
     setCountingDown(true);
     setCountdown(5);
+    let remaining = 5;
     countdownRef.current = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(countdownRef.current);
-          countdownRef.current = null;
-          setCountingDown(false);
-          handleSOS();
-          return 0;
-        }
-        return prev - 1;
-      });
+      remaining -= 1;
+      setCountdown(Math.max(remaining, 0));
+      if (remaining <= 0) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+        setCountingDown(false);
+        handleSOS();
+      }
     }, 1000);
   };
 

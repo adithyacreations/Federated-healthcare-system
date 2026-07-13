@@ -4,7 +4,9 @@ import base64
 from datetime import date, timedelta
 
 from django.conf import settings
-from django.db.models import Count, Q
+from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
+from django.db.models import Min, Q
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -39,6 +41,60 @@ def err(message, errors=None, status=400):
 
 def get_patient(request):
     return request.user.patient_profile
+
+
+def absolute_file_url(request, value):
+    if not value:
+        return ''
+    url = str(value).replace('\\', '/')
+    if url.startswith(('http://', 'https://', 'data:')):
+        return url
+    if not url.startswith('/'):
+        url = settings.MEDIA_URL.rstrip('/') + '/' + url.lstrip('/')
+    return request.build_absolute_uri(url)
+
+
+def _related_profile(login, attr):
+    if not login:
+        return None
+    try:
+        return getattr(login, attr)
+    except ObjectDoesNotExist:
+        return None
+
+
+def _ehr_source_metadata(record):
+    login = record.added_by
+    role = getattr(login, 'role', '') if login else ''
+    meta = {
+        'doctor_name': '',
+        'hospital_name': '',
+        'source_name': '',
+        'source_role': role,
+    }
+
+    if role == 'doctor':
+        doctor = _related_profile(login, 'doctor_profile')
+        if doctor:
+            meta['doctor_name'] = doctor.full_name or ''
+            meta['source_name'] = doctor.full_name or ''
+            meta['hospital_name'] = doctor.hospital_id.hospital_name if doctor.hospital_id else ''
+    elif role == 'lab_tech':
+        lab_tech = _related_profile(login, 'lab_tech_profile')
+        if lab_tech:
+            meta['source_name'] = lab_tech.full_name or ''
+            meta['hospital_name'] = lab_tech.hospital_id.hospital_name if lab_tech.hospital_id else ''
+    elif role == 'hospital_admin':
+        hospital = _related_profile(login, 'hospital_profile')
+        if hospital:
+            meta['source_name'] = hospital.hospital_name or ''
+            meta['hospital_name'] = hospital.hospital_name or ''
+    elif role == 'patient':
+        patient = _related_profile(login, 'patient_profile')
+        if patient:
+            meta['source_name'] = patient.full_name or ''
+
+    return meta
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -101,7 +157,7 @@ class PatientDashboardView(APIView):
         today_ = now.date()
         upcoming_qs = (
             Consultation.objects
-            .filter(patient_id=patient, status='scheduled')
+            .filter(patient_id=patient, status='scheduled', payment_status='paid')
             .select_related('doctor_id', 'slot_id')
             .filter(slot_id__slot_date__gte=today_)
             .order_by('slot_id__slot_date', 'slot_id__start_time')
@@ -130,6 +186,10 @@ class PatientDashboardView(APIView):
         from apps.lab.utils import monthly_no_show_count
         monthly_no_shows = monthly_no_show_count(patient, now)
 
+        total_consultations = Consultation.objects.filter(patient_id=patient).count()
+        total_prescriptions = Prescription.objects.filter(patient_id=patient).count()
+        total_lab_orders = LabOrder.objects.filter(patient_id=patient).count()
+
         return ok('Dashboard fetched', {
             'patient_name': patient.full_name,
             'blood_group': patient.blood_group,
@@ -137,6 +197,9 @@ class PatientDashboardView(APIView):
             'qr_code_url': patient.qr_code_url,
             'unread_notifications': unread_count,
             'pending_lab_orders': pending_labs,
+            'total_consultations': total_consultations,
+            'total_prescriptions': total_prescriptions,
+            'total_lab_orders': total_lab_orders,
             'monthly_no_shows': monthly_no_shows,
             'no_show_warning': monthly_no_shows >= 3,
             'upcoming_consultations': [
@@ -149,7 +212,12 @@ class PatientDashboardView(APIView):
                     'slot_time': str(c.slot_id.start_time) if c.slot_id else None,
                     'start_time': c.slot_id.start_time.strftime('%H:%M') if c.slot_id else None,
                     'end_time': c.slot_id.end_time.strftime('%H:%M') if c.slot_id else None,
-                    'consult_type': c.slot_id.consult_type if c.slot_id else 'online',
+                    'consult_type': (
+                        c.consult_mode
+                        if c.slot_id and c.slot_id.consult_type == 'both'
+                        else (c.slot_id.consult_type if c.slot_id else 'online')
+                    ),
+                    'consult_mode': c.consult_mode,
                     'jitsi_room_id': c.jitsi_room_id,
                     'status': c.status,
                 }
@@ -191,7 +259,11 @@ class EHRWalletView(APIView):
 
     def get(self, request):
         patient = get_patient(request)
-        records = patient.ehr_records.all().order_by('-recorded_at')
+        records = list(
+            patient.ehr_records
+            .select_related('added_by')
+            .order_by('-recorded_at')
+        )
         allergies = patient.allergies.all()
 
         wallet = {
@@ -207,16 +279,64 @@ class EHRWalletView(APIView):
             'prescription': 'prescriptions',
             'history': 'history',
         }
+        lab_file_urls = [
+            r.file_url for r in records
+            if r.record_type == 'lab' and r.file_url
+        ]
+        lab_sources = {}
+        if lab_file_urls:
+            try:
+                from apps.lab.models import LabReport
+                for report in (
+                    LabReport.objects
+                    .filter(patient_id=patient, report_file_url__in=lab_file_urls)
+                    .select_related('order_id__doctor_id__hospital_id')
+                ):
+                    doctor = report.order_id.doctor_id if report.order_id else None
+                    lab_sources[report.report_file_url] = {
+                        'doctor_name': doctor.full_name if doctor else '',
+                        'hospital_name': (
+                            doctor.hospital_id.hospital_name
+                            if doctor and doctor.hospital_id else ''
+                        ),
+                    }
+            except Exception:
+                pass
+            try:
+                from .models import LabTestOrder
+                for order in (
+                    LabTestOrder.objects
+                    .filter(patient_id=patient, report_url__in=lab_file_urls)
+                    .select_related('doctor_id__hospital_id', 'hospital_id')
+                ):
+                    lab_sources[order.report_url] = {
+                        'doctor_name': order.doctor_id.full_name if order.doctor_id else '',
+                        'hospital_name': (
+                            order.hospital_id.hospital_name
+                            if order.hospital_id else (
+                                order.doctor_id.hospital_id.hospital_name
+                                if order.doctor_id and order.doctor_id.hospital_id else ''
+                            )
+                        ),
+                    }
+            except Exception:
+                pass
 
         for r in records:
             key = type_map.get(r.record_type)
             if key and key != 'prescriptions':
+                source = _ehr_source_metadata(r)
+                if r.record_type == 'lab' and r.file_url in lab_sources:
+                    for meta_key, value in lab_sources[r.file_url].items():
+                        if value and (meta_key != 'hospital_name' or not source.get(meta_key)):
+                            source[meta_key] = value
                 wallet[key].append({
                     'record_id': str(r.record_id),
                     'title': r.title,
                     'content': r.content,
                     'file_url': r.file_url,
                     'recorded_at': r.recorded_at.isoformat(),
+                    **source,
                 })
 
         # Prescriptions are sourced directly from the Prescription table so
@@ -225,11 +345,15 @@ class EHRWalletView(APIView):
         from apps.doctor.models import Prescription
         prescriptions = (
             Prescription.objects.filter(patient_id=patient)
-            .select_related('doctor_id')
+            .select_related('doctor_id__hospital_id')
             .order_by('-created_at')
         )
         for p in prescriptions:
             doctor_name = getattr(p.doctor_id, 'full_name', '') if p.doctor_id else ''
+            hospital_name = (
+                p.doctor_id.hospital_id.hospital_name
+                if p.doctor_id and p.doctor_id.hospital_id else ''
+            )
             wallet['prescriptions'].append({
                 'record_id': str(p.prescription_id),
                 'prescription_id': str(p.prescription_id),
@@ -239,6 +363,10 @@ class EHRWalletView(APIView):
                 ) or (p.diagnosis or ''),
                 'file_url': '',
                 'recorded_at': p.created_at.isoformat(),
+                'doctor_name': doctor_name,
+                'hospital_name': hospital_name,
+                'source_name': doctor_name,
+                'source_role': 'doctor',
             })
 
         for a in allergies:
@@ -305,9 +433,17 @@ class BrowseDoctorsView(APIView):
     permission_classes = [IsAuthenticated, IsPatient]
 
     def get(self, request):
-        from apps.doctor.models import DoctorRegistration
+        from apps.doctor.models import DoctorRegistration, DoctorSlot
+        from apps.doctor.utils import (
+            generate_slots_for_schedule,
+            get_current_schedule_for_doctor,
+            release_expired_consultation_holds,
+        )
 
-        today = date.today()
+        release_expired_consultation_holds()
+        now = timezone.localtime(timezone.now())
+        today = now.date()
+        current_time = now.time()
         specialization = request.query_params.get('specialization', '').strip()
         hospital_id = request.query_params.get('hospital_id', '').strip()
 
@@ -315,12 +451,6 @@ class BrowseDoctorsView(APIView):
             DoctorRegistration.objects
             .filter(approval_status='approved')
             .select_related('hospital_id', 'dept_id')
-            .annotate(
-                available_slots_count=Count(
-                    'slots',
-                    filter=Q(slots__is_booked=False, slots__slot_date__gte=today),
-                )
-            )
         )
 
         if specialization:
@@ -328,21 +458,58 @@ class BrowseDoctorsView(APIView):
         if hospital_id:
             qs = qs.filter(hospital_id__hospital_id=hospital_id)
 
+        doctors = []
+        for d in qs:
+            current_schedule = get_current_schedule_for_doctor(d)
+            available_slots = DoctorSlot.objects.none()
+            if current_schedule:
+                try:
+                    generate_slots_for_schedule(current_schedule, days_ahead=30, prune_available=False)
+                except ValueError:
+                    pass
+                available_slots = DoctorSlot.objects.filter(
+                    doctor_id=d,
+                    schedule=current_schedule,
+                    is_booked=False,
+                    is_blocked=False,
+                    status='available',
+                ).filter(
+                    Q(slot_date__gt=today)
+                    | Q(slot_date=today, start_time__gt=current_time)
+                )
+            available_slots_count = available_slots.count()
+            starting_fee = available_slots.aggregate(
+                value=Min('consultation_fee')
+            )['value']
+            doctors.append({
+                'doctor_id': str(d.doctor_id),
+                'full_name': d.full_name,
+                'specialization': d.specialization,
+                'hospital_name': d.hospital_id.hospital_name,
+                'hospital_id': str(d.hospital_id.hospital_id),
+                'dept_name': d.dept_id.dept_name if d.dept_id else None,
+                'dept_id': str(d.dept_id.dept_id) if d.dept_id else None,
+                'profile_photo': absolute_file_url(request, d.profile_photo),
+                'doctor_profile_photo': absolute_file_url(request, d.profile_photo),
+                'department_photo': absolute_file_url(
+                    request,
+                    d.dept_id.department_photo if d.dept_id else '',
+                ),
+                'dept_photo': absolute_file_url(
+                    request,
+                    d.dept_id.department_photo if d.dept_id else '',
+                ),
+                'consultation_fee': float(
+                    starting_fee
+                    if starting_fee is not None
+                    else d.consultation_fee
+                ),
+                'is_online': d.is_online,
+                'available_slots_count': available_slots_count,
+            })
+
         return ok('Doctors fetched', {
-            'doctors': [
-                {
-                    'doctor_id': str(d.doctor_id),
-                    'full_name': d.full_name,
-                    'specialization': d.specialization,
-                    'hospital_name': d.hospital_id.hospital_name,
-                    'hospital_id': str(d.hospital_id.hospital_id),
-                    'dept_name': d.dept_id.dept_name if d.dept_id else None,
-                    'consultation_fee': float(d.consultation_fee),
-                    'is_online': d.is_online,
-                    'available_slots_count': d.available_slots_count,
-                }
-                for d in qs
-            ]
+            'doctors': doctors
         })
 
 
@@ -354,10 +521,30 @@ class DoctorSlotsView(APIView):
 
     def get(self, request, doctor_id):
         from apps.doctor.models import DoctorRegistration, DoctorSlot
+        from apps.doctor.utils import (
+            generate_slots_for_schedule,
+            get_current_schedule_for_doctor,
+            release_expired_consultation_holds,
+        )
+
+        release_expired_consultation_holds()
         try:
             doctor = DoctorRegistration.objects.get(doctor_id=doctor_id, approval_status='approved')
         except DoctorRegistration.DoesNotExist:
             return err('Doctor not found.', status=404)
+
+        current_schedule = get_current_schedule_for_doctor(doctor)
+        if not current_schedule:
+            return ok('Slots fetched', {
+                'doctor_id': str(doctor.doctor_id),
+                'doctor_name': doctor.full_name,
+                'slots': [],
+            })
+
+        try:
+            generate_slots_for_schedule(current_schedule, days_ahead=30, prune_available=False)
+        except ValueError:
+            pass
 
         now = timezone.localtime(timezone.now())
         today = now.date()
@@ -365,7 +552,14 @@ class DoctorSlotsView(APIView):
 
         slots = (
             DoctorSlot.objects
-            .filter(doctor_id=doctor, is_booked=False, slot_date__gte=today)
+            .filter(
+                doctor_id=doctor,
+                is_booked=False,
+                is_blocked=False,
+                status='available',
+                schedule=current_schedule,
+                slot_date__gte=today,
+            )
             .order_by('slot_date', 'start_time')
         )
 
@@ -386,6 +580,10 @@ class DoctorSlotsView(APIView):
                 'start_display': s.start_time.strftime('%I:%M %p'),
                 'end_display': s.end_time.strftime('%I:%M %p'),
                 'consult_type': s.consult_type,
+                'consultation_type': s.consult_type,
+                'consultation_fee': float(s.consultation_fee),
+                'status': s.status,
+                'availability_status': s.status,
             })
 
         return ok('Slots fetched', {
@@ -399,7 +597,10 @@ class BookConsultationView(APIView):
     permission_classes = [IsAuthenticated, IsPatient]
 
     def post(self, request):
-        from apps.doctor.models import Consultation
+        from apps.doctor.models import Consultation, DoctorSlot
+        from apps.doctor.utils import release_expired_consultation_holds
+
+        release_expired_consultation_holds()
 
         serializer = BookConsultationSerializer(data=request.data)
         if not serializer.is_valid():
@@ -409,27 +610,39 @@ class BookConsultationView(APIView):
         patient = get_patient(request)
         doctor = d['_doctor']
         slot = d['_slot']
+        consult_mode = d.get('_consult_mode', 'online')
 
-        consultation = Consultation.objects.create(
-            patient_id=patient,
-            doctor_id=doctor,
-            slot_id=slot,
-            status='scheduled',
-            payment_status='pending',
-        )
+        hold_expires_at = timezone.now() + timedelta(minutes=10)
+        with transaction.atomic():
+            slot = DoctorSlot.objects.select_for_update().get(slot_id=slot.slot_id)
+            if slot.is_booked or slot.is_blocked or slot.status != 'available':
+                return err('Slot is already reserved or booked.', status=409)
 
-        jitsi_room_id = f"federcare-{str(consultation.consultation_id)[:8]}"
-        consultation.jitsi_room_id = jitsi_room_id
-        consultation.save(update_fields=['jitsi_room_id'])
+            consultation = Consultation.objects.create(
+                patient_id=patient,
+                doctor_id=doctor,
+                slot_id=slot,
+                consult_mode=consult_mode,
+                status='scheduled',
+                payment_status='pending',
+                payment_hold_expires_at=hold_expires_at,
+            )
 
-        slot.is_booked = True
-        slot.save(update_fields=['is_booked'])
+            jitsi_room_id = ''
+            if consult_mode == 'online':
+                jitsi_room_id = f"federcare-{str(consultation.consultation_id)[:8]}"
+            consultation.jitsi_room_id = jitsi_room_id
+            consultation.save(update_fields=['jitsi_room_id'])
+
+            slot.is_booked = True
+            slot.status = 'booked'
+            slot.save(update_fields=['is_booked', 'status', 'updated_at'])
 
         # Create the Razorpay order via the shared util — it returns a dict
         # with order_id / amount (paise) / key_id, all needed by the frontend.
         from payment_utils import create_razorpay_order as rzp_create_order
 
-        fee = float(doctor.consultation_fee or 0)
+        fee = float(slot.consultation_fee or 0)
         razorpay_order_id = ''
         razorpay_amount = int(fee * 100)
         key_id = settings.RAZORPAY_KEY_ID
@@ -450,12 +663,22 @@ class BookConsultationView(APIView):
                 key_id = razorpay_data.get('key_id', key_id)
                 consultation.razorpay_order_id = razorpay_order_id
                 consultation.save(update_fields=['razorpay_order_id'])
+            else:
+                consultation.status = 'cancelled'
+                consultation.payment_status = 'failed'
+                consultation.save(update_fields=['status', 'payment_status'])
+                slot.is_booked = False
+                if not slot.is_blocked:
+                    slot.status = 'available'
+                slot.save(update_fields=['is_booked', 'status', 'updated_at'])
+                return err('Payment order could not be created. Please try again.', status=502)
 
         send_notification(
-            doctor.login_id,
-            'New Consultation Booked',
-            f'{patient.full_name} booked a consultation on {slot.slot_date} at {slot.start_time}.',
-            notif_type='alert',
+            patient.login_id,
+            'Payment Pending',
+            'Your consultation slot is reserved for 10 minutes. Complete payment to confirm it.',
+            notif_type='consultation',
+            related_id=str(consultation.consultation_id),
         )
         log_audit(
             request.user, 'consultation_booked', module='patient',
@@ -469,6 +692,16 @@ class BookConsultationView(APIView):
         #    payment_utils.process_payment_success (so a cancelled/unpaid
         #    booking never triggers a confirmation email).
         if fee <= 0:
+            consultation.payment_status = 'paid'
+            consultation.payment_hold_expires_at = None
+            consultation.save(update_fields=['payment_status', 'payment_hold_expires_at'])
+            send_notification(
+                doctor.login_id,
+                'New Consultation Booked',
+                f'{patient.full_name} booked a consultation on {slot.slot_date} at {slot.start_time}.',
+                notif_type='alert',
+                related_id=str(consultation.consultation_id),
+            )
             send_appointment_confirmation(
                 to_email=request.user.email,
                 patient_name=patient.full_name,
@@ -486,6 +719,17 @@ class BookConsultationView(APIView):
             'slot_date': slot.slot_date.isoformat(),
             'slot_time': str(slot.start_time),
             'fee': fee,
+            'consult_type': slot.consult_type,
+            'consult_mode': consult_mode,
+            'payment_status': consultation.payment_status,
+            'payment_hold_expires_at': (
+                consultation.payment_hold_expires_at.isoformat()
+                if consultation.payment_hold_expires_at else None
+            ),
+            'hold_seconds_remaining': (
+                max(0, int((consultation.payment_hold_expires_at - timezone.now()).total_seconds()))
+                if consultation.payment_hold_expires_at else 0
+            ),
             # Required by the frontend to open the Razorpay checkout:
             'razorpay_order_id': razorpay_order_id,
             'amount': razorpay_amount,
@@ -504,9 +748,13 @@ class ConsultationPaymentFailureView(APIView):
 
     def post(self, request):
         from apps.doctor.models import Consultation
+        from apps.doctor.utils import release_expired_consultation_holds
+
+        release_expired_consultation_holds()
 
         consultation_id = request.data.get('consultation_id')
         reason = request.data.get('reason', 'Payment cancelled')
+        force_cancel = str(request.data.get('force_cancel', '')).lower() in ('1', 'true', 'yes')
         if not consultation_id:
             return err('consultation_id is required.')
 
@@ -532,13 +780,41 @@ class ConsultationPaymentFailureView(APIView):
                 'status': consultation.status,
             })
 
+        now = timezone.now()
+        if consultation.status == 'cancelled' or consultation.payment_status == 'failed':
+            return ok('Booking cancelled.', {
+                'consultation_id': str(consultation.consultation_id),
+                'status': 'cancelled',
+            })
+
+        if consultation.payment_hold_expires_at and consultation.payment_hold_expires_at > now and not force_cancel:
+            log_audit(
+                request.user, 'consultation_payment_pending', module='patient',
+                entity_type='Consultation', entity_id=consultation.consultation_id,
+                new_value=reason, ip_address=request.META.get('REMOTE_ADDR'),
+            )
+            return ok('Payment pending. Slot remains reserved until the 10-minute hold expires.', {
+                'consultation_id': str(consultation.consultation_id),
+                'status': consultation.status,
+                'payment_status': consultation.payment_status,
+                'payment_hold_expires_at': consultation.payment_hold_expires_at.isoformat(),
+                'hold_seconds_remaining': max(
+                    0,
+                    int((consultation.payment_hold_expires_at - now).total_seconds()),
+                ),
+            })
+
         consultation.status = 'cancelled'
-        consultation.save(update_fields=['status'])
+        consultation.payment_status = 'failed'
+        consultation.payment_hold_expires_at = None
+        consultation.save(update_fields=['status', 'payment_status', 'payment_hold_expires_at'])
 
         slot = consultation.slot_id
         if slot and slot.is_booked:
             slot.is_booked = False
-            slot.save(update_fields=['is_booked'])
+            if not slot.is_blocked:
+                slot.status = 'available'
+            slot.save(update_fields=['is_booked', 'status', 'updated_at'])
 
         send_notification(
             consultation.patient_id.login_id,
@@ -595,8 +871,11 @@ class PatientConsultationsView(APIView):
 
     def get(self, request):
         from apps.doctor.models import Consultation
+        from apps.doctor.utils import release_expired_consultation_holds
 
+        release_expired_consultation_holds()
         patient = get_patient(request)
+        now = timezone.now()
         consultations = (
             Consultation.objects
             .filter(patient_id=patient)
@@ -615,7 +894,12 @@ class PatientConsultationsView(APIView):
                     'slot_time': str(c.slot_id.start_time) if c.slot_id else None,
                     'start_time': c.slot_id.start_time.strftime('%H:%M') if c.slot_id else None,
                     'end_time': c.slot_id.end_time.strftime('%H:%M') if c.slot_id else None,
-                    'consult_type': c.slot_id.consult_type if c.slot_id else None,
+                    'consult_type': (
+                        c.consult_mode
+                        if c.slot_id and c.slot_id.consult_type == 'both'
+                        else (c.slot_id.consult_type if c.slot_id else None)
+                    ),
+                    'consult_mode': c.consult_mode,
                     # `status` is the computed display status (may be 'missed');
                     # `original_status` is whatever the DB had so callers can
                     # still distinguish "missed but not cancelled" cleanly.
@@ -624,11 +908,108 @@ class PatientConsultationsView(APIView):
                     'jitsi_room_id': c.jitsi_room_id,
                     'jitsi_url': f'https://meet.jit.si/{c.jitsi_room_id}' if c.jitsi_room_id else None,
                     'payment_status': c.payment_status,
-                    'amount': float(c.doctor_id.consultation_fee),
+                    'payment_hold_expires_at': (
+                        c.payment_hold_expires_at.isoformat()
+                        if c.payment_hold_expires_at else None
+                    ),
+                    'hold_seconds_remaining': (
+                        max(0, int((c.payment_hold_expires_at - now).total_seconds()))
+                        if c.payment_hold_expires_at and c.payment_status == 'pending'
+                        else 0
+                    ),
+                    'razorpay_order_id': c.razorpay_order_id,
+                    'razorpay_key_id': settings.RAZORPAY_KEY_ID,
+                    'razorpay_amount': int(round(float(
+                        c.slot_id.consultation_fee
+                        if c.slot_id and c.slot_id.consultation_fee is not None
+                        else c.doctor_id.consultation_fee
+                    ) * 100)),
+                    'can_cancel': (
+                        c.status == 'scheduled'
+                        and c.payment_status == 'paid'
+                        and c.slot_id is not None
+                        and not (
+                            c.slot_id.slot_date < timezone.localdate()
+                            or (
+                                c.slot_id.slot_date == timezone.localdate()
+                                and c.slot_id.start_time <= timezone.localtime(timezone.now()).time()
+                            )
+                        )
+                    ),
+                    'amount': float(
+                        c.slot_id.consultation_fee
+                        if c.slot_id and c.slot_id.consultation_fee is not None
+                        else c.doctor_id.consultation_fee
+                    ),
                     'created_at': c.created_at.isoformat(),
                 }
                 for c in consultations
             ]
+        })
+
+
+class CancelConsultationView(APIView):
+    permission_classes = [IsAuthenticated, IsPatient]
+
+    def post(self, request, consultation_id):
+        from apps.doctor.models import Consultation
+
+        patient = get_patient(request)
+        if not patient:
+            return err('Patient profile not found.', status=404)
+
+        try:
+            consultation = Consultation.objects.select_related(
+                'patient_id', 'doctor_id', 'doctor_id__login_id', 'slot_id',
+            ).get(consultation_id=consultation_id, patient_id=patient)
+        except Consultation.DoesNotExist:
+            return err('Consultation not found.', status=404)
+
+        if consultation.status == 'cancelled':
+            return ok('Consultation already cancelled.', {
+                'consultation_id': str(consultation.consultation_id),
+                'status': consultation.status,
+            })
+
+        if consultation.payment_status != 'paid':
+            return err('Only paid upcoming consultations can be cancelled here.', status=400)
+
+        slot = consultation.slot_id
+        now = timezone.localtime(timezone.now())
+        if not slot or slot.slot_date < now.date() or (
+            slot.slot_date == now.date() and slot.start_time <= now.time()
+        ):
+            return err('Consultation cannot be cancelled after it has started.', status=400)
+
+        with transaction.atomic():
+            consultation.status = 'cancelled'
+            consultation.save(update_fields=['status'])
+
+            if slot.is_booked:
+                slot.is_booked = False
+                if not slot.is_blocked:
+                    slot.status = 'available'
+                slot.save(update_fields=['is_booked', 'status', 'updated_at'])
+
+        send_notification(
+            consultation.doctor_id.login_id,
+            'Consultation Cancelled',
+            f'{patient.full_name} cancelled the consultation on {slot.slot_date} at {slot.start_time}.',
+            notif_type='consultation',
+            related_id=str(consultation.consultation_id),
+        )
+
+        log_audit(
+            request.user, 'consultation_cancelled_no_refund', module='patient',
+            entity_type='Consultation', entity_id=consultation.consultation_id,
+            new_value='Patient cancelled. No refund issued.',
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
+        return ok('Consultation cancelled. No refund will be issued.', {
+            'consultation_id': str(consultation.consultation_id),
+            'status': 'cancelled',
+            'payment_status': consultation.payment_status,
         })
 
 
@@ -1308,8 +1689,8 @@ class PatientHealthDataView(APIView):
             'prescriptions': prescription_data,
             'lab_tests': lab_data,
             'stats': {
-                'total_consultations': len(consultation_data),
-                'total_prescriptions': len(prescription_data),
-                'total_lab_tests': len(lab_data),
+                'total_consultations': Consultation.objects.filter(patient_id=patient).count(),
+                'total_prescriptions': Prescription.objects.filter(patient_id=patient).count(),
+                'total_lab_tests': LabTestOrder.objects.filter(patient_id=patient).count(),
             },
         })

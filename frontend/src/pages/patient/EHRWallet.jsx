@@ -2,7 +2,9 @@ import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
-import { FiDownload, FiChevronDown, FiChevronUp, FiPlus, FiShare2 } from 'react-icons/fi';
+import {
+  FiDownload, FiChevronDown, FiChevronUp, FiHome, FiPlus, FiShare2, FiUser,
+} from 'react-icons/fi';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
 import Badge from '../../components/common/Badge';
@@ -14,6 +16,7 @@ import { pageVariants, cardVariants } from '../../components/dashboard/variants'
 import { useAuth } from '../../context/AuthContext';
 import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
+import { cleanDoctorName } from '../../utils/nameUtils';
 
 const TAB_KEYS = [
   { key: 'all',           label: 'All' },
@@ -52,6 +55,24 @@ const TYPE_TO_TAB = {
 const fmtDate = (iso) => {
   if (!iso) return '—';
   try { return format(new Date(iso), 'dd MMM yyyy, HH:mm'); } catch { return iso; }
+};
+
+const recordTitle = (record) => {
+  if (record?._cat === 'prescriptions' && record.doctor_name) {
+    return `Prescription - ${cleanDoctorName(record.doctor_name)}`;
+  }
+  return record?.title || '-';
+};
+
+const sourceItems = (record) => {
+  const items = [];
+  if (record?.doctor_name) {
+    items.push({ key: 'doctor', icon: FiUser, label: cleanDoctorName(record.doctor_name) });
+  }
+  if (record?.hospital_name) {
+    items.push({ key: 'hospital', icon: FiHome, label: record.hospital_name });
+  }
+  return items;
 };
 
 const EHRWallet = () => {
@@ -435,6 +456,7 @@ const EHRWallet = () => {
                   <div className="space-y-3">
                     {records.map((r) => {
                       const isOpen = expanded[r.record_id];
+                      const metaItems = sourceItems(r);
                       return (
                         <motion.div key={r.record_id} variants={cardVariants} className="dashboard-card">
                           <div className="flex items-start justify-between gap-3">
@@ -443,7 +465,20 @@ const EHRWallet = () => {
                                 <Badge status="info" text={TYPE_TO_TAB[r._cat] || r._cat} />
                                 <span className="text-xs text-muted">{fmtDate(r.recorded_at)}</span>
                               </div>
-                              <div className="font-bricolage font-bold text-ink">{r.title || '—'}</div>
+                              <div className="font-bricolage font-bold text-ink">{recordTitle(r)}</div>
+                              {metaItems.length > 0 && (
+                                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+                                  {metaItems.map((item) => {
+                                    const Icon = item.icon;
+                                    return (
+                                      <span key={item.key} className="inline-flex items-center gap-1.5">
+                                        <Icon className="w-3.5 h-3.5 text-orange-500" />
+                                        {item.label}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
                               {r.content && (
                                 <p className={`text-sm text-muted mt-1 ${isOpen ? '' : 'line-clamp-2'}`}>{r.content}</p>
                               )}
@@ -494,7 +529,7 @@ const EHRWallet = () => {
       {/* QR Share Modal */}
       <Modal isOpen={showQR && qr} onClose={() => setShowQR(false)} title="Share EHR via QR">
         <div className="text-center">
-          {qr?.qr_code && <img src={qr.qr_code} alt="QR" className="mx-auto w-56 h-56 object-contain" />}
+          {qr?.qr_code && <img src={qr.qr_code} alt="QR" className="mx-auto w-48 h-48 sm:w-56 sm:h-56 object-contain" />}
           <div className={`mt-4 inline-block px-4 py-2 rounded-full font-mono font-semibold ${
             remainingMs > 60_000 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'
           }`}>
@@ -504,12 +539,12 @@ const EHRWallet = () => {
           {qr?.short_code && (
             <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mt-4">
               <p className="text-sm text-orange-600 font-medium mb-2">📞 Tell this code to your doctor:</p>
-              <div className="flex items-center justify-center gap-3">
-                <div className="flex gap-2">
+              <div className="flex flex-wrap sm:flex-nowrap items-center justify-center gap-2 sm:gap-3">
+                <div className="flex gap-1 sm:gap-2">
                   {qr.short_code.split('').map((digit, i) => (
                     <span
                       key={i}
-                      className="w-10 h-12 bg-white border-2 border-orange-300 rounded-xl flex items-center justify-center text-2xl font-bricolage font-extrabold text-ink shadow-sm"
+                      className="shrink-0 w-8 h-10 sm:w-10 sm:h-12 bg-white border-2 border-orange-300 rounded-xl flex items-center justify-center text-xl sm:text-2xl font-bricolage font-extrabold text-ink shadow-sm"
                     >
                       {digit}
                     </span>
@@ -535,7 +570,7 @@ const EHRWallet = () => {
           {(qr?.token || qr?.consent_id) && (
             <div className="mt-2">
               <div className="flex items-center justify-center gap-2">
-                <code className="bg-cream border border-hairline rounded-xl px-4 py-2 text-ink font-mono text-sm font-bold tracking-wider select-all break-all">
+                <code className="bg-cream border border-hairline rounded-xl px-3 sm:px-4 py-2 text-ink font-mono text-xs sm:text-sm font-bold tracking-wider select-all break-all text-left max-h-24 overflow-y-auto">
                   {qr.token || qr.consent_id}
                 </code>
                 <button

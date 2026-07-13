@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from decimal import Decimal
 
 # Must stay in sync with payment_utils.PAYMENT_TYPES — a missing entry here
 # makes VerifyPaymentView reject the request with a 400 before the payment
@@ -9,7 +10,7 @@ PAYMENT_TYPE_CHOICES = ('consultation', 'medicine', 'lab', 'lab_test', 'equipmen
 class CreateOrderSerializer(serializers.Serializer):
     payment_type = serializers.ChoiceField(choices=PAYMENT_TYPE_CHOICES)
     object_id = serializers.UUIDField()
-    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0.01)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
 
 
 class VerifyPaymentSerializer(serializers.Serializer):

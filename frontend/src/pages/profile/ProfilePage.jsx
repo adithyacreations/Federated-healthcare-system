@@ -214,7 +214,7 @@ const ProfilePage = () => {
             {/* Info */}
             <div className="flex-1 min-w-0">
               <div className="text-xl font-bold text-gray-800">{displayName}</div>
-              <div className="text-sm text-gray-500 mt-0.5">{loginData?.email}</div>
+              <div className="text-sm text-gray-500 mt-0.5 truncate" title={loginData?.email}>{loginData?.email}</div>
               <div className="flex flex-wrap gap-2 mt-2">
                 <span className={`text-xs font-semibold px-3 py-1 rounded-full ${ROLE_COLORS[role] || 'bg-gray-100 text-gray-600'}`}>
                   {ROLE_LABELS[role] || role}
@@ -227,10 +227,8 @@ const ProfilePage = () => {
           </div>
         </div>
 
-        {/* Two-column layout — left: edit + role extras · right: security + info */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-          {/* LEFT COLUMN */}
-          <div className="space-y-6">
+        {/* Single column layout for profile settings */}
+        <div className="space-y-6">
 
         {/* Section 2 — Edit Profile */}
         <div className="card">
@@ -272,7 +270,7 @@ const ProfilePage = () => {
             <button
               type="submit"
               disabled={savingEdit}
-              className="inline-flex items-center gap-2 bg-orange-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-60"
+              className="flex w-full justify-center items-center gap-2 bg-orange-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-orange-600 transition disabled:opacity-60"
             >
               <FiSave className="w-4 h-4" />
               {savingEdit ? 'Saving…' : 'Save Changes'}
@@ -295,7 +293,7 @@ const ProfilePage = () => {
             <button
               onClick={handleSaveLocation}
               disabled={savingLoc}
-              className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+              className="mt-4 flex w-full justify-center items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white hover:bg-orange-600 transition disabled:opacity-60"
               style={{ backgroundColor: '#F97316' }}
             >
               {savingLoc ? 'Saving…' : 'Save Location'}
@@ -310,7 +308,7 @@ const ProfilePage = () => {
             <p className="text-gray-500 text-sm mb-4">
               Manage how FederCare contacts you about appointments
             </p>
-            <div className="flex items-center justify-between gap-4 p-4 bg-gray-50 rounded-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-gray-50 rounded-xl">
               <div>
                 <p className="font-medium text-black">Appointment Reminders</p>
                 <p className="text-sm text-gray-500 mt-1">
@@ -351,25 +349,22 @@ const ProfilePage = () => {
           </div>
         )}
 
-          </div>{/* END LEFT COLUMN */}
 
-          {/* RIGHT COLUMN */}
-          <div className="space-y-6">
 
         {/* Section 3 — Security (OTP-verified password reset only) */}
         <div className="card">
           <h3 className="font-bold text-lg mb-1 text-gray-700">🔐 Security</h3>
           <p className="text-gray-500 text-sm mb-4">Manage your account password</p>
-          <div className="flex items-center justify-between gap-4 p-4 bg-gray-50 rounded-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-gray-50 rounded-xl">
             <div>
               <p className="font-medium text-black">Password</p>
               <p className="text-sm text-gray-400">
-                A 6-digit OTP is sent to <b>{loginData?.email}</b> to verify it's you.
+                A 6-digit OTP is sent to <b className="break-all">{loginData?.email}</b> to verify it's you.
               </p>
             </div>
             <button
               onClick={() => setShowResetModal(true)}
-              className="shrink-0 px-6 py-2 rounded-full font-semibold text-white text-sm"
+              className="shrink-0 w-full sm:w-auto px-6 py-2 rounded-full font-semibold text-white text-sm"
               style={{ backgroundColor: '#F97316' }}
             >
               Reset Password
@@ -396,8 +391,7 @@ const ProfilePage = () => {
           </div>
         </div>
 
-          </div>{/* END RIGHT COLUMN */}
-        </div>{/* END two-column grid */}
+        </div>{/* END Single column layout */}
       </div>
 
       <PasswordResetModal

@@ -254,9 +254,9 @@ const PatientDashboard = () => {
 
         {/* ─── SECTION B — Stats row ─────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatsCard icon={FiCalendar}     title="Consultations" value={(d.upcoming_consultations || []).length} trend={8} />
-          <StatsCard icon={FiFilePlus}     title="Prescriptions" value={(d.active_prescriptions || []).length} />
-          <StatsCard icon={FiActivity}     title="Lab Tests"     value={d.pending_lab_orders ?? 0} />
+          <StatsCard icon={FiCalendar}     title="Consultations" value={d.total_consultations ?? 0} trend={8} />
+          <StatsCard icon={FiFilePlus}     title="Prescriptions" value={d.total_prescriptions ?? 0} />
+          <StatsCard icon={FiActivity}     title="Lab Tests"     value={d.total_lab_orders ?? 0} />
           <StatsCard icon={FiShoppingCart} title="Orders"        value={medCount} />
         </div>
 
@@ -273,8 +273,8 @@ const PatientDashboard = () => {
             <BentoAction to="/patient/lab"           icon={FiActivity}     title="Lab Test"          description="Diagnostics" />
             <BentoAction to="/patient/ehr"           icon={FiBookOpen}     title="EHR Wallet"        description="Health records" />
             <BentoAction to="/patient/medicine"      icon={FiShoppingCart} title="Order Med"         description="Pharmacy" />
-            <BentoAction to="/patient/emergency"     icon={FiAlertTriangle} title="🚨 Emergency SOS" description="Tap for immediate help" span="col-span-2" danger />
             <BentoAction to="/patient/complaints"    icon={FiFileText}     title="Complaint"         description="Doctor / vendor" />
+            <BentoAction to="/patient/emergency"     icon={FiAlertTriangle} title="🚨 Emergency SOS" description="Tap for immediate help" span="col-span-2" danger />
           </div>
         </section>
 

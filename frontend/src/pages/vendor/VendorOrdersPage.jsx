@@ -13,7 +13,7 @@ import API from '../../api/axios';
 import { colorFor, initials, STATUS_LABEL } from './vendorHelpers';
 import './vendor-design.css';
 
-const STATUS_TABS = ['all', 'pending', 'confirmed', 'dispatched', 'delivered'];
+const STATUS_TABS = ['all', 'pending', 'confirmed', 'dispatched', 'delivered', 'wrong_product'];
 
 const PAY_PILL = {
   paid: { bg: 'var(--v-green-soft)', color: '#1B5C39' },
@@ -23,19 +23,31 @@ const PAY_PILL = {
 
 const VendorOrdersPage = () => {
   const { data: ordersRaw, refetch } = useApi('/api/vendor/orders/');
+  const { data: driversRaw, refetch: refetchDrivers } = useApi('/api/vendor/drivers/');
   const orders = Array.isArray(ordersRaw) ? ordersRaw : [];
+  const drivers = Array.isArray(driversRaw) ? driversRaw : [];
 
   const [statusTab, setStatusTab] = useState('all');
   const [search, setSearch] = useState('');
   const [confirmingId, setConfirmingId] = useState(null);
 
   const [dispatchModal, setDispatchModal] = useState(null);
-  const [dispatchForm, setDispatchForm] = useState({ estimated_delivery_days: 3, tracking_info: '' });
+  const [dispatchForm, setDispatchForm] = useState({ estimated_delivery_days: 3, tracking_info: '', driver_id: '' });
   const [dispatching, setDispatching] = useState(false);
 
   const [resendModal, setResendModal] = useState(null);
   const [resendDays, setResendDays] = useState(3);
   const [resending, setResending] = useState(false);
+
+  const [showAddDriver, setShowAddDriver] = useState(false);
+  const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPhone, setNewDriverPhone] = useState('');
+  const [addingDriver, setAddingDriver] = useState(false);
+
+  const [resolveModal, setResolveModal] = useState(null);
+  const [resolveAction, setResolveAction] = useState('redeliver');
+  const [resolveDriver, setResolveDriver] = useState('');
+  const [resolving, setResolving] = useState(false);
 
   const [openingChat, setOpeningChat] = useState(null);
 
@@ -91,25 +103,73 @@ const VendorOrdersPage = () => {
   };
 
   const openDispatch = (order) => {
-    setDispatchForm({ estimated_delivery_days: 3, tracking_info: '' });
+    setDispatchForm({ estimated_delivery_days: 3, tracking_info: '', driver_id: '' });
     setDispatchModal(order);
   };
 
   const handleDispatch = async () => {
     if (!dispatchModal) return;
+    if (!dispatchForm.driver_id) {
+      toast.error('Please select a driver.');
+      return;
+    }
     setDispatching(true);
     try {
       const r = await API.put(`/api/vendor/orders/${dispatchModal.eq_order_id}/dispatch/`, {
         estimated_delivery_days: Number(dispatchForm.estimated_delivery_days),
         tracking_info: dispatchForm.tracking_info,
+        driver_id: dispatchForm.driver_id,
       });
       toast.success(r.data?.message || 'Dispatched! OTP sent.');
       setDispatchModal(null);
       refetch();
+      refetchDrivers();
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Dispatch failed');
     } finally {
       setDispatching(false);
+    }
+  };
+
+  const handleAddDriver = async () => {
+    setAddingDriver(true);
+    try {
+      await API.post('/api/vendor/drivers/', {
+        name: newDriverName,
+        phone: newDriverPhone,
+      });
+      toast.success('Driver added successfully!');
+      setShowAddDriver(false);
+      setNewDriverName('');
+      setNewDriverPhone('');
+      refetchDrivers();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to add driver');
+    } finally {
+      setAddingDriver(false);
+    }
+  };
+
+  const handleResolveIssue = async () => {
+    if (!resolveModal) return;
+    if (resolveAction === 'redeliver' && !resolveDriver) {
+      toast.error('Please select a driver for redelivery.');
+      return;
+    }
+    setResolving(true);
+    try {
+      await API.put(`/api/vendor/orders/${resolveModal.eq_order_id}/resolve-issue/`, {
+        resolution: resolveAction,
+        new_driver_id: resolveAction === 'redeliver' ? resolveDriver : undefined,
+      });
+      toast.success(`Issue resolved via ${resolveAction}`);
+      setResolveModal(null);
+      refetch();
+      if (resolveAction === 'redeliver') refetchDrivers();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to resolve issue');
+    } finally {
+      setResolving(false);
     }
   };
 
@@ -146,6 +206,9 @@ const VendorOrdersPage = () => {
             </p>
           </div>
           <div className="v-page-actions">
+            <button type="button" onClick={() => setShowAddDriver(true)} className="v-btn-primary">
+              <FiTruck style={{ width: 14, height: 14 }} /> Add Driver
+            </button>
             <button type="button" onClick={refetch} className="v-btn-ghost">
               <FiRefreshCw style={{ width: 14, height: 14 }} /> Refresh
             </button>
@@ -276,8 +339,25 @@ const VendorOrdersPage = () => {
                       Resend OTP
                     </button>
                   )}
+                  {order.order_status === 'wrong_product' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResolveAction('redeliver');
+                        setResolveDriver('');
+                        setResolveModal(order);
+                      }}
+                      className="v-btn-primary"
+                      style={{ padding: '7px 14px', fontSize: 12, backgroundColor: '#EF4444', borderColor: '#EF4444' }}
+                    >
+                      Resolve Issue
+                    </button>
+                  )}
                   {order.order_status === 'delivered' && (
                     <span style={{ fontSize: 12, color: 'var(--v-green)', fontWeight: 600 }}>Delivered ✓</span>
+                  )}
+                  {order.order_status === 'refunded' && (
+                    <span style={{ fontSize: 12, color: 'var(--v-red)', fontWeight: 600 }}>Refunded ✓</span>
                   )}
                   <button
                     type="button"
@@ -315,6 +395,21 @@ const VendorOrdersPage = () => {
                 onChange={(e) => setDispatchForm((p) => ({ ...p, estimated_delivery_days: e.target.value }))}
               >
                 {[1, 2, 3, 4, 5, 6, 7].map((d) => <option key={d} value={d}>{d} day{d > 1 ? 's' : ''}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-ink mb-1.5 block">Select Delivery Driver</label>
+              <select
+                className="input"
+                value={dispatchForm.driver_id}
+                onChange={(e) => setDispatchForm((p) => ({ ...p, driver_id: e.target.value }))}
+              >
+                <option value="" disabled>-- Select a driver --</option>
+                {drivers.map(d => (
+                  <option key={d.driver_id} value={d.driver_id} disabled={!d.is_available}>
+                    {d.name} ({d.phone}) {d.is_available ? '🟢' : '🔴 On Delivery'}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -365,6 +460,83 @@ const VendorOrdersPage = () => {
             </div>
           </div>
         )}
+      </Modal>
+      {/* Resolve Issue modal */}
+      <Modal isOpen={Boolean(resolveModal)} onClose={() => setResolveModal(null)} title="Resolve Equipment Issue">
+        {resolveModal && (
+          <div className="space-y-4">
+            <div className="bg-red-50 rounded-xl p-4 text-sm border border-red-100">
+              <p className="font-semibold text-red-800 mb-1">Hospital reported: Wrong Equipment</p>
+              <p className="text-red-700">Patient Requested: <span className="font-bold capitalize">{resolveModal.hospital_desired_resolution}</span></p>
+            </div>
+            
+            <div>
+              <label className="text-sm font-medium text-ink mb-1.5 block">Select Action</label>
+              <select
+                className="input"
+                value={resolveAction}
+                onChange={(e) => setResolveAction(e.target.value)}
+              >
+                <option value="redeliver">Redeliver Equipment</option>
+                <option value="refund">Issue Full Refund</option>
+              </select>
+            </div>
+
+            {resolveAction === 'redeliver' && (
+              <div>
+                <label className="text-sm font-medium text-ink mb-1.5 block">Select Delivery Driver</label>
+                <select
+                  className="input"
+                  value={resolveDriver}
+                  onChange={(e) => setResolveDriver(e.target.value)}
+                >
+                  <option value="" disabled>-- Select an available driver --</option>
+                  {drivers.map(d => (
+                    <option key={d.driver_id} value={d.driver_id} disabled={!d.is_available}>
+                      {d.name} ({d.phone}) {d.is_available ? '🟢' : '🔴 On Delivery'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <button onClick={handleResolveIssue} disabled={resolving} className="btn-orange w-full disabled:opacity-60" style={{ backgroundColor: '#EF4444' }}>
+              {resolving ? 'Resolving…' : 'Confirm Resolution'}
+            </button>
+          </div>
+        )}
+      </Modal>
+
+      {/* Add Driver modal */}
+      <Modal isOpen={showAddDriver} onClose={() => setShowAddDriver(false)} title="Add Delivery Driver">
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium text-ink mb-1.5 block">Driver Name</label>
+            <input
+              className="input"
+              placeholder="E.g. John Doe"
+              value={newDriverName}
+              onChange={(e) => setNewDriverName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-ink mb-1.5 block">Phone Number</label>
+            <input
+              className="input"
+              placeholder="E.g. 9876543210"
+              maxLength={10}
+              value={newDriverPhone}
+              onChange={(e) => setNewDriverPhone(e.target.value.replace(/[^0-9]/g, ''))}
+            />
+          </div>
+          <button
+            onClick={handleAddDriver}
+            disabled={addingDriver || !newDriverName.trim() || !newDriverPhone.trim()}
+            className="btn-orange w-full"
+          >
+            {addingDriver ? 'Adding...' : 'Add Driver'}
+          </button>
+        </div>
       </Modal>
     </DashboardLayout>
   );

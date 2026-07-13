@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { FiCheck, FiTrash2 } from 'react-icons/fi';
+import { FiCheck, FiTrash2, FiSearch } from 'react-icons/fi';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
 import AnimatedTabs from '../../components/patient/AnimatedTabs';
@@ -53,6 +53,8 @@ const LabTestPage = () => {
   const [slotRestriction, setSlotRestriction] = useState(null);
   const [fastingRequired, setFastingRequired] = useState(false);
   const [slotMessage, setSlotMessage] = useState(null);
+
+  const [searchQuery, setSearchQuery] = useState('');
 
   const selectedCount = selected.length;
   useEffect(() => {
@@ -127,7 +129,18 @@ const LabTestPage = () => {
     ];
   }, [grouped, allTests.length]);
 
-  const visibleTests = activeCat === 'all' ? allTests : (grouped[activeCat] || []);
+  const visibleTests = useMemo(() => {
+    let tests = activeCat === 'all' ? allTests : (grouped[activeCat] || []);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      tests = tests.filter((t) => 
+        (t.name && t.name.toLowerCase().includes(q)) || 
+        (t.category && t.category.toLowerCase().includes(q)) || 
+        (t.description && t.description.toLowerCase().includes(q))
+      );
+    }
+    return tests;
+  }, [activeCat, allTests, grouped, searchQuery]);
   const cartHasRx = selected.some((t) => t.requires_prescription);
 
   const isPicked = (t) => selected.some((x) => x.name === t.name);
@@ -159,8 +172,8 @@ const LabTestPage = () => {
       if (!ACTIVE_STATUSES.includes(o.status)) return false;
       // Skip unpaid past-date orders — they are abandoned/expired
       if (o.payment_status === 'pending' && o.appointment_date && o.appointment_date < todayDate) return false;
-      // Only show for the selected date or earlier
-      return o.appointment_date && o.appointment_date <= apptDate;
+      // Only show for the selected date
+      return o.appointment_date && o.appointment_date === apptDate;
     });
   }, [allLabOrders, apptDate, todayDate]);
 
@@ -250,7 +263,18 @@ const LabTestPage = () => {
 
         <div className="flex flex-col lg:flex-row gap-6 items-start">
           {/* Catalog */}
-          <section className="flex-1 w-full min-w-0">
+          <section className="flex-1 w-full min-w-0 order-2 lg:order-1">
+            {/* Search */}
+            <div className="relative max-w-xl mb-5">
+              <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-500 w-4 h-4" />
+              <input
+                className="w-full bg-white border border-hairline rounded-full pl-11 pr-4 py-3 text-sm focus:outline-none focus:border-orange-400 transition"
+                placeholder="Search lab tests…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            
             <AnimatedTabs tabs={catTabs} active={activeCat} onChange={setActiveCat} layoutId="lab-tab" />
             {catalog.loading ? (
               <div className="dashboard-card text-sm text-muted">Loading test catalog…</div>
@@ -319,7 +343,7 @@ const LabTestPage = () => {
           </section>
 
           {/* Sticky booking summary — aligned to the top of the test cards */}
-          <aside className="w-full lg:w-[340px] lg:flex-shrink-0 lg:sticky lg:top-20 self-start">
+          <aside className="w-full lg:w-[340px] lg:flex-shrink-0 lg:sticky lg:top-20 self-start order-1 lg:order-2">
             <motion.div
               variants={cardVariants}
               className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm"

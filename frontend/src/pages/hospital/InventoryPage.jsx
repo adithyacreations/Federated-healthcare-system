@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiPackage, FiPlus, FiRefreshCw } from 'react-icons/fi';
+import { FiPackage, FiPlus, FiRefreshCw, FiSearch } from 'react-icons/fi';
 import DashboardLayout from '../../components/common/DashboardLayout';
 import Modal from '../../components/common/Modal';
 import API from '../../api/axios';
@@ -98,7 +98,7 @@ const EquipmentCard = ({ item, onEdit, onDelete, onImageUpload, onAddStock, onRe
         <img
           src={item.image_url}
           alt={item.item_name}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain p-2 mix-blend-multiply"
           onError={(e) => { e.target.style.display = 'none'; }}
         />
       ) : (
@@ -300,8 +300,12 @@ const InventoryPage = () => {
   const [stockHistory, setStockHistory]       = useState([]);
   const [stockSaving, setStockSaving]         = useState(false);
   const [stockForm, setStockForm]             = useState(BLANK_STOCK_FORM);
+  const [searchQuery, setSearchQuery]         = useState('');
 
   const items = inventory.data?.items || (Array.isArray(inventory.data) ? inventory.data : []);
+  const filteredItems = items.filter((item) =>
+    item.item_name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
   const lowStockCount = inventory.data?.low_stock_count ?? items.filter((i) => i.is_low_stock).length;
 
   const refetchInventory = () => inventory.refetch();
@@ -552,19 +556,31 @@ const InventoryPage = () => {
 
       {/* ─── Inventory Card Grid ──────────────────────────────── */}
       <section>
-        <h2 className="text-base font-bold text-black mb-4 flex items-center gap-2">
-          <FiPackage className="w-4 h-4" /> All Equipment
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+          <h2 className="text-base font-bold text-black flex items-center gap-2">
+            <FiPackage className="w-4 h-4" /> All Equipment
+          </h2>
+          <div className="relative w-full sm:w-64">
+            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <input
+              type="text"
+              placeholder="Search equipment..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-full text-sm focus:outline-none focus:border-orange-400 transition"
+            />
+          </div>
+        </div>
         {inventory.loading ? (
           <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-gray-400">Loading inventory…</div>
-        ) : items.length === 0 ? (
+        ) : filteredItems.length === 0 ? (
           <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
             <div className="text-4xl mb-2">📦</div>
-            <p className="text-gray-500 font-medium">No equipment in inventory yet.</p>
+            <p className="text-gray-500 font-medium">{searchQuery ? 'No equipment found matching search.' : 'No equipment in inventory yet.'}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {items.map((item) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {filteredItems.map((item) => (
               <EquipmentCard
                 key={item.inventory_id}
                 item={item}

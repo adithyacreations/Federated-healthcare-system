@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { FiGrid, FiPlus, FiRefreshCw } from 'react-icons/fi';
+import { FiGrid, FiPlus, FiRefreshCw, FiEdit2 } from 'react-icons/fi';
 import DashboardLayout from '../../components/common/DashboardLayout';
+import Modal from '../../components/common/Modal';
 import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
 
@@ -23,6 +24,10 @@ const BedsPage = () => {
   const beds = useApi('/api/hospital/beds/');
   const [form, setForm] = useState(BLANK_FORM);
   const [adding, setAdding] = useState(false);
+
+  const [editingBed, setEditingBed] = useState(null);
+  const [editForm, setEditForm] = useState(BLANK_FORM);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const summary = beds.data?.summary || {};
   const bedList = beds.data?.beds || [];
@@ -47,6 +52,35 @@ const BedsPage = () => {
       toast.error(err?.response?.data?.message || 'Failed to add bed');
     } finally {
       setAdding(false);
+    }
+  };
+
+  const openEdit = (e, bed) => {
+    e.stopPropagation();
+    setEditingBed(bed);
+    setEditForm({ bed_type: bed.bed_type, ward_name: bed.ward_name || '' });
+  };
+
+  const closeEdit = () => {
+    setEditingBed(null);
+    setEditForm(BLANK_FORM);
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    setSavingEdit(true);
+    try {
+      await API.put(`/api/hospital/beds/${editingBed.bed_id}/`, {
+        bed_type: editForm.bed_type,
+        ward_name: editForm.ward_name,
+      });
+      toast.success('Bed updated successfully');
+      beds.refetch();
+      closeEdit();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Update failed');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -129,7 +163,7 @@ const BedsPage = () => {
         </h2>
         <form onSubmit={handleAdd} className="flex flex-wrap gap-3 items-end">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Bed Type</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Ward Name</label>
             <select
               value={form.bed_type}
               onChange={(e) => setForm((p) => ({ ...p, bed_type: e.target.value }))}
@@ -141,9 +175,9 @@ const BedsPage = () => {
             </select>
           </div>
           <div className="flex-1 min-w-[160px]">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Ward Name</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Bed Number</label>
             <input
-              placeholder="e.g. Ward A"
+              placeholder="e.g. 101"
               value={form.ward_name}
               onChange={(e) => setForm((p) => ({ ...p, ward_name: e.target.value }))}
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
@@ -190,7 +224,12 @@ const BedsPage = () => {
                       <div className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-block mb-1 ${TYPE_BADGE[b.bed_type] || 'bg-gray-100 text-gray-600'}`}>
                         {b.bed_type}
                       </div>
-                      <span className="text-lg leading-none">🔒</span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={(e) => openEdit(e, b)} className="text-gray-400 hover:text-gray-700 transition">
+                          <FiEdit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="text-lg leading-none">🔒</span>
+                      </div>
                     </div>
                     <div className="font-semibold text-sm truncate text-red-700">{b.ward_name || '—'}</div>
                     <span className="text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full mt-1 inline-block">
@@ -237,24 +276,74 @@ const BedsPage = () => {
                     })()}
                   </div>
                 ) : (
-                  <button
+                  <div
                     key={b.bed_id}
                     onClick={() => cycleStatus(b)}
-                    className={`p-3 rounded-xl border-2 text-left hover:scale-[1.03] transition-all ${STATUS_STYLE[b.status] || STATUS_STYLE.available}`}
+                    className={`p-3 rounded-xl border-2 text-left hover:scale-[1.03] transition-all cursor-pointer ${STATUS_STYLE[b.status] || STATUS_STYLE.available}`}
                     title="Click to cycle: available → occupied → reserved → available"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleStatus(b); } }}
                   >
-                    <div className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-block mb-1 ${TYPE_BADGE[b.bed_type] || 'bg-gray-100 text-gray-600'}`}>
-                      {b.bed_type}
+                    <div className="flex items-start justify-between">
+                      <div className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full inline-block mb-1 ${TYPE_BADGE[b.bed_type] || 'bg-gray-100 text-gray-600'}`}>
+                        {b.bed_type}
+                      </div>
+                      <button onClick={(e) => openEdit(e, b)} className="text-gray-400 hover:text-gray-700 transition">
+                        <FiEdit2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                     <div className="font-semibold text-sm truncate">{b.ward_name || '—'}</div>
                     <div className="text-xs mt-1 capitalize font-medium">{b.status}</div>
-                  </button>
+                  </div>
                 )
               ))}
             </div>
           )}
         </div>
       </section>
+
+      <Modal isOpen={!!editingBed} onClose={closeEdit} title="Edit Bed">
+        <form onSubmit={handleEditSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Ward Name</label>
+            <select
+              value={editForm.bed_type}
+              onChange={(e) => setEditForm((p) => ({ ...p, bed_type: e.target.value }))}
+              className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-orange-300 focus:border-orange-300"
+            >
+              <option value="general">General</option>
+              <option value="icu">ICU</option>
+              <option value="ventilator">Ventilator</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Bed Number</label>
+            <input
+              value={editForm.ward_name}
+              onChange={(e) => setEditForm((p) => ({ ...p, ward_name: e.target.value }))}
+              className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-orange-300 focus:border-orange-300"
+              placeholder="e.g. 101"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={closeEdit}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={savingEdit}
+              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-xl hover:bg-orange-600 transition disabled:opacity-60"
+            >
+              {savingEdit ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </DashboardLayout>
   );
 };
