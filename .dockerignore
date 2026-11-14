@@ -1,0 +1,39 @@
+# This file is relative to the repository root. Build with:
+# docker build -f backend/Dockerfile .
+*
+!backend
+backend/*
+!backend/Dockerfile
+!backend/requirements.txt
+!backend/start.sh
+!backend/manage.py
+!backend/billing_utils.py
+!backend/email_utils.py
+!backend/payment_utils.py
+!backend/utils.py
+!backend/apps
+!backend/federcare
+
+!ml_models
+ml_models/*
+!ml_models/*.pkl
+!ml_models/*.keras
+!ml_models/*.h5
+!ml_models/*.json
+
+# Keep runtime data and credentials out even inside allowed source directories.
+**/.env
+**/.env.*
+**/venv/
+**/__pycache__/
+**/*.py[cod]
+**/*.sqlite3
+**/*.sqlite3-shm
+**/*.sqlite3-wal
+**/*.db
+**/media/
+**/uploads/
+**/staticfiles/
+**/*.log
+**/*.pem
+**/*.key
