@@ -88,17 +88,17 @@ class PatientRegisterSerializer(serializers.Serializer):
     full_name = serializers.CharField(max_length=120)
     dob = serializers.DateField()
     gender = serializers.ChoiceField(
-        choices=['male', 'female', 'other'], required=False, default=''
+        choices=['male', 'female', 'other'], required=False, allow_blank=True, default=''
     )
-    blood_group = serializers.CharField(max_length=5, required=False, default='')
+    blood_group = serializers.CharField(max_length=5, required=False, allow_blank=True, default='')
     height_cm = serializers.DecimalField(
         max_digits=5, decimal_places=2, required=False, allow_null=True, default=None
     )
     weight_kg = serializers.DecimalField(
         max_digits=5, decimal_places=2, required=False, allow_null=True, default=None
     )
-    address = serializers.CharField(required=False, default='')
-    emergency_contact = serializers.CharField(max_length=15, required=False, default='')
+    address = serializers.CharField(required=False, allow_blank=True, default='')
+    emergency_contact = serializers.CharField(max_length=15, required=False, allow_blank=True, default='')
     phone = serializers.CharField(max_length=15)
 
     def validate_email(self, value):

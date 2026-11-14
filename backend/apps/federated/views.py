@@ -1285,48 +1285,41 @@ class BroadcastAlertView(APIView):
 
         notified_count = 0
 
-        # Hospital admins — in-app notification + email
-        for admin in hospital_admins:
+        staff = hospital_admins + doctors + lab_techs
+        for recipient in staff:
             try:
-                send_notification(admin, title, alert_message, notif_type='alert')
-                try:
-                    hospital = HospitalRegistration.objects.get(login_id=admin)
-                    from email_utils import send_epidemic_alert_email
-                    send_epidemic_alert_email(
-                        to_email=admin.email,
-                        hospital_name=hospital.hospital_name,
-                        disease_name=disease_name,
-                        alert_level=alert_level,
-                        region=region,
-                        message=alert_message,
-                    )
-                except HospitalRegistration.DoesNotExist:
-                    pass
-                except Exception as exc:
-                    logger.warning('Epidemic email failed for %s: %s', admin.email, exc)
+                send_notification(recipient, title, alert_message, notif_type='alert')
                 notified_count += 1
             except Exception as exc:
-                logger.warning('Epidemic notification failed for %s: %s', admin.email, exc)
+                logger.warning('Epidemic alert notification failed (%s)', type(exc).__name__)
 
-        # Doctors + lab technicians — in-app notification + email
-        for login in doctors + lab_techs:
+        from email_utils import send_epidemic_alert_email
+
+        emails_sent = 0
+        if staff:
+            hospital_names = dict(HospitalRegistration.objects.filter(
+                login_id__in=hospital_admins,
+            ).values_list('login_id', 'hospital_name'))
             try:
-                send_notification(login, title, alert_message, notif_type='alert')
-                try:
-                    from email_utils import send_epidemic_alert_email
-                    send_epidemic_alert_email(
-                        to_email=login.email,
-                        hospital_name=login.role.replace('_', ' ').title(),
-                        disease_name=disease_name,
-                        alert_level=alert_level,
-                        region=region,
-                        message=alert_message,
-                    )
-                except Exception as exc:
-                    logger.warning('Epidemic email failed for %s: %s', login.email, exc)
-                notified_count += 1
+                with get_connection() as connection:
+                    for recipient in staff:
+                        name = hospital_names.get(recipient.pk) or recipient.get_role_display()
+                        if send_epidemic_alert_email(
+                            to_email=recipient.email,
+                            hospital_name=name,
+                            disease_name=disease_name,
+                            alert_level=alert_level,
+                            region=region,
+                            message=alert_message,
+                            connection=connection,
+                        ):
+                            emails_sent += 1
             except Exception as exc:
-                logger.warning('Epidemic notification failed for %s: %s', login.email, exc)
+                logger.warning(
+                    'Epidemic alert mail connection failed (%s, SMTP code %s)',
+                    type(exc).__name__,
+                    getattr(exc, 'smtp_code', 'unavailable'),
+                )
 
         # Real-time push to any open dashboards
         broadcast_fl_update('epidemic_alert', {
@@ -1343,8 +1336,11 @@ class BroadcastAlertView(APIView):
             entity_type='EpidemicTrend',
         )
 
-        return ok(f'Alert sent to {notified_count} staff members!', {
+        return ok(f'In-app alerts created for {notified_count} of {len(staff)} eligible staff.', {
             'notified_count': notified_count,
+            'recipient_count': len(staff),
+            'emails_sent': emails_sent,
+            'emails_failed': len(staff) - emails_sent,
             'hospital_admins': len(hospital_admins),
             'doctors': len(doctors),
             'lab_techs': len(lab_techs),

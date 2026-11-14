@@ -1,3 +1,4 @@
+from django.conf import settings
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
@@ -63,7 +64,7 @@ class Command(BaseCommand):
                     ]
                     cta = (
                         '<div style="text-align:center;margin:20px 0;">'
-                        '<a href="http://localhost:3000/patient/consultations" '
+                        f'<a href="{settings.FRONTEND_URL}/patient/consultations" '
                         'style="background:#F97316;color:white;padding:14px 32px;'
                         'border-radius:999px;text-decoration:none;font-weight:bold;'
                         'font-size:16px;">Join Consultation →</a></div>'

@@ -1,104 +1,39 @@
-"""Smoke test for FederCare WebSocket consumers.
+"""Read-only notification handshake smoke test against a running ASGI server.
 
-Prerequisite: an ASGI server running on port 8000. Either:
-    python manage.py runserver       (Django + Channels dev server)
-or:
-    daphne -b 127.0.0.1 -p 8000 federcare.asgi:application
-
-Then run from another shell:
-    python test_websocket.py
+Set WS_SMOKE_ACCESS_TOKEN and WS_SMOKE_LOGIN_ID for the same active account.
+For a hosted test also set WS_SMOKE_URL and WS_SMOKE_ORIGIN.
+For isolated access and GPS tests run:
+    python manage.py test apps.auth_app.test_websocket_access
 """
 import asyncio
 import json
-import sys
+import os
+from uuid import UUID
 
 import websockets
 
-BASE = 'ws://127.0.0.1:8000'
-
-
-async def _recv_json(ws, timeout=3.0):
-    raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
-    return json.loads(raw)
-
-
-async def test_notification_ws():
-    url = f'{BASE}/ws/notifications/test-login-id/'
-    print(f'\n[notification] Connecting to {url}')
-    async with websockets.connect(url) as ws:
-        # 1. Welcome / unread_count handshake
-        welcome = await _recv_json(ws)
-        assert welcome.get('type') == 'connected', f'unexpected: {welcome}'
-        print(f'  -> connected, unread_count={welcome.get("unread_count")}')
-
-        # 2. mark_read should be acknowledged
-        await ws.send(json.dumps({'type': 'mark_read', 'notif_id': 'fake-id-not-in-db'}))
-        ack = await _recv_json(ws)
-        assert ack.get('type') == 'mark_read_ack', f'unexpected ack: {ack}'
-        print(f'  -> mark_read_ack received: success={ack.get("success")}')
-    print('[OK] Notification WebSocket working')
-
-
-async def test_gps_ws():
-    url = f'{BASE}/ws/gps/test-dispatch-id/'
-    print(f'\n[gps] Connecting to {url}')
-    async with websockets.connect(url) as ws:
-        welcome = await _recv_json(ws)
-        assert welcome.get('type') == 'connected', f'unexpected: {welcome}'
-        print(f'  -> connected: {welcome.get("message")}')
-
-        # Send a GPS update — server will persist (no-op if dispatch_id not real)
-        # and broadcast to the group, which we ourselves are subscribed to.
-        payload = {
-            'type': 'gps_update',
-            'lat': 8.5241,
-            'lng': 76.9366,
-            'dispatch_id': 'test-dispatch-id',
-        }
-        await ws.send(json.dumps(payload))
-
-        echo = await _recv_json(ws)
-        assert echo.get('type') == 'gps_update', f'unexpected echo: {echo}'
-        assert float(echo.get('lat')) == 8.5241
-        assert float(echo.get('lng')) == 76.9366
-        print(f'  -> gps_update echoed: lat={echo["lat"]} lng={echo["lng"]}')
-    print('[OK] GPS WebSocket working')
-
-
-async def test_orders_ws():
-    url = f'{BASE}/ws/orders/test-order-id/'
-    print(f'\n[orders] Connecting to {url}')
-    async with websockets.connect(url) as ws:
-        welcome = await _recv_json(ws)
-        assert welcome.get('type') == 'connected', f'unexpected: {welcome}'
-        print(f'  -> connected: order_id={welcome.get("order_id")}')
-
-        # Ask for a snapshot
-        await ws.send(json.dumps({'type': 'refresh'}))
-        snap = await _recv_json(ws)
-        assert snap.get('type') == 'snapshot', f'unexpected snap: {snap}'
-        print(f'  -> snapshot received: {snap.get("current")}')
-    print('[OK] Order Status WebSocket working')
-
 
 async def main():
-    failures = []
-    for name, coro in [
-        ('notification', test_notification_ws()),
-        ('gps', test_gps_ws()),
-        ('orders', test_orders_ws()),
-    ]:
-        try:
-            await coro
-        except Exception as exc:
-            failures.append((name, exc))
-            print(f'[FAIL] {name}: {type(exc).__name__}: {exc}')
+    base = os.getenv('WS_SMOKE_URL', 'ws://127.0.0.1:8000').rstrip('/')
+    origin = os.getenv('WS_SMOKE_ORIGIN', 'http://localhost:3000')
+    token = os.getenv('WS_SMOKE_ACCESS_TOKEN')
+    login_id = os.getenv('WS_SMOKE_LOGIN_ID')
+    if not token or not login_id:
+        raise SystemExit('Set WS_SMOKE_ACCESS_TOKEN and WS_SMOKE_LOGIN_ID before running this check.')
 
-    print('\n' + '=' * 60)
-    if failures:
-        print(f'  {len(failures)} test(s) failed.')
-        sys.exit(1)
-    print('  All WebSocket smoke tests passed.')
+    try:
+        async with websockets.connect(
+            f'{base}/ws/notifications/{UUID(login_id)}/',
+            origin=origin,
+            subprotocols=['federcare.jwt', token],
+            open_timeout=5,
+        ) as socket:
+            welcome = json.loads(await asyncio.wait_for(socket.recv(), timeout=5))
+            if socket.subprotocol != 'federcare.jwt' or welcome.get('type') != 'connected':
+                raise ValueError('Unexpected handshake response.')
+    except Exception as exc:
+        raise SystemExit(f'Notification WebSocket check failed ({type(exc).__name__}).') from None
+    print('Authenticated notification WebSocket connected.')
 
 
 if __name__ == '__main__':

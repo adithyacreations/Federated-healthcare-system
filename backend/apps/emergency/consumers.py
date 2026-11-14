@@ -7,9 +7,10 @@ Three consumers:
 """
 import json
 import logging
+import math
 from datetime import datetime, timezone
 
-from asgiref.sync import sync_to_async
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 logger = logging.getLogger(__name__)
@@ -17,16 +18,20 @@ logger = logging.getLogger(__name__)
 
 # ─── Sync DB helpers (wrapped via sync_to_async on call) ────────────────────
 
-@sync_to_async
-def _persist_gps(dispatch_id, lat, lng):
+@database_sync_to_async
+def _persist_gps(dispatch_id, login_id, lat, lng):
     """Save the latest GPS coords on the ambulance for this dispatch. Returns ETA.
 
-    Returns None when the dispatch_id is unknown or malformed — the consumer still
-    broadcasts the GPS update either way so subscribers get live coords.
+    Return None if the sender is no longer authorized for this dispatch.
     """
     from apps.emergency.models import AmbulanceDispatch
     try:
-        dispatch = AmbulanceDispatch.objects.select_related('ambulance_id').get(dispatch_id=dispatch_id)
+        dispatch = AmbulanceDispatch.objects.select_related('ambulance_id').get(
+            dispatch_id=dispatch_id,
+            ambulance_id__driver_id__login_id=login_id,
+            ambulance_id__driver_id__login_id__is_active=True,
+            ambulance_id__driver_id__login_id__is_approved=True,
+        )
     except (AmbulanceDispatch.DoesNotExist, ValueError, TypeError):
         return None
     except Exception as exc:
@@ -36,10 +41,10 @@ def _persist_gps(dispatch_id, lat, lng):
     ambulance.current_lat = lat
     ambulance.current_lng = lng
     ambulance.save(update_fields=['current_lat', 'current_lng'])
-    return dispatch.eta_minutes
+    return {'eta_minutes': dispatch.eta_minutes}
 
 
-@sync_to_async
+@database_sync_to_async
 def _unread_notification_count(login_id):
     from apps.auth_app.models import Notification
     try:
@@ -49,7 +54,7 @@ def _unread_notification_count(login_id):
         return 0
 
 
-@sync_to_async
+@database_sync_to_async
 def _mark_notification_read(notification_id, login_id):
     from apps.auth_app.models import Notification
     try:
@@ -60,7 +65,7 @@ def _mark_notification_read(notification_id, login_id):
         return False
 
 
-@sync_to_async
+@database_sync_to_async
 def _resolve_order_status(order_id):
     """Best-effort lookup of an order's current status across the 3 order models."""
     try:
@@ -77,6 +82,10 @@ def _resolve_order_status(order_id):
             return {'kind': 'lab', 'status': l.status, 'payment_status': l.payment_status}
     except Exception:
         pass
+    from apps.patient.models import LabTestOrder
+    patient_test = LabTestOrder.objects.filter(pk=order_id).first()
+    if patient_test:
+        return {'kind': 'lab', 'status': patient_test.status, 'payment_status': patient_test.payment_status}
     try:
         from apps.vendor.models import EquipmentOrder
         e = EquipmentOrder.objects.filter(eq_order_id=order_id).first()
@@ -117,23 +126,29 @@ class GPSConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({'type': 'error', 'message': 'Invalid JSON'}))
             return
 
-        msg_type = data.get('type')
-        if msg_type != 'gps_update':
+        if not isinstance(data, dict) or data.get('type') != 'gps_update':
             return
 
-        lat = data.get('lat')
-        lng = data.get('lng')
-        if lat is None or lng is None:
-            await self.send(text_data=json.dumps({'type': 'error', 'message': 'Missing lat/lng'}))
+        user = self.scope['user']
+        if user.role != 'driver':
+            return
+        try:
+            lat = float(data['lat'])
+            lng = float(data['lng'])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return
+        if not (math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180):
             return
 
-        eta = await _persist_gps(self.dispatch_id, lat, lng)
+        result = await _persist_gps(self.dispatch_id, user.pk, lat, lng)
+        if result is None:
+            return
 
         await self.channel_layer.group_send(self.group_name, {
             'type': 'gps_update',
             'lat': lat,
             'lng': lng,
-            'eta_minutes': eta,
+            'eta_minutes': result['eta_minutes'],
             'dispatch_id': str(self.dispatch_id),
         })
 

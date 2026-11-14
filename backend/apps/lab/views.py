@@ -120,7 +120,7 @@ def _rx_verified_email(order, test_names):
           <p style="margin:8px 0 0;color:#666;">Amount: <b style="color:#F97316;">&#8377;{order.total_fee}</b></p>
         </div>
         <div style="text-align:center;">
-          <a href="http://localhost:3000/patient/test-records"
+          <a href="{settings.FRONTEND_URL}/patient/test-records"
              style="background:#F97316;color:white;padding:12px 32px;border-radius:999px;text-decoration:none;font-weight:bold;">
             Complete Payment &rarr;
           </a>

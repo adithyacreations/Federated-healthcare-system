@@ -6,6 +6,7 @@ from datetime import date, datetime
 from uuid import UUID
 
 from django.contrib.auth.hashers import make_password
+from django.db import transaction
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -251,43 +252,48 @@ class PatientRegisterView(APIView):
         if limit_err:
             return limit_err
 
-        login = LoginCredentials.objects.create(
-            email=d['email'],
-            phone_number=d.get('phone', ''),
-            password_hash=make_password(d['password']),
-            role='patient',
-            is_active=True,
-            is_approved=True,
-        )
+        with transaction.atomic():
+            login, created = LoginCredentials.objects.get_or_create(
+                email=d['email'],
+                defaults={
+                    'phone_number': d.get('phone', ''),
+                    'password_hash': make_password(d['password']),
+                    'role': 'patient',
+                    'is_active': True,
+                    'is_approved': True,
+                },
+            )
+            if not created:
+                return err('Validation failed', {'email': ['An account with this email already exists']})
 
-        # BMI calculation
-        bmi = None
-        if d.get('height_cm') and d.get('weight_kg'):
-            h = float(d['height_cm']) / 100
-            bmi = round(float(d['weight_kg']) / (h ** 2), 2)
+            # BMI calculation
+            bmi = None
+            if d.get('height_cm') and d.get('weight_kg'):
+                h = float(d['height_cm']) / 100
+                bmi = round(float(d['weight_kg']) / (h ** 2), 2)
 
-        patient = PatientRegistration.objects.create(
-            login_id=login,
-            full_name=d['full_name'],
-            dob=d['dob'],
-            gender=d.get('gender', ''),
-            blood_group=d.get('blood_group', ''),
-            height_cm=d.get('height_cm'),
-            weight_kg=d.get('weight_kg'),
-            bmi=bmi,
-            address=d.get('address', ''),
-            emergency_contact=d.get('emergency_contact', ''),
-        )
+            patient = PatientRegistration.objects.create(
+                login_id=login,
+                full_name=d['full_name'],
+                dob=d['dob'],
+                gender=d.get('gender', ''),
+                blood_group=d.get('blood_group', ''),
+                height_cm=d.get('height_cm'),
+                weight_kg=d.get('weight_kg'),
+                bmi=bmi,
+                address=d.get('address', ''),
+                emergency_contact=d.get('emergency_contact', ''),
+            )
 
-        patient.qr_code_url = generate_qr_code(str(patient.patient_id))
-        patient.save(update_fields=['qr_code_url'])
+            patient.qr_code_url = generate_qr_code(str(patient.patient_id))
+            patient.save(update_fields=['qr_code_url'])
 
-        # No auto-login: the patient is sent to the login page to sign in with
-        # the credentials they just created (no token issued, no session saved).
-        log_audit(login, 'patient_registered', module='auth', entity_type='PatientRegistration',
-                  entity_id=patient.patient_id)
+            # No auto-login: the patient is sent to the login page to sign in with
+            # the credentials they just created (no token issued, no session saved).
+            log_audit(login, 'patient_registered', module='auth', entity_type='PatientRegistration',
+                      entity_id=patient.patient_id)
 
-        send_welcome_email(d['email'], d['full_name'], 'patient')
+            transaction.on_commit(lambda: send_welcome_email(d['email'], d['full_name'], 'patient'), robust=True)
 
         return ok('Registration successful! Please log in.', {
             'email': login.email,

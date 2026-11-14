@@ -6,6 +6,7 @@ cbor2==6.0.1
 certifi==2026.4.22
 cffi==2.0.0
 channels>=4.0.0
+channels-redis==4.3.0
 charset-normalizer==3.4.7
 cloudinary==1.36.0
 colorama==0.4.6

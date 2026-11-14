@@ -413,7 +413,7 @@ class GenerateQRTokenView(APIView):
             short_code=generate_short_code(),
         )
 
-        qr_url = f"http://localhost:3000/patient/qr/{consent.consent_id}"
+        qr_url = f"{settings.FRONTEND_URL}/patient/qr/{consent.consent_id}"
         qr_image = generate_qr(qr_url)
 
         return ok('QR token generated', {

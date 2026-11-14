@@ -1,16 +1,66 @@
 from pathlib import Path
 from datetime import timedelta
 import os
+from urllib.parse import urlsplit
 import dj_database_url
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-fallback-key')
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+def env_list(name, default=''):
+    return [item.strip() for item in os.getenv(name, default).split(',') if item.strip()]
+
+
+def env_flag(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {'1', 'true', 'yes', 'on'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'off'}:
+        return False
+    raise ImproperlyConfigured(f'{name} must be true or false.')
+
+
+DEBUG = env_flag('DEBUG', default=True)
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY') or (
+    'django-insecure-local-development-only-key-for-federcare' if DEBUG else ''
+)
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1,[::1]' if DEBUG else '')
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000' if DEBUG else '').strip().rstrip('/')
+LOCAL_FRONTEND_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000']
+FRONTEND_ORIGINS = list(dict.fromkeys(
+    ([FRONTEND_URL] if FRONTEND_URL else []) + (LOCAL_FRONTEND_ORIGINS if DEBUG else [])
+))
+CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS', ','.join(FRONTEND_ORIGINS))
+CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+WEBSOCKET_ALLOWED_ORIGINS = CORS_ALLOWED_ORIGINS
+CORS_URLS_REGEX = r'^/(api|media)/'
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_SSL_REDIRECT = env_flag('SECURE_SSL_REDIRECT', default=not DEBUG)
+if env_flag('TRUST_PROXY_SSL_HEADER'):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+if not DEBUG:
+    if not SECRET_KEY:
+        raise ImproperlyConfigured('Set DJANGO_SECRET_KEY in production.')
+    if not ALLOWED_HOSTS or any('*' in host for host in ALLOWED_HOSTS):
+        raise ImproperlyConfigured('Set specific ALLOWED_HOSTS in production.')
+    for name, origins in (
+        ('FRONTEND_URL', [FRONTEND_URL]),
+        ('CORS_ALLOWED_ORIGINS', CORS_ALLOWED_ORIGINS),
+        ('CSRF_TRUSTED_ORIGINS', CSRF_TRUSTED_ORIGINS),
+    ):
+        for origin in origins:
+            parsed = urlsplit(origin)
+            if (parsed.scheme != 'https' or not parsed.hostname or '*' in parsed.netloc
+                    or parsed.username is not None or parsed.path or parsed.query or parsed.fragment):
+                raise ImproperlyConfigured(f'{name} must contain specific HTTPS origins in production.')
 
 INSTALLED_APPS = [
     # 'daphne' must be first for Channels 4.x runserver to handle WebSockets
@@ -75,11 +125,18 @@ TEMPLATES = [
 
 ASGI_APPLICATION = 'federcare.asgi.application'
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
+redis_url = os.getenv('REDIS_URL', '').strip()
+if redis_url:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': [redis_url]},
+        },
+    }
+elif DEBUG:
+    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
+else:
+    raise ImproperlyConfigured('Set REDIS_URL for the production Channels layer.')
 
 DATABASES = {
     'default': {
@@ -119,9 +176,6 @@ SIMPLE_JWT = {
     'ALGORITHM': 'HS256',
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
-
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
 
 # ── File storage ──────────────────────────────────────────────────────────────
 # All uploads are stored on the local filesystem (MEDIA_ROOT) and served from
@@ -167,7 +221,7 @@ STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = Path(os.getenv('DJANGO_MEDIA_ROOT') or BASE_DIR / 'media')
 
 # Ensure local media folders exist (prescriptions are stored on disk, not Cloudinary).
 os.makedirs(os.path.join(MEDIA_ROOT, 'prescriptions'), exist_ok=True)

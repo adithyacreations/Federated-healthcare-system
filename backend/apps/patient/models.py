@@ -47,7 +47,7 @@ class PatientRegistration(models.Model):
     bmi = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
     address = models.TextField(blank=True)
     emergency_contact = models.CharField(max_length=15, blank=True)
-    qr_code_url = models.CharField(max_length=500, blank=True)
+    qr_code_url = models.TextField(blank=True)
     lifestyle_data = models.JSONField(default=dict, blank=True)
     reminder_enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

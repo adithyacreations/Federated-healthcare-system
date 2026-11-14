@@ -34,6 +34,12 @@ class ConsultationChatConsumer(AsyncWebsocketConsumer):
             payload = json.loads(text_data)
         except Exception:
             return
+        if not isinstance(payload, dict) or payload.get('type') not in {'image', 'xray_result'}:
+            return
+        if payload['type'] == 'image':
+            payload['sender'] = self.scope['user'].role
+        else:
+            payload['sender'] = 'system'
         await self.channel_layer.group_send(
             self.group_name,
             {'type': 'chat_relay', 'payload': payload},

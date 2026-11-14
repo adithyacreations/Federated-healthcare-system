@@ -99,7 +99,7 @@ def send_welcome_email(to_email, full_name, role):
       FederCare is an AI-powered federated healthcare network connecting patients, doctors,
       pharmacies, and hospitals — all while keeping your data private and secure.
     </p>
-    <a href="http://localhost:3000/login"
+    <a href="{settings.FRONTEND_URL}/login"
        style="display:inline-block;background:{_BRAND};color:#ffffff;text-decoration:none;
               padding:12px 28px;border-radius:8px;font-size:15px;font-weight:bold;">
       Login to FederCare
@@ -408,7 +408,7 @@ def send_approval_email(to_email, full_name, entity_type, status):
         <p style="color:#6b7280;font-size:14px;margin:0 0 28px;">
           You can now log in and access all features available to your role.
         </p>
-        <a href="http://localhost:3000/login"
+        <a href="{settings.FRONTEND_URL}/login"
            style="display:inline-block;background:{_BRAND};color:#ffffff;text-decoration:none;
                   padding:12px 28px;border-radius:8px;font-size:15px;font-weight:bold;">
           Login to FederCare
@@ -479,7 +479,7 @@ def send_emergency_alert_email(to_email, hospital_name, patient_name, severity, 
     _send(to_email, f"🚨 Emergency Alert — Incoming Patient", html)
 
 
-def send_epidemic_alert_email(to_email, hospital_name, disease_name, alert_level, region, message):
+def send_epidemic_alert_email(to_email, hospital_name, disease_name, alert_level, region, message, connection=None):
     alert_colors = {
         'low': '#06D6A0', 'moderate': '#F59E0B',
         'high': '#EF4444', 'critical': '#7C3AED',
@@ -510,7 +510,7 @@ def send_epidemic_alert_email(to_email, hospital_name, disease_name, alert_level
     </p>
     """
     html = _base_layout(color, f"&#x1F6A8; Epidemic Alert &mdash; {disease_name}", body)
-    _send(to_email, f"🚨 Epidemic Alert: {disease_name} — FederCare", html)
+    return _send(to_email, f"🚨 Epidemic Alert: {disease_name} — FederCare", html, connection=connection)
 
 
 def send_appointment_confirmation(to_email, patient_name, doctor_name, doctor_specialization,
@@ -604,7 +604,7 @@ def send_lab_report_email(to_email, patient_name, tests_done, abnormal_flags, re
     {abnormal_html}
     <div style="margin-bottom:12px;">
       {download_btn}
-      <a href="http://localhost:3000/patient/consultations"
+      <a href="{settings.FRONTEND_URL}/patient/consultations"
          style="display:inline-block;background:{_ACCENT};color:#ffffff;text-decoration:none;
                 padding:12px 24px;border-radius:8px;font-size:14px;font-weight:bold;">
         Consult Doctor
@@ -747,7 +747,7 @@ def send_fl_reminder_email(to_email, hospital_name, round_number, deadline, comp
       Please log in to FederCare and submit your local weights before the deadline to contribute
       to the federated model improvement.
     </p>
-    <a href="http://localhost:3000/hospital"
+    <a href="{settings.FRONTEND_URL}/hospital"
        style="display:inline-block;background:{_BRAND};color:#ffffff;text-decoration:none;
               padding:12px 28px;border-radius:8px;font-size:15px;font-weight:bold;">
       Submit Weights Now
@@ -951,7 +951,7 @@ def send_medicine_order_email(to_email, patient_name, medicines, pharmacy_name,
     </div>
 
     <div style="text-align:center;margin:20px 0;">
-      <a href="http://localhost:3000/patient/medicine-orders"
+      <a href="{settings.FRONTEND_URL}/patient/medicine-orders"
          style="background:{_ORANGE};color:white;padding:12px 32px;border-radius:999px;text-decoration:none;font-weight:bold;font-size:14px;">
         Track Your Order &rarr;
       </a>
