@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /app/backend
 
 # System dependencies for psycopg2 / Pillow / cairo-backed PDF rendering /
 # cffi-based native wheels. Cairo headers are included even though pycairo
@@ -19,12 +19,16 @@ RUN apt-get update && apt-get install -y \
 # Install Python deps first so the layer is cached when only code changes.
 # Upgrade pip first so its modern resolver can untangle transitive conflicts
 # (cryptography ↔ autobahn ↔ pyOpenSSL ↔ channels ↔ daphne).
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Project source
-COPY . .
+COPY backend/ .
+COPY ml_models/ /app/ml_models/
+
+# Normalize shell scripts copied from Windows checkouts.
+RUN sed -i 's/\r$//' /app/backend/start.sh
 
 # Media directories used by uploads (Cloudinary covers prod, local for dev)
 RUN mkdir -p media/prescriptions \
@@ -33,6 +37,6 @@ RUN mkdir -p media/prescriptions \
     media/equipment_images \
     media/profile_photos
 
-EXPOSE 8000
+EXPOSE 10000
 
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["/bin/sh", "/app/backend/start.sh"]

@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 
 from django.apps import AppConfig
+from django.conf import settings
 
 
 class DoctorConfig(AppConfig):
@@ -12,21 +13,11 @@ class DoctorConfig(AppConfig):
     name = 'apps.doctor'
 
     def ready(self):
-        # Only spin up the scheduler thread in the long-running server process —
-        # not for management commands like makemigrations / migrate / shell.
-        # Under runserver's auto-reloader, RUN_MAIN is 'true' only in the child
-        # process that actually serves requests.
-        argv = sys.argv
-        is_runserver_child = 'runserver' in argv and os.environ.get('RUN_MAIN') == 'true'
-        is_server_entrypoint = not any(
-            cmd in argv for cmd in (
-                'makemigrations', 'migrate', 'shell', 'collectstatic',
-                'check', 'createsuperuser', 'send_appointment_reminders',
-                'test', 'dbshell', 'bootstrap_platform_admin',
-            )
-        ) and 'manage.py' not in argv[-1:]
-
-        if not (is_runserver_child or is_server_entrypoint):
+        # Production reminders run in one scheduled job, outside web processes.
+        # With the local autoreloader, only the serving child starts a thread.
+        if not settings.DEBUG or len(sys.argv) < 2 or sys.argv[1] != 'runserver':
+            return
+        if os.environ.get('RUN_MAIN') != 'true' and '--noreload' not in sys.argv:
             return
 
         def run_reminder_scheduler():
