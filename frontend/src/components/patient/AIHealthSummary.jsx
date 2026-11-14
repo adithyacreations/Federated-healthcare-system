@@ -158,7 +158,7 @@ const AIHealthSummary = () => {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       {/* Header */}
-      <div className="p-5 border-b border-gray-50 flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-50 p-4 sm:p-5">
         <div className="flex items-center gap-3">
           <div
             className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
@@ -242,7 +242,7 @@ const AIHealthSummary = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
           >
-            <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="text-center p-3 rounded-xl" style={{ backgroundColor: '#FFF7ED' }}>
                 <p className="font-bold text-lg" style={{ color: '#F97316' }}>
                   {summary.stats?.total_consultations || 0}
@@ -278,7 +278,7 @@ const AIHealthSummary = () => {
               ))}
             </div>
 
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3">
               <p className="text-xs text-gray-400">
                 {summary.is_demo ? '📋 Sample summary' : '🧠 Gemini AI'}
                 {' · '}

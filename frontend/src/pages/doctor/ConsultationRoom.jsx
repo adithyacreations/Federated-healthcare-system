@@ -252,10 +252,10 @@ const ConsultationRoom = () => {
 
   // ─── Render — full-screen focus layout ──────────────────────
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#111111', overflow: 'hidden' }}>
+    <div className="flex min-h-[100dvh] flex-col bg-[#111111] lg:h-[100dvh] lg:min-h-0 lg:flex-row lg:overflow-hidden">
       {/* ─── Video (65%) ─────────────────────────────────────── */}
-      <div style={{ flex: '0 0 65%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-        <div style={{ flex: 1, backgroundColor: '#000' }}>
+      <div className="relative flex min-w-0 flex-col lg:flex-[0_0_65%]">
+        <div className="h-[clamp(15rem,42dvh,28rem)] bg-black lg:h-auto lg:min-h-0 lg:flex-1">
           {consultation.jitsi_room_id ? (
             <JitsiFrame roomId={consultation.jitsi_room_id} />
           ) : (
@@ -266,7 +266,7 @@ const ConsultationRoom = () => {
         </div>
 
         {/* Bottom info bar */}
-        <div style={{ height: 60, backgroundColor: '#1A1A1A', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 16 }}>
+        <div className="flex min-h-[60px] flex-wrap items-center gap-x-3 gap-y-1 bg-[#1A1A1A] px-3 py-2 sm:px-5">
           <Link
             to="/doctor/consultations"
             className="inline-flex items-center gap-1.5 text-white/80 hover:text-white text-sm"
@@ -284,7 +284,7 @@ const ConsultationRoom = () => {
       </div>
 
       {/* ─── Right panel (35%) ───────────────────────────────── */}
-      <div style={{ flex: '0 0 35%', backgroundColor: '#FAF7F2', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="flex min-w-0 flex-1 flex-col bg-[#FAF7F2] lg:flex-[0_0_35%] lg:overflow-hidden">
         {/* Header */}
         <div style={{ backgroundColor: 'white', padding: '14px 16px', borderBottom: '1px solid #E5E5E5', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: '50%', backgroundColor: '#F97316', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0 }}>

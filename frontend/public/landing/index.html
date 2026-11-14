@@ -1461,6 +1461,38 @@
             .fc-footer4-bottom { justify-content: center; text-align: center; }
             .fc-footer4-copyright, .fc-footer4-credit { order: 0; width: 100%; }
         }
+
+        #home { overflow-x: clip; }
+        section[id] { scroll-margin-top: 72px; }
+        .fc-footer4-contact a, .fc-faq-email { overflow-wrap: anywhere; }
+
+        @media (max-width: 1023px) {
+            #menu-toggle {
+                display: grid;
+                place-items: center;
+                width: 44px;
+                height: 44px;
+            }
+            #menu {
+                top: 100%;
+                max-height: min(24rem, calc(100dvh - 5.5rem));
+                overflow-y: auto;
+                visibility: hidden;
+                opacity: 0;
+            }
+            #menu-toggle[aria-expanded="true"] + #menu {
+                visibility: visible;
+                opacity: 1;
+            }
+            #menu a { display: block; }
+        }
+
+        @media (max-width: 639px) {
+            #home .fc-hero-description { padding-inline: 0; }
+            #home .fc-hero-decoration { display: none; }
+            .fc-about-img-blob-1, .fc-about-img-blob-2 { display: none; }
+            .fc-footer4::before, .fc-footer4::after { width: 85%; }
+        }
     </style>
 </head>
 
@@ -1474,11 +1506,12 @@
                     <span class="fc-mark"><i class="ri-pulse-line"></i></span>
                     Feder<span class="fc-accent">Care</span>
                 </a>
-                <div class="text-3xl mt-1 cursor-pointer block lg:hidden" id="menu-toggle">
-                    <i class="ri-menu-line"></i>
-                </div>
-                <nav id="menu"
-                    class="lg:bg-secondary bg-black-300 lg:rounded-[50px] lg:static absolute left-0 top-16 z-50 w-full max-h-0 overflow-hidden opacity-0 invisible lg:max-h-full lg:opacity-100 lg:visible lg:w-auto transition-all duration-500 ease-linear">
+                <button type="button" class="text-3xl cursor-pointer lg:hidden" id="menu-toggle"
+                    aria-label="Toggle navigation" aria-expanded="false" aria-controls="menu">
+                    <i class="ri-menu-line" aria-hidden="true"></i>
+                </button>
+                <nav id="menu" aria-label="Main navigation"
+                    class="lg:bg-secondary bg-black-300 lg:rounded-[50px] lg:static absolute left-0 z-50 w-full lg:w-auto">
                     <ul class="flex lg:flex-row flex-col">
                         <li class="border-b border-b-black-100 lg:border-b-0">
                             <a href="#how" class="text-[#dedede] font-medium font-bricolage px-5 py-2.5 inline-block hover:text-primary transition-all duration-500">How It Works</a>
@@ -1529,7 +1562,7 @@
                     </span>
                 </div>
 
-                <p class="text-xl leading-7 mb-[5px] px-15 text-black-100 mt-4">
+                <p class="fc-hero-description text-xl leading-7 mb-[5px] px-15 text-black-100 mt-4">
                     Privacy-preserving federated learning platform connecting hospitals,
                     doctors and patients through intelligent AI.
                 </p>
@@ -1537,10 +1570,10 @@
                     <a href="/login" class="btn bg-primary text-secondary border-primary hover:bg-black-200 hover:text-white">Get Started</a>
                     <a href="/login" class="btn bg-black-200 text-white border-black-200 hover:text-primary">Login</a>
                 </div>
-                <div class="absolute lg:right-[-25%] top-1/2 right-0">
+                <div class="fc-hero-decoration absolute lg:right-[-25%] top-1/2 right-0">
                     <img src="assets/images/shapes/shape1.png" alt="Shape" class="lg:max-w-[300px] max-w-[70px]">
                 </div>
-                <div class="absolute lg:-left-[30%] top-[10%] left-0">
+                <div class="fc-hero-decoration absolute lg:-left-[30%] top-[10%] left-0">
                     <img src="assets/images/shapes/shape2.png" alt="Shape" class="lg:max-w-[200px] max-w-15">
                 </div>
             </div>
@@ -2451,7 +2484,7 @@
                     <a href="/login" class="btn bg-primary text-secondary border-primary hover:bg-black-200 hover:text-white">
                         Login to platform <i class="ri-login-circle-line"></i>
                     </a>
-                    <p class="text-white mt-4">Prefer email? <a href="mailto:federcaresupport@gmail.com" class="text-primary">federcaresupport@gmail.com</a></p>
+                    <p class="text-white mt-4">Prefer email? <a href="mailto:federcaresupport@gmail.com" class="fc-faq-email text-primary">federcaresupport@gmail.com</a></p>
                 </div>
 
                 <div class="flex flex-col gap-[15px] lg:pl-7.5">

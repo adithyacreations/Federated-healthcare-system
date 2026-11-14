@@ -739,11 +739,7 @@ class AllUsersView(APIView):
 
     def get(self, request):
         from apps.hospital.models import HospitalRegistration
-        from apps.doctor.models import DoctorRegistration
-        from apps.patient.models import PatientRegistration
-        from apps.pharmacy.models import PharmacistRegistration
         from apps.vendor.models import VendorRegistration
-        from apps.lab.models import LabTechRegistration
         from apps.emergency.models import AmbulanceDriverRegistration
 
         def base(login):
@@ -763,69 +759,12 @@ class AllUsersView(APIView):
                       'approval_status': h.approval_status})
             hospital_admins.append(d)
 
-        doctors = []
-        for doc in DoctorRegistration.objects.select_related('login_id', 'hospital_id').all():
-            d = base(doc.login_id)
-            d.update({'full_name': doc.full_name, 'specialization': doc.specialization,
-                      'hospital_name': doc.hospital_id.hospital_name})
-            doctors.append(d)
-
-        patients = []
-        patient_qs = PatientRegistration.objects.select_related('login_id').prefetch_related(
-            'risk_assessments', 'ehr_records'
-        ).all()
-        for p in patient_qs:
-            d = base(p.login_id)
-            latest_risk = p.risk_assessments.first()
-            ehr_records = list(p.ehr_records.all())
-            ehr_by_type = {}
-            for r in ehr_records:
-                ehr_by_type[r.record_type] = ehr_by_type.get(r.record_type, 0) + 1
-            recent_ehr = [
-                {
-                    'record_id': str(r.record_id),
-                    'record_type': r.record_type,
-                    'title': r.title,
-                    'recorded_at': r.recorded_at.isoformat(),
-                }
-                for r in ehr_records[:5]
-            ]
-            d.update({
-                'patient_id': str(p.patient_id),
-                'full_name': p.full_name,
-                'blood_group': p.blood_group,
-                'gender': p.gender,
-                'dob': p.dob.isoformat() if p.dob else None,
-                'bmi': float(p.bmi) if p.bmi else None,
-                'risk_level': latest_risk.risk_level if latest_risk else None,
-                'diabetes_risk': float(latest_risk.diabetes_risk) if latest_risk and latest_risk.diabetes_risk else None,
-                'heart_risk': float(latest_risk.heart_risk) if latest_risk and latest_risk.heart_risk else None,
-                'hypertension_risk': float(latest_risk.hypertension_risk) if latest_risk and latest_risk.hypertension_risk else None,
-                'ehr_count': len(ehr_records),
-                'ehr_by_type': ehr_by_type,
-                'recent_ehr': recent_ehr,
-            })
-            patients.append(d)
-
-        pharmacists = []
-        for ph in PharmacistRegistration.objects.select_related('login_id').all():
-            d = base(ph.login_id)
-            d.update({'full_name': ph.full_name, 'pharmacy_name': ph.pharmacy_name,
-                      'approval_status': ph.approval_status})
-            pharmacists.append(d)
-
         vendors = []
         for v in VendorRegistration.objects.select_related('login_id').all():
             d = base(v.login_id)
             d.update({'company_name': v.company_name, 'contact_name': v.contact_name,
                       'approval_status': v.approval_status})
             vendors.append(d)
-
-        lab_techs = []
-        for lt in LabTechRegistration.objects.select_related('login_id', 'hospital_id').all():
-            d = base(lt.login_id)
-            d.update({'full_name': lt.full_name, 'hospital_name': lt.hospital_id.hospital_name})
-            lab_techs.append(d)
 
         drivers = []
         for dr in AmbulanceDriverRegistration.objects.select_related('login_id', 'hospital_id').all():
@@ -835,22 +774,16 @@ class AllUsersView(APIView):
 
         return ok('Users fetched', {
             'hospital_admins': hospital_admins,
-            'doctors': doctors,
-            'patients': patients,
-            'pharmacists': pharmacists,
             'vendors': vendors,
-            'lab_techs': lab_techs,
             'drivers': drivers,
-            'total': (len(hospital_admins) + len(doctors) + len(patients)
-                      + len(pharmacists) + len(vendors) + len(lab_techs) + len(drivers)),
+            'total': len(hospital_admins) + len(vendors) + len(drivers),
         })
 
 
 # ─── Super Admin: Platform Suspend / Terminate ─────────────────────────────────
 
 class PlatformActionView(APIView):
-    """Super-admin suspend/terminate of a platform account (hospital / vendor /
-    patient). Keyed by the central login_id (the identifier the users directory
+    """Super-admin suspend/terminate of a hospital or vendor account. Keyed by the central login_id (the identifier the users directory
     exposes). Both actions deactivate the login; a role-specific email is sent."""
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
@@ -859,23 +792,21 @@ class PlatformActionView(APIView):
         if action not in ('suspend', 'terminate', 'resume'):
             return err('Invalid action!')
 
+        target_role = {'hospital': 'hospital_admin', 'vendor': 'vendor'}.get(entity_type)
+        if target_role is None:
+            return err('Invalid entity type!')
+
         try:
-            login = LoginCredentials.objects.get(login_id=login_id)
+            login = LoginCredentials.objects.get(login_id=login_id, role=target_role)
         except LoginCredentials.DoesNotExist:
             return err('Account not found!', status=404)
 
         if entity_type == 'hospital':
             prof = getattr(login, 'hospital_profile', None)
             entity_name = prof.hospital_name if prof else login.email
-        elif entity_type == 'vendor':
+        else:
             prof = getattr(login, 'vendor_profile', None)
             entity_name = (getattr(prof, 'company_name', None) if prof else None) or login.email
-        elif entity_type == 'patient':
-            prof = getattr(login, 'patient_profile', None)
-            entity_name = (getattr(prof, 'full_name', None) if prof else None) or login.email
-        else:
-            return err('Invalid entity type!')
-
         # suspend / terminate block sign-in; resume restores it.
         login.is_active = (action == 'resume')
         login.save(update_fields=['is_active', 'updated_at'])
@@ -907,7 +838,7 @@ class PlatformActionView(APIView):
         """Welcome-back email when a platform account is reactivated."""
         from email_utils import send_email, clean_name_for_email
 
-        type_icons = {'hospital': '🏥', 'vendor': '🏪', 'patient': '👤'}
+        type_icons = {'hospital': '🏥', 'vendor': '🏪'}
         try:
             send_email(
                 to_email=email,
@@ -1216,7 +1147,7 @@ class PasswordResetRequestView(APIView):
     authentication_classes = []
 
     def post(self, request):
-        import random
+        import secrets
         from django.core.cache import cache
         from email_utils import send_email
 
@@ -1224,14 +1155,12 @@ class PasswordResetRequestView(APIView):
         if not email:
             return err('Email is required')
 
-        try:
-            LoginCredentials.objects.get(email=email)
-        except LoginCredentials.DoesNotExist:
-            # Same response either way — don't leak which emails exist.
-            return ok('If this email exists, an OTP has been sent!')
+        # Use the same public response for unknown accounts and delivery failures.
+        response = ok('If this email is registered, you should receive a reset code.')
+        if not LoginCredentials.objects.filter(email=email).exists():
+            return response
 
-        otp = str(random.randint(100000, 999999))
-        cache.set(f'password_reset_otp_{email}', otp, timeout=600)  # 10 minutes
+        otp = str(100000 + secrets.randbelow(900000))
 
         html = f"""
         <div style="font-family: Arial; max-width: 600px; margin: 0 auto;">
@@ -1257,12 +1186,10 @@ class PasswordResetRequestView(APIView):
             </div>
         </div>
         """
-        try:
-            send_email(email, 'FederCare: Password Reset OTP', html)
-        except Exception as e:
-            print(f'OTP email error: {e}')
+        if send_email(email, 'FederCare: Password Reset OTP', html):
+            cache.set(f'password_reset_otp_{email}', otp, timeout=600)
 
-        return ok('OTP sent to your email!')
+        return response
 
 
 class PasswordResetVerifyView(APIView):

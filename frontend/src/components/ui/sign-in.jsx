@@ -93,18 +93,18 @@ const AnimatedSignIn = () => {
   });
 
   return (
-    <div className="min-h-screen w-full" style={{ backgroundColor: CREAM, fontFamily: BODY_FONT }}>
-      <div className="flex min-h-screen items-center justify-center p-4 md:p-6">
+    <div className="min-h-[100dvh] w-full" style={{ backgroundColor: CREAM, fontFamily: BODY_FONT }}>
+      <div className="flex min-h-[100dvh] items-center justify-center p-4 md:p-6">
         <div
-          className="w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-xl shadow-gray-200 transition-all duration-500"
+          className="w-full max-w-md lg:max-w-6xl overflow-hidden rounded-2xl bg-white shadow-xl shadow-gray-200 transition-all duration-500"
           style={{
             opacity: formVisible ? 1 : 0,
             transform: formVisible ? 'scale(1)' : 'scale(0.95)',
           }}
         >
-          <div className="flex flex-col md:flex-row">
+          <div className="flex flex-col lg:flex-row">
             {/* Left — medical image + stat collage */}
-            <div className="hidden md:block w-full md:w-3/5 p-6" style={{ backgroundColor: CREAM }}>
+            <div className="hidden lg:block w-full lg:w-3/5 p-6" style={{ backgroundColor: CREAM }}>
               <div className="grid grid-cols-2 grid-rows-3 gap-4 h-full overflow-hidden">
                 {/* Top left — telemedicine */}
                 <div className="overflow-hidden rounded-xl">
@@ -148,7 +148,7 @@ const AnimatedSignIn = () => {
 
             {/* Right — sign-in form */}
             <div
-              className="w-full md:w-2/5 p-8 md:p-12 bg-white text-gray-900"
+              className="w-full min-w-0 p-5 sm:p-8 lg:w-2/5 lg:p-10 bg-white text-gray-900"
               style={{
                 transform: formVisible ? 'translateX(0)' : 'translateX(20px)',
                 opacity: formVisible ? 1 : 0,
@@ -184,7 +184,7 @@ const AnimatedSignIn = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="username"
-                    className="block w-full rounded-md border border-gray-300 bg-white py-3 px-4 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 sm:text-sm"
+                    className="block w-full rounded-md border border-gray-300 bg-white py-3 px-4 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 text-base"
                     style={{ '--tw-ring-color': ORANGE }}
                     onFocus={(e) => { e.target.style.borderColor = ORANGE; }}
                     onBlur={(e) => { e.target.style.borderColor = '#d1d5db'; }}
@@ -203,7 +203,7 @@ const AnimatedSignIn = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       autoComplete="current-password"
-                      className="block w-full rounded-md border border-gray-300 bg-white py-3 px-4 pr-10 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 sm:text-sm"
+                      className="block w-full rounded-md border border-gray-300 bg-white py-3 px-4 pr-12 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 text-base"
                       style={{ '--tw-ring-color': ORANGE }}
                       onFocus={(e) => { e.target.style.borderColor = ORANGE; }}
                       onBlur={(e) => { e.target.style.borderColor = '#d1d5db'; }}
@@ -212,7 +212,7 @@ const AnimatedSignIn = () => {
                     />
                     <button
                       type="button"
-                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500"
+                      className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-gray-500"
                       onClick={() => setShowPassword(!showPassword)}
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
@@ -229,7 +229,7 @@ const AnimatedSignIn = () => {
                   <button
                     type="button"
                     onClick={() => setShowResetModal(true)}
-                    className="text-sm font-medium hover:underline"
+                    className="min-h-[44px] text-sm font-medium hover:underline"
                     style={{ color: ORANGE }}
                   >
                     Forgot the password?
@@ -270,10 +270,10 @@ const AnimatedSignIn = () => {
                   <div className="flex-grow border-t border-gray-300" />
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-center text-sm">
-                  <Link to="/register/patient" className="py-1 hover:underline font-medium" style={{ color: ORANGE }}>Patient</Link>
-                  <Link to="/register/hospital" className="py-1 hover:underline font-medium" style={{ color: ORANGE }}>Hospital</Link>
-                  <Link to="/register/pharmacist" className="py-1 hover:underline font-medium" style={{ color: ORANGE }}>Pharmacy</Link>
-                  <Link to="/register/vendor" className="py-1 hover:underline font-medium" style={{ color: ORANGE }}>Vendor</Link>
+                  <Link to="/register/patient" className="flex min-h-[44px] items-center justify-center hover:underline font-medium" style={{ color: ORANGE }}>Patient</Link>
+                  <Link to="/register/hospital" className="flex min-h-[44px] items-center justify-center hover:underline font-medium" style={{ color: ORANGE }}>Hospital</Link>
+                  <Link to="/register/pharmacist" className="flex min-h-[44px] items-center justify-center hover:underline font-medium" style={{ color: ORANGE }}>Pharmacy</Link>
+                  <Link to="/register/vendor" className="flex min-h-[44px] items-center justify-center hover:underline font-medium" style={{ color: ORANGE }}>Vendor</Link>
                 </div>
               </form>
             </div>

@@ -65,7 +65,13 @@ const EpidemicPage = () => {
         `/api/federated/epidemic/${selectedEpidemic.trend_id}/resolve/`,
         { resolution_note: resolutionNote || 'Epidemic resolved by admin' },
       );
-      toast.success(res.data?.message || 'Epidemic resolved.');
+      const message = res.data?.message || 'Epidemic resolved.';
+      const { emails_sent = 0, emails_failed = 0 } = res.data?.data || {};
+      if (emails_failed > 0) {
+        toast.error(`${message} Email sent to ${emails_sent} of ${emails_sent + emails_failed} recipients.`);
+      } else {
+        toast.success(message);
+      }
       closeResolveModal();
       epidemic.refetch();
     } catch (err) {

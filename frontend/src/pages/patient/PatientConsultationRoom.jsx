@@ -105,9 +105,9 @@ export default function PatientConsultationRoom() {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#111111', overflow: 'hidden' }}>
+    <div className="flex min-h-[100dvh] flex-col bg-[#111111] lg:h-[100dvh] lg:min-h-0 lg:flex-row lg:overflow-hidden">
       {/* Video */}
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div className="relative h-[clamp(15rem,42dvh,28rem)] min-w-0 lg:h-auto lg:flex-1">
         <JitsiFrame roomId={roomId} name={patientName} />
         <button
           onClick={() => navigate('/patient/consultations')}
@@ -122,7 +122,7 @@ export default function PatientConsultationRoom() {
       </div>
 
       {/* Side panel */}
-      <div style={{ width: 360, flexShrink: 0, backgroundColor: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="flex min-w-0 flex-1 flex-col bg-white lg:w-[360px] lg:flex-none lg:overflow-hidden">
         {/* Header */}
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #E5E5E5', display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: '50%', backgroundColor: '#F97316', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>

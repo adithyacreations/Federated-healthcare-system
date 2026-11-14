@@ -146,9 +146,9 @@ const MedicineCard = ({ medicine, inCart, cartQuantity, hasRx, onAddToCart, onUp
             </button>
           ) : (
             <div className="flex items-center gap-1">
-              <button onClick={() => onUpdateQuantity(medicine, -1)} className="w-6 h-6 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-sm">−</button>
+              <button onClick={() => onUpdateQuantity(medicine, -1)} className="w-11 h-11 shrink-0 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-sm">−</button>
               <span className="font-bold text-orange-600 w-5 text-center text-sm">{cartQuantity}</span>
-              <button onClick={() => onUpdateQuantity(medicine, 1)} className="w-6 h-6 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold text-sm">+</button>
+              <button onClick={() => onUpdateQuantity(medicine, 1)} className="w-11 h-11 shrink-0 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold text-sm">+</button>
             </div>
           )}
         </div>
@@ -508,7 +508,7 @@ const OrderMedicinePage = () => {
           <div className="relative max-w-xl mb-4">
             <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-500 w-4 h-4" />
             <input
-              className="w-full bg-white border border-hairline rounded-full pl-11 pr-4 py-3 text-sm focus:outline-none focus:border-orange-400 transition"
+              className="w-full bg-white border border-hairline rounded-full pl-11 pr-4 py-3 text-base focus:outline-none focus:border-orange-400 transition"
               placeholder="Search medicines…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -520,7 +520,7 @@ const OrderMedicinePage = () => {
             <div className="flex flex-wrap gap-2 mb-3">
               <button
                 onClick={() => setSelectedPharmacy('')}
-                className={`px-3.5 py-1.5 rounded-full text-sm font-medium border transition ${
+                className={`min-h-[44px] max-w-full break-words px-3.5 py-1.5 rounded-full text-sm font-medium border transition ${
                   !selectedPharmacy ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-muted border-hairline hover:border-orange-400'
                 }`}
               >
@@ -530,7 +530,7 @@ const OrderMedicinePage = () => {
                 <button
                   key={p.pharmacy_id}
                   onClick={() => setSelectedPharmacy(p.pharmacy_id)}
-                  className={`px-3.5 py-1.5 rounded-full text-sm font-medium border transition ${
+                  className={`min-h-[44px] max-w-full break-words px-3.5 py-1.5 rounded-full text-sm font-medium border transition ${
                     selectedPharmacy === p.pharmacy_id ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-muted border-hairline hover:border-orange-400'
                   }`}
                 >
@@ -546,7 +546,7 @@ const OrderMedicinePage = () => {
               <button
                 key={c.value}
                 onClick={() => setCategoryFilter(c.value)}
-                className={`px-3.5 py-1.5 rounded-full text-sm font-medium border transition ${
+                className={`min-h-[44px] max-w-full break-words px-3.5 py-1.5 rounded-full text-sm font-medium border transition ${
                   categoryFilter === c.value ? 'bg-ink text-white border-ink' : 'bg-white text-muted border-hairline hover:border-gray-300'
                 }`}
               >
@@ -555,7 +555,7 @@ const OrderMedicinePage = () => {
             ))}
             <button
               onClick={() => setShowRxOnly((v) => !v)}
-              className={`px-3.5 py-1.5 rounded-full text-sm font-semibold border transition ${
+              className={`min-h-[44px] max-w-full break-words px-3.5 py-1.5 rounded-full text-sm font-semibold border transition ${
                 showRxOnly ? 'bg-red-500 text-white border-red-500' : 'bg-white text-muted border-hairline hover:border-red-300'
               }`}
             >
@@ -582,7 +582,7 @@ const OrderMedicinePage = () => {
               <button onClick={clearFilters} className="text-orange-500 text-sm mt-2 underline">Clear filters</button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,10rem),1fr))] gap-3">
               {filteredMedicines.map((medicine) => (
                 <MedicineCard
                   key={medicine.inventory_id}
@@ -609,9 +609,9 @@ const OrderMedicinePage = () => {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 200, damping: 24 }}
-            className="fixed bottom-0 left-0 right-0 bg-white border-t border-hairline shadow-[0_-8px_30px_rgba(0,0,0,0.08)] p-4 z-40"
+            className="fixed bottom-0 left-0 right-0 bg-white border-t border-hairline shadow-[0_-8px_30px_rgba(0,0,0,0.08)] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 pr-24 sm:pl-4 z-40"
           >
-            <div className="max-w-4xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
+            <div className="max-w-4xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                   <p className="font-semibold text-ink text-sm sm:text-base whitespace-nowrap">{cartCount} items</p>
@@ -624,7 +624,7 @@ const OrderMedicinePage = () => {
                 </div>
                 <p className="font-bricolage text-orange-500 font-extrabold text-lg sm:text-xl">₹{cartTotal.toFixed(2)}</p>
               </div>
-              <button onClick={() => setShowCartModal(true)} className="btn-orange px-4 py-2 sm:px-6 sm:py-2.5 text-sm sm:text-base whitespace-nowrap flex-shrink-0">
+              <button onClick={() => setShowCartModal(true)} className="btn-orange min-h-[44px] shrink-0 px-2 py-2 text-sm sm:px-6 sm:text-base">
                 Checkout →
               </button>
             </div>
@@ -661,18 +661,18 @@ const OrderMedicinePage = () => {
                 <div className="space-y-2">
                   {group.medicines.map((item) => (
                     <div key={item.inventory_id} className="bg-cream border border-hairline rounded-xl p-2 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-ink truncate">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 break-words font-medium text-ink">
                           {item.name}
                           {item.requires_prescription && <span className="ml-1 text-xs text-red-500">Prescription</span>}
                         </span>
-                        <button onClick={() => removeFromCart(item.inventory_id)} className="text-gray-400 hover:text-red-500"><FiX /></button>
+                        <button onClick={() => removeFromCart(item.inventory_id)} aria-label={`Remove ${item.name}`} className="flex h-11 w-11 shrink-0 items-center justify-center text-gray-400 hover:text-red-500"><FiX /></button>
                       </div>
                       <div className="flex items-center justify-between mt-1">
                         <div className="flex items-center gap-2">
-                          <button onClick={() => updateQuantity(item, -1)} className="w-6 h-6 rounded bg-orange-100 text-orange-600"><FiMinus className="mx-auto w-3 h-3" /></button>
+                          <button onClick={() => updateQuantity(item, -1)} className="w-11 h-11 shrink-0 rounded bg-orange-100 text-orange-600"><FiMinus className="mx-auto w-3 h-3" /></button>
                           <span>{item.quantity}</span>
-                          <button onClick={() => updateQuantity(item, 1)} className="w-6 h-6 rounded bg-orange-500 text-white"><FiPlus className="mx-auto w-3 h-3" /></button>
+                          <button onClick={() => updateQuantity(item, 1)} className="w-11 h-11 shrink-0 rounded bg-orange-500 text-white"><FiPlus className="mx-auto w-3 h-3" /></button>
                         </div>
                         <span className="text-muted">₹{item.price * item.quantity}</span>
                       </div>
@@ -722,7 +722,9 @@ const OrderMedicinePage = () => {
               <input
                 type="tel"
                 inputMode="numeric"
-                className="flex-1 px-3.5 py-2.5 text-sm outline-none"
+                aria-label="Delivery phone number"
+                autoComplete="tel-national"
+                className="min-w-0 flex-1 px-2 py-2.5 text-base outline-none sm:px-3.5"
                 placeholder="Enter 10-digit number"
                 maxLength={10}
                 value={deliveryPhone}
@@ -731,7 +733,7 @@ const OrderMedicinePage = () => {
                   if (digits.length <= 10) setDeliveryPhone(digits);
                 }}
               />
-              <span className="px-3 flex items-center text-[11px] flex-shrink-0" style={{ color: deliveryPhone.length === 10 ? '#22C55E' : '#9CA3AF' }}>
+              <span className="px-2 flex items-center text-[11px] flex-shrink-0 sm:px-3" style={{ color: deliveryPhone.length === 10 ? '#22C55E' : '#9CA3AF' }}>
                 {deliveryPhone.length}/10{deliveryPhone.length === 10 ? ' ✓' : ''}
               </span>
             </div>
@@ -741,7 +743,9 @@ const OrderMedicinePage = () => {
           <div>
             <p className="font-medium text-ink mb-1 text-sm">📍 Delivery Address *</p>
             <textarea
-              className="input-field h-20 resize-none w-full"
+              aria-label="Delivery address"
+              autoComplete="street-address"
+              className="input-field h-20 resize-none w-full text-base"
               placeholder="Full delivery address…"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
@@ -754,7 +758,7 @@ const OrderMedicinePage = () => {
                 <span className="text-2xl">⚕️</span>
                 <div>
                   <p className="font-semibold text-orange-800">Prescription Required</p>
-                  <p className="text-xs text-orange-600">
+                  <p className="break-words text-xs text-orange-600">
                     Required for: {cart.filter((m) => m.requires_prescription).map((m) => m.name).join(', ')}
                   </p>
                 </div>
@@ -789,7 +793,7 @@ const OrderMedicinePage = () => {
             </div>
           )}
 
-          <button onClick={placeOrder} disabled={placing} className="btn-orange w-full disabled:opacity-60">
+          <button onClick={placeOrder} disabled={placing} className="btn-orange min-h-[44px] w-full disabled:opacity-60">
             {placing ? 'Placing order…' : `Place Order — ₹${cartTotal.toFixed(2)}`}
           </button>
         </div>
@@ -797,7 +801,7 @@ const OrderMedicinePage = () => {
 
       {/* Prescription approved → pay popup */}
       {showPaymentModal && approvedOrderData && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-black/50 p-4">
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}

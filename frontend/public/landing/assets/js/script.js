@@ -1,22 +1,28 @@
+const menuToggle = document.getElementById("menu-toggle");
+const menu = document.getElementById("menu");
+
+function setMenuOpen(isOpen) {
+    menuToggle.setAttribute("aria-expanded", String(isOpen));
+}
+
+menuToggle.addEventListener("click", () => {
+    setMenuOpen(menuToggle.getAttribute("aria-expanded") !== "true");
+});
+
+menu.addEventListener("click", (event) => {
+    if (event.target.closest("a")) setMenuOpen(false);
+});
+
+matchMedia("(min-width: 1024px)").addEventListener("change", () => setMenuOpen(false));
+
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && menuToggle.getAttribute("aria-expanded") === "true") {
+        setMenuOpen(false);
+        menuToggle.focus();
+    }
+});
+
 window.onload = function () {
-
-    // toggle mobile menu
-    const menuToggle = document.getElementById("menu-toggle")
-    const menu = document.getElementById("menu")
-
-    let isMenuOpen = false;
-    menuToggle.addEventListener("click", () => {
-        if (isMenuOpen) {
-            menu.classList.add("max-h-0", "overflow-hidden", "opacity-0", "invisible")
-            menu.classList.remove("max-h-[300px]", "overflow-auto", "opacity-100", "visible")
-            isMenuOpen = false
-        }
-        else {
-            menu.classList.remove("max-h-0", "overflow-hidden", "opacity-0", "invisible")
-            menu.classList.add("max-h-[300px]", "overflow-auto", "opacity-100", "visible")
-            isMenuOpen = true
-        }
-    })
 
     // fixed header
     const header = document.getElementById("header")

@@ -30,7 +30,8 @@ export default function FederCareChatbot() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const messagesEndRef = useRef(null);
+  const messageListRef = useRef(null);
+  const panelRef = useRef(null);
   const inputRef = useRef(null);
 
   // Drag logic for the chatbot button
@@ -39,6 +40,7 @@ export default function FederCareChatbot() {
   const dragRef = useRef({ isDragging: false, wasDragged: false, startX: 0, startY: 0, initRight: 24, initBottom: 24 });
 
   const handlePointerDown = (e) => {
+    if (isOpen) return;
     dragRef.current.isDragging = false;
     dragRef.current.wasDragged = false;
     dragRef.current.startX = e.clientX;
@@ -66,6 +68,7 @@ export default function FederCareChatbot() {
   };
 
   const handlePointerUp = (e) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
     e.currentTarget.releasePointerCapture(e.pointerId);
     if (dragRef.current.isDragging) {
       const PADDING = 24;
@@ -87,18 +90,45 @@ export default function FederCareChatbot() {
       dragRef.current.wasDragged = false;
       return;
     }
-    setIsOpen(true);
+    if (isOpen) {
+      closeChat();
+    } else {
+      setIsOpen(true);
+    }
+  };
+
+  const closeChat = () => {
+    setIsOpen(false);
+    setIsMinimized(false);
   };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+    const list = messageListRef.current;
+    if (list && messages.length > 1) list.scrollTop = list.scrollHeight;
+  }, [messages, loading, isOpen, isMinimized]);
 
   useEffect(() => {
-    if (isOpen && !isMinimized) {
-      setTimeout(() => inputRef.current?.focus(), 300);
-    }
+    const panel = panelRef.current;
+    const viewport = window.visualViewport;
+    if (!panel || !viewport || !isOpen || isMinimized) return;
+
+    const updateViewport = () => {
+      const keyboardInset = Math.max(0, window.innerHeight - viewport.offsetTop - viewport.height);
+      panel.style.setProperty('--chat-bottom', `${keyboardInset ? keyboardInset + 8 : 72}px`);
+      panel.style.setProperty('--chat-height', `${viewport.height}px`);
+    };
+    updateViewport();
+    viewport.addEventListener('resize', updateViewport);
+    viewport.addEventListener('scroll', updateViewport);
+    return () => {
+      viewport.removeEventListener('resize', updateViewport);
+      viewport.removeEventListener('scroll', updateViewport);
+    };
   }, [isOpen, isMinimized]);
+
+  useEffect(() => {
+    if (!input && inputRef.current) inputRef.current.style.height = 'auto';
+  }, [input]);
 
   const sendMessage = async (overrideText) => {
     const userMessage = (overrideText ?? input).trim();
@@ -192,72 +222,74 @@ export default function FederCareChatbot() {
 
   return (
     <>
-      {!isOpen && (
-        <button
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onClick={handleClick}
-          className="fixed z-50 w-16 h-16 rounded-full bg-orange-500 text-white shadow-2xl hover:bg-orange-600 hover:scale-110 flex items-center justify-center touch-none"
-          style={{ 
-            right: `${btnPos.right}px`, 
-            bottom: `${btnPos.bottom}px`,
-            transition: isDraggingBtn ? 'none' : 'all 0.3s ease'
-          }}
-          title="Chat with FederCare Assistant"
-        >
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-            />
-          </svg>
-          <span className="absolute top-0 right-0 w-4 h-4 bg-green-400 rounded-full border-2 border-white animate-pulse" />
-        </button>
-      )}
+      <button
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onClick={handleClick}
+        aria-label={isOpen ? 'Close chat bubble' : 'Open chat bubble'}
+        aria-expanded={isOpen}
+        className={`fixed z-[61] flex items-center justify-center rounded-full bg-orange-500 text-white shadow-2xl hover:bg-orange-600 touch-none ${isOpen ? 'h-12 w-12 sm:hidden' : 'h-16 w-16 hover:scale-110'}`}
+        style={{
+          right: isOpen ? '12px' : `${btnPos.right}px`,
+          bottom: isOpen ? 'max(12px, env(safe-area-inset-bottom))' : `${btnPos.bottom}px`,
+          transition: isOpen || isDraggingBtn ? 'none' : 'all 0.3s ease'
+        }}
+        title={isOpen ? 'Close chat bubble' : 'Chat with FederCare Assistant'}
+      >
+        {isOpen ? <span aria-hidden="true" className="text-xl">✕</span> : <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+          />
+        </svg>}
+        {!isOpen && <span className="absolute top-0 right-0 w-4 h-4 bg-green-400 rounded-full border-2 border-white animate-pulse" />}
+      </button>
 
       {isOpen && (
-        <div
-          className={`fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-gray-100 flex flex-col overflow-hidden transition-all duration-300 ${isMinimized ? 'h-16' : 'h-[600px] max-h-[calc(100vh-3rem)]'
-            }`}
+        <section
+          ref={panelRef}
+          aria-label="FederCare Assistant"
+          className={`fixed inset-x-3 z-[60] flex min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl sm:left-auto sm:right-6 sm:w-96 ${isMinimized
+            ? 'bottom-[max(72px,calc(env(safe-area-inset-bottom)+60px))] sm:bottom-6'
+            : 'bottom-[max(var(--chat-bottom,72px),calc(env(safe-area-inset-bottom)+60px))] h-[min(32rem,calc(var(--chat-height,100dvh)-84px))] sm:bottom-6 sm:h-[600px] sm:max-h-[calc(100dvh-3rem)]'
+          }`}
         >
           {/* Header */}
           <div
-            className="p-4 flex items-center justify-between flex-shrink-0"
-            style={{ backgroundColor: '#FAF7F2', borderBottom: '1px solid #E5E5E5' }}
+            className="flex shrink-0 items-center justify-between gap-2 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-4"
+            style={{backgroundColor: '#FAF7F2', borderBottom: '1px solid #E5E5E5' }}
           >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center text-xl text-white">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="w-9 h-9 shrink-0 rounded-full bg-orange-500 flex items-center justify-center text-xl text-white">
                 ⚕️
               </div>
               <div>
                 <p className="font-semibold text-sm text-black">FederCare Assistant</p>
-                <p className="text-xs flex items-center gap-1" style={{ color: '#666666' }}>
-                  <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: '#22C55E' }} />
+                <p className="text-xs flex items-center gap-1" style={{color: '#666666' }}>
+                  <span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor: '#22C55E' }} />
                   Online • AI Powered
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center">
               <button
                 onClick={() => setIsMinimized(!isMinimized)}
-                className="text-black/70 hover:text-black w-7 h-7 flex items-center justify-center rounded-lg hover:bg-black/5"
-                title={isMinimized ? 'Expand' : 'Minimize'}
+                className="text-black/70 hover:text-black w-11 h-11 flex items-center justify-center rounded-lg hover:bg-black/5"
+                aria-label={isMinimized ? 'Expand chat' : 'Minimize chat'}
+                aria-expanded={!isMinimized}
               >
                 {isMinimized ? '▲' : '▼'}
               </button>
 
               <button
-                onClick={() => {
-                  setIsOpen(false);
-                  setIsMinimized(false);
-                }}
-                className="text-black/70 hover:text-black w-7 h-7 flex items-center justify-center rounded-lg hover:bg-black/5"
-                title="Close"
+                onClick={closeChat}
+                className="text-black/70 hover:text-black w-11 h-11 flex items-center justify-center rounded-lg hover:bg-black/5"
+                aria-label="Close chat"
               >
                 ✕
               </button>
@@ -266,7 +298,7 @@ export default function FederCareChatbot() {
 
           {!isMinimized && (
             <>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+              <div ref={messageListRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-gray-50 p-3 sm:p-4">
                 {messages.map((msg, idx) => (
                   <div
                     key={idx}
@@ -279,7 +311,7 @@ export default function FederCareChatbot() {
                     )}
 
                     <div
-                      className={`max-w-xs rounded-2xl px-4 py-3 text-sm ${msg.role === 'user'
+                      className={`min-w-0 max-w-[85%] break-words rounded-2xl px-3 py-2 text-sm ${msg.role === 'user'
                         ? 'bg-orange-500 text-white rounded-tr-sm'
                         : 'bg-white text-gray-800 rounded-tl-sm shadow-sm border border-gray-200'
                         }`}
@@ -306,60 +338,60 @@ export default function FederCareChatbot() {
                       <div className="flex gap-1 items-center h-5">
                         <div
                           className="w-2 h-2 bg-orange-400 rounded-full animate-bounce"
-                          style={{ animationDelay: '0ms' }}
+                          style={{animationDelay: '0ms' }}
                         />
                         <div
                           className="w-2 h-2 bg-orange-400 rounded-full animate-bounce"
-                          style={{ animationDelay: '150ms' }}
+                          style={{animationDelay: '150ms' }}
                         />
                         <div
                           className="w-2 h-2 bg-orange-400 rounded-full animate-bounce"
-                          style={{ animationDelay: '300ms' }}
+                          style={{animationDelay: '300ms' }}
                         />
                       </div>
                     </div>
                   </div>
                 )}
 
-                <div ref={messagesEndRef} />
+                {messages.length === 1 && (
+                  <div className="pt-1">
+                    <p className="text-xs text-gray-400 mb-2">Quick questions:</p>
+                    <div className="flex gap-2 overflow-x-auto overscroll-x-contain pb-1 sm:flex-wrap">
+                      {SUGGESTIONS.map((s, i) => (
+                        <button
+                          key={i}
+                          onClick={() => sendMessage(s)}
+                          className="min-h-[44px] shrink-0 whitespace-nowrap text-xs bg-orange-50 text-orange-600 px-3 py-1.5 rounded-full hover:bg-orange-100 border border-orange-200 transition-colors"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {messages.length === 1 && (
-                <div className="px-4 pb-2 bg-gray-50">
-                  <p className="text-xs text-gray-400 mb-2">Quick questions:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {SUGGESTIONS.map((s, i) => (
-                      <button
-                        key={i}
-                        onClick={() => sendMessage(s)}
-                        className="text-xs bg-orange-50 text-orange-600 px-3 py-1.5 rounded-full hover:bg-orange-100 border border-orange-200 transition-colors"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="p-4 bg-white border-t border-gray-100">
+              <div className="shrink-0 border-t border-gray-100 bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4">
                 <div className="flex gap-2 items-end">
                   <textarea
                     ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyPress}
-                    placeholder="Ask about FederCare or medical questions..."
+                    aria-label="Message FederCare Assistant"
+                    placeholder="Type a message…"
                     rows={1}
-                    className="flex-1 resize-none border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 max-h-32"
-                    style={{ minHeight: '44px' }}
+                    className="min-w-0 flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-orange-300 focus:border-orange-400 max-h-24"
+                    style={{minHeight: '44px' }}
                     onInput={(e) => {
                       e.target.style.height = 'auto';
                       e.target.style.height =
-                        Math.min(e.target.scrollHeight, 128) + 'px';
+                        Math.min(e.target.scrollHeight, 96) + 'px';
                     }}
                   />
                   <button
                     onClick={() => sendMessage()}
+                    aria-label="Send message"
                     disabled={!input.trim() || loading}
                     className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all flex-shrink-0 ${input.trim() && !loading
                       ? 'bg-orange-500 text-white hover:bg-orange-600'
@@ -399,13 +431,13 @@ export default function FederCareChatbot() {
                     )}
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mt-2 text-center">
+                <p className="mt-2 hidden text-center text-xs text-gray-400 sm:block">
                   Powered by Gemini AI • FederCare Assistant
                 </p>
               </div>
             </>
           )}
-        </div>
+        </section>
       )}
     </>
   );

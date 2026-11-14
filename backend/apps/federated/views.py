@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from datetime import timedelta
 
+from django.core.mail import get_connection
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -905,12 +906,12 @@ class ResolveEpidemicView(APIView):
             update_fields=['is_resolved', 'resolved_at', 'resolved_by', 'resolution_note'],
         )
 
-        # Notify all non-patient staff that the alert is over.
-        staff = LoginCredentials.objects.filter(is_approved=True, is_active=True).exclude(role='patient')
-        for s in staff:
+        # Save in-app notifications independently of email delivery.
+        staff = list(LoginCredentials.objects.filter(is_approved=True, is_active=True).exclude(role='patient'))
+        for recipient in staff:
             try:
                 send_notification(
-                    s,
+                    recipient,
                     f'✅ Epidemic Resolved: {epidemic.disease_name}',
                     (
                         f'The {epidemic.disease_name} epidemic in '
@@ -920,18 +921,30 @@ class ResolveEpidemicView(APIView):
                     notif_type='alert',
                     related_id=str(epidemic.trend_id),
                 )
-                try:
-                    from email_utils import send_epidemic_resolved_email
-                    send_epidemic_resolved_email(
-                        to_email=s.email,
-                        recipient_name=s.role.replace('_', ' ').title(),
-                        disease_name=epidemic.disease_name,
-                        region=epidemic.region,
-                    )
-                except Exception as exc:
-                    logger.warning('Epidemic resolution email failed for %s: %s', s.email, exc)
             except Exception as exc:
-                logger.warning('Epidemic resolution notification failed for %s: %s', s.email, exc)
+                logger.warning('Epidemic resolution notification failed (%s)', type(exc).__name__)
+
+        from email_utils import send_epidemic_resolved_email
+
+        emails_sent = 0
+        if staff:
+            try:
+                with get_connection(timeout=10) as connection:
+                    for recipient in staff:
+                        if send_epidemic_resolved_email(
+                            to_email=recipient.email,
+                            recipient_name=recipient.role.replace('_', ' ').title(),
+                            disease_name=epidemic.disease_name,
+                            region=epidemic.region,
+                            connection=connection,
+                        ):
+                            emails_sent += 1
+            except Exception as exc:
+                logger.warning(
+                    'Epidemic resolution mail connection failed (%s, SMTP code %s)',
+                    type(exc).__name__,
+                    getattr(exc, 'smtp_code', 'unavailable'),
+                )
 
         # WebSocket broadcast (best-effort)
         try:
@@ -961,10 +974,45 @@ class ResolveEpidemicView(APIView):
             },
         )
 
-        return ok(
-            f'{epidemic.disease_name} epidemic resolved! All staff notified.',
-            EpidemicTrendSerializer(epidemic).data,
+        data = EpidemicTrendSerializer(epidemic).data
+        data['emails_sent'] = emails_sent
+        data['emails_failed'] = len(staff) - emails_sent
+        return ok(f'{epidemic.disease_name} epidemic resolved.', data)
+
+
+
+class DeleteEpidemicView(APIView):
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+
+    def delete(self, request, trend_id):
+        try:
+            epidemic = EpidemicTrend.objects.get(trend_id=trend_id)
+        except EpidemicTrend.DoesNotExist:
+            return err('Epidemic not found.', status_code=404)
+
+        epidemic_name = epidemic.disease_name
+        epidemic.delete()
+
+        log_audit(
+            login_id=request.user,
+            action='delete_epidemic_trend',
+            module='federated',
+            entity_type='EpidemicTrend',
+            entity_id=str(trend_id),
+            new_value={'disease_name': epidemic_name},
         )
+
+        # Update frontend quietly
+        try:
+            broadcast_fl_update('epidemic_deleted', {
+                'trend_id': str(trend_id),
+                'message': f'Epidemic {epidemic_name} has been removed quietly.',
+            })
+        except Exception:
+            pass
+
+        return ok(f'{epidemic_name} epidemic removed quietly.')
+
 
 
 class DeleteEpidemicView(APIView):

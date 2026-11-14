@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiUsers, FiPlus, FiRefreshCw, FiCopy } from 'react-icons/fi';
+import { FiPlus, FiCopy } from 'react-icons/fi';
 import DashboardLayout from '../../components/common/DashboardLayout';
 import Modal from '../../components/common/Modal';
 import FormInput from '../../components/auth/FormInput';
@@ -27,11 +27,11 @@ const SuspendedBadge = () => (
 );
 
 const StaffActions = ({ canSetDept, onSetDept, isActive = true, onSuspend, onResume, onTerminate }) => (
-  <div className="flex flex-col gap-2 w-full min-w-[120px]">
+  <div className="grid w-full grid-cols-2 gap-2 xl:min-w-[120px] xl:grid-cols-1">
     {canSetDept && (
       <button
         onClick={onSetDept}
-        className="w-full px-3 py-1.5 rounded-md text-xs font-semibold text-center whitespace-nowrap"
+        className="min-h-[44px] w-full rounded-md px-2 py-1.5 text-center text-xs font-semibold xl:min-h-0 xl:whitespace-nowrap xl:px-3"
         style={{ backgroundColor: '#FFF7ED', color: '#F97316', border: '1px solid #FED7AA' }}
       >
         🏥 Set Dept
@@ -40,7 +40,7 @@ const StaffActions = ({ canSetDept, onSetDept, isActive = true, onSuspend, onRes
     {isActive ? (
       <button
         onClick={onSuspend}
-        className="w-full px-3 py-1.5 rounded-md text-xs font-semibold text-center whitespace-nowrap"
+        className="min-h-[44px] w-full rounded-md px-2 py-1.5 text-center text-xs font-semibold xl:min-h-0 xl:whitespace-nowrap xl:px-3"
         style={{ backgroundColor: '#FFF7ED', color: '#F97316', border: '1px solid #FED7AA' }}
       >
         🔴 Suspend
@@ -48,7 +48,7 @@ const StaffActions = ({ canSetDept, onSetDept, isActive = true, onSuspend, onRes
     ) : (
       <button
         onClick={onResume}
-        className="w-full px-3 py-1.5 rounded-md text-xs font-semibold text-center whitespace-nowrap"
+        className="min-h-[44px] w-full rounded-md px-2 py-1.5 text-center text-xs font-semibold xl:min-h-0 xl:whitespace-nowrap xl:px-3"
         style={{ backgroundColor: '#F0FDF4', color: '#16A34A', border: '1px solid #86EFAC' }}
       >
         ✅ Resume
@@ -56,7 +56,7 @@ const StaffActions = ({ canSetDept, onSetDept, isActive = true, onSuspend, onRes
     )}
     <button
       onClick={onTerminate}
-      className="w-full px-3 py-1.5 rounded-md text-xs font-semibold text-center whitespace-nowrap"
+      className="min-h-[44px] w-full rounded-md px-2 py-1.5 text-center text-xs font-semibold xl:min-h-0 xl:whitespace-nowrap xl:px-3"
       style={{ backgroundColor: '#FEF2F2', color: '#EF4444', border: '1.5px solid #FCA5A5' }}
     >
       ⛔ Terminate
@@ -188,25 +188,26 @@ const StaffPage = () => {
           <p className="text-sm text-gray-500">Manage doctors, lab technicians, and ambulance drivers</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => setModal('doctor')} className="inline-flex items-center gap-1.5 bg-orange-500 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-orange-600 transition whitespace-nowrap">
+          <button onClick={() => setModal('doctor')} aria-label="Add doctor" className="inline-flex min-h-[44px] items-center gap-1.5 bg-orange-500 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-orange-600 transition whitespace-nowrap">
             <FiPlus className="w-4 h-4" /> Doctor
           </button>
-          <button onClick={() => setModal('lab')} className="inline-flex items-center gap-1.5 bg-black text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-black/80 transition whitespace-nowrap">
+          <button onClick={() => setModal('lab')} aria-label="Add lab technician" className="inline-flex min-h-[44px] items-center gap-1.5 bg-black text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-black/80 transition whitespace-nowrap">
             <FiPlus className="w-4 h-4" /> Lab Tech
           </button>
-          <button onClick={() => setModal('driver')} className="inline-flex items-center gap-1.5 bg-black text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-black/80 transition whitespace-nowrap">
+          <button onClick={() => setModal('driver')} aria-label="Add ambulance driver" className="inline-flex min-h-[44px] items-center gap-1.5 bg-black text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-black/80 transition whitespace-nowrap">
             <FiPlus className="w-4 h-4" /> Driver
           </button>
         </div>
       </div>
 
       {/* ─── Tabs ─────────────────────────────────────────────── */}
-      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
+      <div className="mb-6 flex w-fit max-w-full flex-wrap gap-1 rounded-xl bg-gray-100 p-1">
         {TABS.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
+            aria-pressed={tab === t}
+            className={`min-h-[44px] rounded-lg px-3 py-1.5 text-sm font-medium transition ${
               tab === t ? 'bg-white text-primary-500 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -222,8 +223,8 @@ const StaffPage = () => {
       {tab === 'Doctors' && (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
+            <table role="table" className="block w-full text-sm xl:table">
+              <thead className="sr-only xl:not-sr-only xl:table-header-group">
                 <tr className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Specialization</th>
@@ -234,22 +235,34 @@ const StaffPage = () => {
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="block divide-y divide-gray-200 xl:table-row-group xl:divide-gray-50">
                 {doctors.loading ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>
+                  <tr role="row" className="block xl:table-row"><td role="cell" colSpan={7} className="block px-4 py-8 xl:table-cell text-center text-gray-400">Loading…</td></tr>
                 ) : doctorList.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No doctors added yet.</td></tr>
+                  <tr role="row" className="block xl:table-row"><td role="cell" colSpan={7} className="block px-4 py-8 xl:table-cell text-center text-gray-400">No doctors added yet.</td></tr>
                 ) : (
                   doctorList.map((d) => (
-                    <tr key={d.doctor_id} className="hover:bg-primary-50/20 transition">
-                      <td className="px-4 py-3 font-semibold text-gray-800">
+                    <tr key={d.doctor_id} role="row" className="block space-y-2 p-4 transition hover:bg-primary-50/20 xl:table-row xl:space-y-0 xl:p-0">
+                      <td role="cell" className="block break-words pb-2 xl:table-cell xl:px-4 xl:py-3 font-semibold text-gray-800">
                         {d.full_name}
                         {d.is_active === false && <SuspendedBadge />}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{d.specialization}</td>
-                      <td className="px-4 py-3 font-medium text-gray-700">₹{d.consultation_fee?.toFixed?.(0) ?? d.consultation_fee}</td>
-                      <td className="px-4 py-3 text-xs">
-                        {d.dept_name ? (
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-600">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Specialization</span>
+                        <div className="min-w-0 xl:contents">
+                          {d.specialization}
+                        </div>
+                      </td>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 font-medium text-gray-700">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Fee</span>
+                        <div className="min-w-0 xl:contents">
+                          ₹{d.consultation_fee?.toFixed?.(0) ?? d.consultation_fee}
+                        </div>
+                      </td>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-xs">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Department</span>
+                        <div className="min-w-0 xl:contents">
+                          {d.dept_name ? (
                           <span className="font-semibold" style={{ color: '#F97316' }}>{d.dept_name}</span>
                         ) : (
                           <button
@@ -260,15 +273,24 @@ const StaffPage = () => {
                             ⚠️ Set Department
                           </button>
                         )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 text-xs">
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Status</span>
+                        <div className="min-w-0 xl:contents">
+                          <span className="inline-flex items-center gap-1.5 text-xs">
                           <STATUS_DOT ok={d.is_online} />
                           {d.is_online ? 'Online' : 'Offline'}
                         </span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{d.email}</td>
-                      <td className="px-4 py-3">
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-500 text-xs">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Email</span>
+                        <div className="min-w-0 xl:contents">
+                          {d.email}
+                        </div>
+                      </td>
+                      <td role="cell" className="block border-t border-gray-100 pt-2 xl:table-cell xl:border-0 xl:px-4 xl:py-3">
                         <StaffActions
                           canSetDept
                           isActive={d.is_active !== false}
@@ -291,8 +313,8 @@ const StaffPage = () => {
       {tab === 'Lab Technicians' && (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
+            <table role="table" className="block w-full text-sm xl:table">
+              <thead className="sr-only xl:not-sr-only xl:table-header-group">
                 <tr className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Qualification</th>
@@ -303,28 +325,49 @@ const StaffPage = () => {
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="block divide-y divide-gray-200 xl:table-row-group xl:divide-gray-50">
                 {labTechs.loading ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>
+                  <tr role="row" className="block xl:table-row"><td role="cell" colSpan={7} className="block px-4 py-8 xl:table-cell text-center text-gray-400">Loading…</td></tr>
                 ) : labList.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No lab technicians added yet.</td></tr>
+                  <tr role="row" className="block xl:table-row"><td role="cell" colSpan={7} className="block px-4 py-8 xl:table-cell text-center text-gray-400">No lab technicians added yet.</td></tr>
                 ) : (
                   labList.map((lt) => (
-                    <tr key={lt.lab_tech_id} className="hover:bg-primary-50/20 transition">
-                      <td className="px-4 py-3 font-semibold text-gray-800">
+                    <tr key={lt.lab_tech_id} role="row" className="block space-y-2 p-4 transition hover:bg-primary-50/20 xl:table-row xl:space-y-0 xl:p-0">
+                      <td role="cell" className="block break-words pb-2 xl:table-cell xl:px-4 xl:py-3 font-semibold text-gray-800">
                         {lt.full_name}
                         {lt.is_active === false && <SuspendedBadge />}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{lt.qualification || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{lt.specialization || '—'}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">
-                        📞 {lt.phone || <span className="text-gray-400">No phone number</span>}
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-600">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Qualification</span>
+                        <div className="min-w-0 xl:contents">
+                          {lt.qualification || '—'}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{lt.email}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700 capitalize">{lt.approval_status}</span>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-600">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Specialization</span>
+                        <div className="min-w-0 xl:contents">
+                          {lt.specialization || '—'}
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-500 text-xs">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Phone</span>
+                        <div className="min-w-0 xl:contents">
+                          📞 {lt.phone || <span className="text-gray-400">No phone number</span>}
+                        </div>
+                      </td>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-500 text-xs">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Email</span>
+                        <div className="min-w-0 xl:contents">
+                          {lt.email}
+                        </div>
+                      </td>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Status</span>
+                        <div className="min-w-0 xl:contents">
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700 capitalize">{lt.approval_status}</span>
+                        </div>
+                      </td>
+                      <td role="cell" className="block border-t border-gray-100 pt-2 xl:table-cell xl:border-0 xl:px-4 xl:py-3">
                         <StaffActions
                           isActive={lt.is_active !== false}
                           onSuspend={() => askAction('lab_tech', lt.lab_tech_id, lt.full_name, lt.email, 'suspend')}
@@ -345,8 +388,8 @@ const StaffPage = () => {
       {tab === 'Drivers' && (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
+            <table role="table" className="block w-full text-sm xl:table">
+              <thead className="sr-only xl:not-sr-only xl:table-header-group">
                 <tr className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">License No</th>
@@ -357,28 +400,51 @@ const StaffPage = () => {
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="block divide-y divide-gray-200 xl:table-row-group xl:divide-gray-50">
                 {drivers.loading ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>
+                  <tr role="row" className="block xl:table-row"><td role="cell" colSpan={7} className="block px-4 py-8 xl:table-cell text-center text-gray-400">Loading…</td></tr>
                 ) : driverList.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No drivers added yet.</td></tr>
+                  <tr role="row" className="block xl:table-row"><td role="cell" colSpan={7} className="block px-4 py-8 xl:table-cell text-center text-gray-400">No drivers added yet.</td></tr>
                 ) : (
                   driverList.map((dr) => (
-                    <tr key={dr.driver_id} className="hover:bg-primary-50/20 transition">
-                      <td className="px-4 py-3 font-semibold text-gray-800">
+                    <tr key={dr.driver_id} role="row" className="block space-y-2 p-4 transition hover:bg-primary-50/20 xl:table-row xl:space-y-0 xl:p-0">
+                      <td role="cell" className="block break-words pb-2 xl:table-cell xl:px-4 xl:py-3 font-semibold text-gray-800">
                         {dr.full_name}
                         {dr.is_active === false && <SuspendedBadge />}
                       </td>
-                      <td className="px-4 py-3 text-gray-600 font-mono text-xs">{dr.license_no}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{dr.phone}</td>
-                      <td className="px-4 py-3 text-gray-600 font-mono text-xs">{dr.vehicle_no || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600 capitalize">{dr.ambulance_type || '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${dr.is_available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-600 font-mono text-xs">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">License No</span>
+                        <div className="min-w-0 xl:contents">
+                          {dr.license_no}
+                        </div>
+                      </td>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-500 text-xs">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Phone</span>
+                        <div className="min-w-0 xl:contents">
+                          {dr.phone}
+                        </div>
+                      </td>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-600 font-mono text-xs">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Vehicle No</span>
+                        <div className="min-w-0 xl:contents">
+                          {dr.vehicle_no || '—'}
+                        </div>
+                      </td>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3 text-gray-600 capitalize">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Type</span>
+                        <div className="min-w-0 xl:contents">
+                          {dr.ambulance_type || '—'}
+                        </div>
+                      </td>
+                      <td role="cell" className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] items-start gap-2 break-words xl:table-cell xl:px-4 xl:py-3">
+                        <span aria-hidden="true" className="font-medium text-gray-500 xl:hidden">Availability</span>
+                        <div className="min-w-0 xl:contents">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${dr.is_available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                           {dr.is_available ? 'Available' : 'On Duty'}
                         </span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td role="cell" className="block border-t border-gray-100 pt-2 xl:table-cell xl:border-0 xl:px-4 xl:py-3">
                         <StaffActions
                           isActive={dr.is_active !== false}
                           onSuspend={() => askAction('driver', dr.driver_id, dr.full_name, dr.email, 'suspend')}
@@ -426,7 +492,7 @@ const StaffPage = () => {
           <FormInput label="Email" type="email" value={doctorForm.email} onChange={(e) => setDoctorForm({ ...doctorForm, email: e.target.value })} />
           <FormInput label="Phone" value={doctorForm.phone} onChange={(e) => setDoctorForm({ ...doctorForm, phone: e.target.value })} />
         </div>
-        <div className="flex justify-end gap-3 mt-5">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
           <button onClick={closeModal} className="btn-secondary">Cancel</button>
           <button onClick={() => handleAdd('doctor')} disabled={submitting} className="btn-primary disabled:opacity-60">
             {submitting ? 'Adding…' : 'Add Doctor'}
@@ -443,7 +509,7 @@ const StaffPage = () => {
           <FormInput label="Phone" value={labForm.phone} onChange={(e) => setLabForm({ ...labForm, phone: e.target.value })} />
           <FormInput label="Email" type="email" value={labForm.email} onChange={(e) => setLabForm({ ...labForm, email: e.target.value })} />
         </div>
-        <div className="flex justify-end gap-3 mt-5">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
           <button onClick={closeModal} className="btn-secondary">Cancel</button>
           <button onClick={() => handleAdd('lab')} disabled={submitting} className="btn-primary disabled:opacity-60">
             {submitting ? 'Adding…' : 'Add Lab Tech'}
@@ -468,7 +534,7 @@ const StaffPage = () => {
             ]}
           />
         </div>
-        <div className="flex justify-end gap-3 mt-5">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
           <button onClick={closeModal} className="btn-secondary">Cancel</button>
           <button onClick={() => handleAdd('driver')} disabled={submitting} className="btn-primary disabled:opacity-60">
             {submitting ? 'Adding…' : 'Add Driver'}
@@ -491,14 +557,14 @@ const StaffPage = () => {
           </div>
         )}
 
-        <p className="text-gray-700 mb-3">
+        <p className="mb-3 break-words text-gray-700">
           Credentials for <strong>{created?.full_name}</strong>:
         </p>
         <div className="bg-primary-50 border border-primary-100 rounded-xl p-4 space-y-2 text-sm">
-          <div><span className="text-gray-500">Email:</span> <code className="text-primary-600">{created?.login_email}</code></div>
-          <div className="flex items-center gap-2">
+          <div><span className="text-gray-500">Email:</span> <code className="break-all text-primary-600">{created?.login_email}</code></div>
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-gray-500">Temp password:</span>
-            <code className="bg-white px-2 py-0.5 rounded border border-gray-200 text-primary-600">{created?.temp_password}</code>
+            <code className="min-w-0 break-all rounded border border-gray-200 bg-white px-2 py-0.5 text-primary-600">{created?.temp_password}</code>
             <button
               onClick={() => { navigator.clipboard.writeText(created?.temp_password || ''); toast.success('Copied'); }}
               className="text-gray-400 hover:text-primary-500"
@@ -517,7 +583,7 @@ const StaffPage = () => {
 
       {/* ─── Set / fix department for an existing doctor ──────────── */}
       <Modal isOpen={Boolean(editingDoctor)} onClose={() => setEditingDoctor(null)} title="Set Department">
-        <p className="text-sm text-gray-500 mb-4">Dr. {editingDoctor?.full_name}</p>
+        <p className="mb-4 break-words text-sm text-gray-500">Dr. {editingDoctor?.full_name}</p>
         {departmentList.length === 0 ? (
           <div className="rounded-xl px-3 py-2.5 text-sm" style={{ border: '1.5px solid #FCA5A5', backgroundColor: '#FEF2F2', color: '#EF4444' }}>
             ❌ No departments yet — add some in the Departments section first.
@@ -531,7 +597,7 @@ const StaffPage = () => {
             options={deptOptions}
           />
         )}
-        <div className="flex justify-end gap-3 mt-5">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
           <button onClick={() => setEditingDoctor(null)} className="btn-secondary">Cancel</button>
           <button
             onClick={saveDoctorDept}
@@ -560,7 +626,7 @@ const StaffPage = () => {
             <p className="text-sm text-gray-600 mb-1">
               You are about to {actionType} <strong className="text-black">{actionStaff.name}</strong>.
             </p>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="mb-4 break-words text-sm text-gray-500">
               📧 A notification email will be sent to <strong>{actionStaff.email}</strong>.
             </p>
             <div
@@ -579,7 +645,7 @@ const StaffPage = () => {
                   ? '🔴 The account will be suspended — sign-in is blocked until it is reactivated.'
                   : '⛔ The account will be terminated and can no longer sign in. A farewell email will be sent.'}
             </div>
-            <div className="flex justify-end gap-3">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
               <button onClick={() => setActionStaff(null)} disabled={actionLoading} className="btn-secondary">Cancel</button>
               <button
                 onClick={handleStaffAction}

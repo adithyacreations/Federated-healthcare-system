@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { FiCheck, FiTrash2, FiSearch } from 'react-icons/fi';
+import { FiCheck, FiChevronDown, FiTrash2, FiSearch } from 'react-icons/fi';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
 import AnimatedTabs from '../../components/patient/AnimatedTabs';
@@ -40,6 +40,7 @@ const LabTestPage = () => {
   const catalog = useApi('/api/patient/lab/catalog/');
 
   const [hospitalId, setHospitalId] = useState('');
+  const [hospitalPickerOpen, setHospitalPickerOpen] = useState(false);
   const [selected, setSelected] = useState([]);
   const [apptDate, setApptDate] = useState('');
   const [booking, setBooking] = useState(false);
@@ -109,6 +110,7 @@ const LabTestPage = () => {
   }, [apptDate, selectedSlot]);
 
   const hospitalList = hospitals.data?.hospitals || [];
+  const selectedHospital = hospitalList.find((hospital) => hospital.hospital_id === hospitalId);
   const allTests = catalog.data?.tests || [];
   const totalFee = selected.reduce((s, t) => s + Number(t.fee || 0), 0);
 
@@ -133,9 +135,9 @@ const LabTestPage = () => {
     let tests = activeCat === 'all' ? allTests : (grouped[activeCat] || []);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      tests = tests.filter((t) => 
-        (t.name && t.name.toLowerCase().includes(q)) || 
-        (t.category && t.category.toLowerCase().includes(q)) || 
+      tests = tests.filter((t) =>
+        (t.name && t.name.toLowerCase().includes(q)) ||
+        (t.category && t.category.toLowerCase().includes(q)) ||
         (t.description && t.description.toLowerCase().includes(q))
       );
     }
@@ -274,7 +276,7 @@ const LabTestPage = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            
+
             <AnimatedTabs tabs={catTabs} active={activeCat} onChange={setActiveCat} layoutId="lab-tab" />
             {catalog.loading ? (
               <div className="dashboard-card text-sm text-muted">Loading test catalog…</div>
@@ -384,22 +386,66 @@ const LabTestPage = () => {
                 </div>
               )}
 
-              <label className="text-xs text-muted block mb-1">Hospital</label>
-              <select
-                value={hospitalId}
-                onChange={(e) => setHospitalId(e.target.value)}
-                className="w-full bg-white border border-hairline rounded-xl px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-orange-400"
-              >
-                <option value="">Select hospital…</option>
-                {hospitalList.map((h) => (
-                  <option key={h.hospital_id} value={h.hospital_id} disabled={!h.lab_configured}>
-                    {h.hospital_name} · {h.city}
-                    {h.lab_configured
-                      ? (h.has_available_slots ? '' : ' — ⚠️ No slots yet')
-                      : ' — ❌ Lab not configured'}
-                  </option>
-                ))}
-              </select>
+              <div className="mb-3 min-w-0">
+                <p id="lab-hospital-label" className="mb-1 text-xs text-muted">Hospital</p>
+                <button
+                  type="button"
+                  id="lab-hospital-picker"
+                  aria-labelledby="lab-hospital-label lab-hospital-value"
+                  aria-expanded={hospitalPickerOpen}
+                  aria-controls="lab-hospital-options"
+                  disabled={hospitals.loading || hospitalList.length === 0}
+                  onClick={() => setHospitalPickerOpen((open) => !open)}
+                  className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-xl border border-hairline bg-white px-3 py-2 text-left text-sm focus-visible:outline-orange-500 disabled:text-muted"
+                >
+                  <span id="lab-hospital-value" className="min-w-0 break-words">
+                    {selectedHospital?.hospital_name || (hospitals.loading
+                      ? 'Loading hospitals…'
+                      : hospitalList.length ? 'Select hospital…' : 'No hospitals available')}
+                  </span>
+                  <FiChevronDown aria-hidden="true" className="h-4 w-4 shrink-0" />
+                </button>
+                <fieldset
+                  id="lab-hospital-options"
+                  aria-labelledby="lab-hospital-label"
+                  hidden={!hospitalPickerOpen}
+                  className="mt-2 max-h-64 min-w-0 overflow-y-auto overscroll-contain rounded-xl border border-hairline bg-white"
+                >
+                  {hospitalList.map((hospital) => (
+                    <label
+                      key={hospital.hospital_id}
+                      className={`flex min-h-[44px] items-start gap-3 border-b border-hairline px-3 py-2.5 last:border-b-0 ${hospital.lab_configured ? 'cursor-pointer hover:bg-orange-50' : 'cursor-not-allowed bg-gray-50 text-muted'}`}
+                    >
+                      <input
+                        type="radio"
+                        name="lab-hospital"
+                        value={hospital.hospital_id}
+                        checked={hospitalId === hospital.hospital_id}
+                        disabled={!hospital.lab_configured}
+                        onChange={() => {
+                          setSelectedSlot(null);
+                          setAvailableSlots([]);
+                          setHospitalId(hospital.hospital_id);
+                        }}
+                        className="mt-1 shrink-0 accent-orange-500"
+                      />
+                      <span className="min-w-0 break-words text-sm">
+                        <span className="block font-medium">{hospital.hospital_name}</span>
+                        <span className="block text-xs text-muted">
+                          {[hospital.city, !hospital.lab_configured
+                            ? 'Lab not configured'
+                            : !hospital.has_available_slots ? 'No slots yet' : null].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+                {!hospitalPickerOpen && selectedHospital && (
+                  <p className="mt-1 break-words text-xs text-muted">
+                    {[selectedHospital.city, !selectedHospital.has_available_slots && 'No slots yet'].filter(Boolean).join(' · ')}
+                  </p>
+                )}
+              </div>
 
               <label className="text-xs text-muted block mb-1">Date</label>
               <input

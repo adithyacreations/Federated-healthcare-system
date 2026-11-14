@@ -5,8 +5,10 @@ import { motion } from 'framer-motion';
  * (Framer Motion shared layout). `tabs` is an array of strings or
  * { key, label } objects.
  */
-const AnimatedTabs = ({ tabs, active, onChange, layoutId = 'tab-underline' }) => (
-  <div className="flex flex-wrap gap-1 border-b border-hairline mb-5">
+const AnimatedTabs = ({ tabs, active, onChange, layoutId = 'tab-underline', scrollOnMobile = false }) => (
+  <div className={`mb-5 flex gap-1 border-b border-hairline ${scrollOnMobile
+    ? 'overflow-x-auto overscroll-x-contain sm:flex-wrap'
+    : 'flex-wrap'}`}>
     {tabs.map((t) => {
       const key = t.key ?? t;
       const label = t.label ?? t;
@@ -15,7 +17,7 @@ const AnimatedTabs = ({ tabs, active, onChange, layoutId = 'tab-underline' }) =>
         <button
           key={key}
           onClick={() => onChange(key)}
-          className={`relative px-4 py-2.5 text-sm font-semibold capitalize transition ${
+          className={`relative px-4 py-2.5 text-sm font-semibold capitalize transition ${scrollOnMobile ? 'min-h-[44px] shrink-0 whitespace-nowrap' : ''} ${
             on ? 'text-orange-500' : 'text-muted hover:text-ink'
           }`}
         >

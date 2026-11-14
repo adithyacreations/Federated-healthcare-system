@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import timedelta
 import os
+import dj_database_url
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -92,6 +93,11 @@ DATABASES = {
     }
 }
 
+# The hosted backend uses a fresh PostgreSQL database when DATABASE_URL is set.
+database_url = os.getenv('DATABASE_URL', '').strip()
+if database_url:
+    DATABASES['default'] = dj_database_url.parse(database_url)
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'apps.auth_app.authentication.FederCareJWTAuthentication',
@@ -140,6 +146,7 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
+EMAIL_TIMEOUT = 10
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER')

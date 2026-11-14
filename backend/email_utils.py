@@ -1,6 +1,10 @@
+import logging
+
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 _BRAND = '#1A3C6E'
 _ACCENT = '#2E75B6'
@@ -46,24 +50,29 @@ def _base_layout(header_color, header_text, body_html):
 """
 
 
-def _send(to_email, subject, html_content):
+def _send(to_email, subject, html_content, connection=None):
     try:
-        send_mail(
+        return send_mail(
             subject=subject,
             message='',
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[to_email],
             html_message=html_content,
+            connection=connection,
             fail_silently=False,
+        ) == 1
+    except Exception as exc:
+        logger.warning(
+            'Email send failed (%s, SMTP code %s)',
+            type(exc).__name__,
+            getattr(exc, 'smtp_code', 'unavailable'),
         )
-        print(f"[email_utils] Email sent to {to_email}")
-    except Exception as e:
-        print(f"[email_utils] Failed to send email to {to_email}: {e}")
+        return False
 
 
 def send_email(to_email, subject, html_content):
     """Generic raw-HTML email sender (used by flows that pass their own markup)."""
-    _send(to_email, subject, html_content)
+    return _send(to_email, subject, html_content)
 
 
 def clean_name_for_email(name):
@@ -989,7 +998,7 @@ def send_pharmacist_order_email(to_email, patient_name, medicines, pharmacy_name
     _send(to_email, f"FederCare: New Medicine Order — {med_label}", html)
 
 
-def send_epidemic_resolved_email(to_email, recipient_name, disease_name, region):
+def send_epidemic_resolved_email(to_email, recipient_name, disease_name, region, connection=None):
     body = f"""
     <h2 style="color:{_SUCCESS};margin:0 0 12px;">&#x2705; Epidemic Resolved</h2>
     <p style="color:#374151;font-size:15px;line-height:1.6;margin:0 0 16px;">
@@ -1002,4 +1011,4 @@ def send_epidemic_resolved_email(to_email, recipient_name, disease_name, region)
     </p>
     """
     html = _base_layout(_SUCCESS, f"Epidemic Resolved — {disease_name}", body)
-    _send(to_email, f"✅ FederCare: {disease_name} Epidemic Resolved", html)
+    return _send(to_email, f"✅ FederCare: {disease_name} Epidemic Resolved", html, connection=connection)

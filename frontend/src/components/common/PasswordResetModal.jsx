@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
+import ResetCodeInput from '../auth/ResetCodeInput';
 import toast from 'react-hot-toast';
 import API from '../../api/axios';
 
@@ -22,7 +23,7 @@ export default function PasswordResetModal({
 }) {
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState(prefilledEmail);
-  const [otpDigits, setOtpDigits] = useState(Array(6).fill(''));
+  const [otp, setOtp] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -30,11 +31,9 @@ export default function PasswordResetModal({
   const [showCurrentPwd, setShowCurrentPwd] = useState(false);
   const [showNewPwd, setShowNewPwd] = useState(false);
 
-  const otpRefs = useRef([]);
-
   const resetModal = () => {
     setStep(1);
-    setOtpDigits(Array(6).fill(''));
+    setOtp('');
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
@@ -62,7 +61,7 @@ export default function PasswordResetModal({
       const response = await API.post(endpoint, payload);
       if (response.data.success) {
         toast.success(response.data.message || 'OTP sent!');
-        setOtpDigits(Array(6).fill(''));
+        setOtp('');
         setStep(2);
       }
     } catch (error) {
@@ -72,20 +71,8 @@ export default function PasswordResetModal({
     }
   };
 
-  // ── Step 2 — OTP digit handling ───────────────────────────────────────────
-  const handleOTPDigit = (value, index) => {
-    if (!/^\d*$/.test(value)) return;
-    const newDigits = [...otpDigits];
-    newDigits[index] = value;
-    setOtpDigits(newDigits);
-
-    if (value && index < 5) otpRefs.current[index + 1]?.focus();
-    if (index === 5 && value && newDigits.join('').length === 6) setStep(3);
-  };
-
   // ── Step 3 — reset password ───────────────────────────────────────────────
   const handleResetPassword = async () => {
-    const otp = otpDigits.join('');
     if (otp.length !== 6) {
       toast.error('Enter complete OTP!');
       return;
@@ -137,256 +124,230 @@ export default function PasswordResetModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-100">
-          <div>
-            <h3 className="font-bold text-xl text-black">Reset Password</h3>
-            <div className="flex items-center gap-1 mt-2">
-              {[1, 2, 3].map((s) => (
-                <div
-                  key={s}
-                  className="h-1 w-8 rounded-full transition-all"
-                  style={{ backgroundColor: step >= s ? ORANGE : '#E5E5E5' }}
-                />
-              ))}
-              <span className="text-xs text-gray-400 ml-2">Step {step} of 3</span>
-            </div>
-          </div>
-          <button
-            onClick={handleClose}
-            className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="p-6">
-          {/* Step 1 — email + send OTP */}
-          {step === 1 && (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 p-3 sm:p-4">
+      <div className="flex min-h-full items-center justify-center">
+        <div role="dialog" aria-modal="true" aria-label="Reset password" className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-2 p-4 sm:p-6 border-b border-gray-100">
             <div>
-              <p className="text-gray-500 text-sm mb-4">
-                We'll send a 6-digit OTP to your registered Gmail.
-              </p>
-
-              {!isAuthenticated && (
-                <div className="mb-4">
-                  <label className="text-sm font-medium text-black mb-1 block">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="your@email.com"
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400"
-                  />
-                </div>
-              )}
-
-              {isAuthenticated && (
-                <div className="bg-orange-50 rounded-xl p-3 mb-4">
-                  <p className="text-sm text-orange-700">
-                    OTP will be sent to: <b className="ml-1">{prefilledEmail}</b>
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={handleSendOTP}
-                disabled={loading || (!isAuthenticated && !email)}
-                className="w-full py-3 rounded-full font-semibold text-white disabled:opacity-50"
-                style={{ backgroundColor: ORANGE }}
-              >
-                {loading ? 'Sending OTP...' : '📧 Send OTP to Gmail'}
-              </button>
-            </div>
-          )}
-
-          {/* Step 2 — enter OTP */}
-          {step === 2 && (
-            <div>
-              <p className="text-gray-500 text-sm mb-6 text-center">
-                Enter the 6-digit OTP sent to your Gmail
-              </p>
-
-              <div className="flex justify-center gap-2 mb-4">
-                {otpDigits.map((digit, i) => (
-                  <input
-                    key={i}
-                    ref={(el) => {
-                      otpRefs.current[i] = el;
-                    }}
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={1}
-                    value={digit}
-                    onChange={(e) => handleOTPDigit(e.target.value, i)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Backspace' && !digit && i > 0) {
-                        otpRefs.current[i - 1]?.focus();
-                      }
-                    }}
-                    style={{
-                      width: '48px',
-                      height: '56px',
-                      textAlign: 'center',
-                      fontSize: '24px',
-                      fontWeight: '700',
-                      border: `2px solid ${digit ? ORANGE : '#E5E5E5'}`,
-                      borderRadius: '12px',
-                      outline: 'none',
-                      transition: 'all 0.2s',
-                    }}
+              <h3 className="font-bold text-xl text-black">Reset Password</h3>
+              <div className="flex items-center gap-1 mt-2">
+                {[1, 2, 3].map((s) => (
+                  <div
+                    key={s}
+                    className="h-1 w-8 rounded-full transition-all"
+                    style={{ backgroundColor: step >= s ? ORANGE : '#E5E5E5' }}
                   />
                 ))}
+                <span className="text-xs text-gray-400 ml-2">Step {step} of 3</span>
               </div>
-
-              <p className="text-center text-xs text-gray-400 mb-4">
-                ⏱️ OTP valid for 10 minutes
-              </p>
-
-              <button
-                onClick={() => {
-                  if (otpDigits.join('').length === 6) setStep(3);
-                  else toast.error('Enter all 6 digits!');
-                }}
-                className="w-full py-3 rounded-full font-semibold text-white mb-3"
-                style={{ backgroundColor: ORANGE }}
-              >
-                Verify OTP →
-              </button>
-
-              <p className="text-center text-sm text-gray-500">
-                Didn't receive?{' '}
-                <button
-                  onClick={() => {
-                    setOtpDigits(Array(6).fill(''));
-                    handleSendOTP();
-                  }}
-                  style={{ color: ORANGE }}
-                  className="font-medium underline"
-                >
-                  Resend OTP
-                </button>
-              </p>
             </div>
-          )}
+            <button
+              onClick={handleClose}
+              aria-label="Close password reset"
+              className="w-11 h-11 shrink-0 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200"
+            >
+              ✕
+            </button>
+          </div>
 
-          {/* Step 3 — new password */}
-          {step === 3 && (
-            <div className="space-y-4">
-              <p className="text-gray-500 text-sm">
-                ✅ OTP entered! Now set your new password.
-              </p>
+          {/* Body */}
+          <div className="p-4 sm:p-6">
+            {/* Step 1 — email + send OTP */}
+            {step === 1 && (
+              <div>
+                <p className="text-gray-500 text-sm mb-4">
+                  We'll send a 6-digit OTP to your registered email address.
+                </p>
 
-              {/* Current password — skipped for the forgot-password flow */}
-              {requireCurrentPassword && (
+                {!isAuthenticated && (
+                  <div className="mb-4">
+                    <label className="text-sm font-medium text-black mb-1 block">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="your@email.com"
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-base focus:outline-none focus:border-orange-400"
+                    />
+                  </div>
+                )}
+
+                {isAuthenticated && (
+                  <div className="bg-orange-50 rounded-xl p-3 mb-4">
+                    <p className="break-all text-sm text-orange-700">
+                      OTP will be sent to: <b className="ml-1">{prefilledEmail}</b>
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleSendOTP}
+                  disabled={loading || (!isAuthenticated && !email)}
+                  className="w-full py-3 rounded-full font-semibold text-white disabled:opacity-50"
+                  style={{ backgroundColor: ORANGE }}
+                >
+                  {loading ? 'Sending OTP...' : '📧 Send reset code'}
+                </button>
+              </div>
+            )}
+
+            {/* Step 2 — enter OTP */}
+            {step === 2 && (
+              <div>
+                <p className="text-gray-500 text-sm mb-6 text-center">
+                  Check your email for the 6-digit reset code.
+                </p>
+
+                <ResetCodeInput value={otp} onChange={setOtp} />
+
+                <p className="text-center text-xs text-gray-400 mb-4">
+                  ⏱️ OTP valid for 10 minutes
+                </p>
+
+                <button
+                  onClick={() => setStep(3)}
+                  disabled={otp.length !== 6 || loading}
+                  className="w-full py-3 rounded-full font-semibold text-white mb-3 disabled:opacity-50"
+                  style={{ backgroundColor: ORANGE }}
+                >
+                  Continue
+                </button>
+
+                <p className="text-center text-sm text-gray-500">
+                  Didn't receive?{' '}
+                  <button
+                    onClick={handleSendOTP}
+                    disabled={loading}
+                    style={{ color: ORANGE }}
+                    className="font-medium underline"
+                  >
+                    Resend OTP
+                  </button>
+                </p>
+              </div>
+            )}
+
+            {/* Step 3 — new password */}
+            {step === 3 && (
+              <div className="space-y-4">
+                <p className="text-gray-500 text-sm">
+                  Set your new password.
+                </p>
+                <button type="button" onClick={() => setStep(2)} disabled={loading} className="min-h-[44px] text-sm font-medium text-orange-700">Edit reset code</button>
+
+                {/* Current password — skipped for the forgot-password flow */}
+                {requireCurrentPassword && (
+                  <div>
+                    <label className="text-sm font-medium text-black mb-1 block">
+                      Current Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showCurrentPwd ? 'text' : 'password'}
+                        autoComplete="current-password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        placeholder="Current password"
+                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-base pr-12 focus:outline-none focus:border-orange-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPwd(!showCurrentPwd)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg"
+                      >
+                        {showCurrentPwd ? '🙈' : '👁️'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* New password */}
                 <div>
                   <label className="text-sm font-medium text-black mb-1 block">
-                    Current Password
+                    New Password
                   </label>
                   <div className="relative">
                     <input
-                      type={showCurrentPwd ? 'text' : 'password'}
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                      placeholder="Current password"
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm pr-12 focus:outline-none focus:border-orange-400"
+                      type={showNewPwd ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Min 8 characters"
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-base pr-12 focus:outline-none focus:border-orange-400"
                     />
                     <button
                       type="button"
-                      onClick={() => setShowCurrentPwd(!showCurrentPwd)}
+                      onClick={() => setShowNewPwd(!showNewPwd)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg"
                     >
-                      {showCurrentPwd ? '🙈' : '👁️'}
+                      {showNewPwd ? '🙈' : '👁️'}
                     </button>
                   </div>
+                  {newPassword && (
+                    <div className="flex gap-1 mt-2">
+                      {[
+                        newPassword.length >= 8,
+                        /[A-Z]/.test(newPassword),
+                        /[0-9]/.test(newPassword),
+                        /[^A-Za-z0-9]/.test(newPassword),
+                      ].map((met, i) => (
+                        <div
+                          key={i}
+                          className="flex-1 h-1 rounded-full transition-all"
+                          style={{ backgroundColor: met ? ORANGE : '#E5E5E5' }}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
 
-              {/* New password */}
-              <div>
-                <label className="text-sm font-medium text-black mb-1 block">
-                  New Password
-                </label>
-                <div className="relative">
+                {/* Confirm password */}
+                <div>
+                  <label className="text-sm font-medium text-black mb-1 block">
+                    Confirm New Password
+                  </label>
                   <input
-                    type={showNewPwd ? 'text' : 'password'}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Min 8 characters"
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm pr-12 focus:outline-none focus:border-orange-400"
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Repeat new password"
+                    className={`w-full border rounded-xl px-4 py-3 text-base focus:outline-none ${
+                      confirmPassword && newPassword !== confirmPassword
+                        ? 'border-red-400'
+                        : 'border-gray-200 focus:border-orange-400'
+                    }`}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowNewPwd(!showNewPwd)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg"
-                  >
-                    {showNewPwd ? '🙈' : '👁️'}
-                  </button>
+                  {confirmPassword && newPassword !== confirmPassword && (
+                    <p className="text-red-500 text-xs mt-1">Passwords do not match!</p>
+                  )}
+                  {confirmPassword && newPassword && newPassword === confirmPassword && (
+                    <p className="text-xs mt-1" style={{ color: ORANGE }}>
+                      ✅ Passwords match!
+                    </p>
+                  )}
                 </div>
-                {newPassword && (
-                  <div className="flex gap-1 mt-2">
-                    {[
-                      newPassword.length >= 8,
-                      /[A-Z]/.test(newPassword),
-                      /[0-9]/.test(newPassword),
-                      /[^A-Za-z0-9]/.test(newPassword),
-                    ].map((met, i) => (
-                      <div
-                        key={i}
-                        className="flex-1 h-1 rounded-full transition-all"
-                        style={{ backgroundColor: met ? ORANGE : '#E5E5E5' }}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              {/* Confirm password */}
-              <div>
-                <label className="text-sm font-medium text-black mb-1 block">
-                  Confirm New Password
-                </label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Repeat new password"
-                  className={`w-full border rounded-xl px-4 py-3 text-sm focus:outline-none ${
-                    confirmPassword && newPassword !== confirmPassword
-                      ? 'border-red-400'
-                      : 'border-gray-200 focus:border-orange-400'
-                  }`}
-                />
-                {confirmPassword && newPassword !== confirmPassword && (
-                  <p className="text-red-500 text-xs mt-1">Passwords do not match!</p>
-                )}
-                {confirmPassword && newPassword && newPassword === confirmPassword && (
-                  <p className="text-xs mt-1" style={{ color: ORANGE }}>
-                    ✅ Passwords match!
-                  </p>
-                )}
+                <button
+                  onClick={handleResetPassword}
+                  disabled={
+                    loading ||
+                    (requireCurrentPassword && !currentPassword) ||
+                    newPassword.length < 8 ||
+                    newPassword !== confirmPassword
+                  }
+                  className="w-full py-3 rounded-full font-semibold text-white disabled:opacity-50"
+                  style={{ backgroundColor: ORANGE }}
+                >
+                  {loading ? 'Changing Password...' : '🔐 Change Password'}
+                </button>
               </div>
-
-              <button
-                onClick={handleResetPassword}
-                disabled={
-                  loading ||
-                  (requireCurrentPassword && !currentPassword) ||
-                  newPassword.length < 8 ||
-                  newPassword !== confirmPassword
-                }
-                className="w-full py-3 rounded-full font-semibold text-white disabled:opacity-50"
-                style={{ backgroundColor: ORANGE }}
-              >
-                {loading ? 'Changing Password...' : '🔐 Change Password'}
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

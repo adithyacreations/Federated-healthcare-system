@@ -253,10 +253,10 @@ const EHRWallet = () => {
         {/* SECTION A — Health card */}
         <motion.section
           variants={cardVariants}
-          className="rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50 to-cream p-6 mb-6 flex flex-wrap items-center justify-between gap-6"
+          className="rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50 to-cream mb-6 flex flex-col items-stretch gap-4 p-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-6 sm:p-6"
         >
           <div className="min-w-0">
-            <h1 className="font-bricolage text-3xl font-extrabold text-ink truncate">{patientName}</h1>
+            <h1 className="font-bricolage break-words text-2xl font-extrabold text-ink sm:text-3xl">{patientName}</h1>
             <p className="text-muted">Your lifelong health record — share via QR with consent.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
               {w.blood_group && (
@@ -275,12 +275,12 @@ const EHRWallet = () => {
               <FiShare2 className="w-6 h-6" />
             </div>
             <p className="text-sm text-muted mb-3">Share with your doctor</p>
-            <button onClick={requestQR} className="btn-orange text-sm">Generate QR</button>
+            <button onClick={requestQR} className="btn-orange min-h-[44px] w-full text-sm sm:w-auto">Generate QR</button>
           </div>
         </motion.section>
 
         {/* SECTION B — Animated tabs */}
-        <AnimatedTabs tabs={TABS} active={activeTab} onChange={setActiveTab} layoutId="ehr-tab" />
+        <AnimatedTabs tabs={TABS} active={activeTab} onChange={setActiveTab} layoutId="ehr-tab" scrollOnMobile />
 
         <AnimatePresence mode="wait">
           <motion.div
@@ -304,7 +304,7 @@ const EHRWallet = () => {
                       <button
                         key={type.value}
                         onClick={() => { setImageType(type.value); setSelectedFile(null); setPreview(null); }}
-                        className={`px-4 py-2 rounded-full text-sm font-semibold border-2 transition ${
+                        className={`min-h-[44px] px-4 py-2 rounded-full text-sm font-semibold border-2 transition ${
                           imageType === type.value
                             ? 'bg-orange-500 text-white border-orange-500'
                             : 'bg-white text-muted border-hairline hover:border-orange-400'
@@ -323,7 +323,7 @@ const EHRWallet = () => {
                     {preview ? (
                       <div>
                         <img src={preview} alt="Preview" className="max-h-44 mx-auto rounded-lg object-contain" />
-                        <p className="text-xs text-orange-500 mt-2">✅ {selectedFile?.name} — click to change</p>
+                        <p className="break-all text-xs text-orange-500 mt-2">✅ {selectedFile?.name} — click to change</p>
                       </div>
                     ) : (
                       <div className="py-6">
@@ -339,7 +339,7 @@ const EHRWallet = () => {
                     value={uploadDesc}
                     onChange={(e) => setUploadDesc(e.target.value)}
                     placeholder="Add a note e.g. Chest X-Ray 2026 (optional)"
-                    className="w-full mt-3 border border-hairline rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400"
+                    className="w-full mt-3 border border-hairline rounded-xl px-4 py-2.5 text-base focus:outline-none focus:border-orange-400"
                   />
 
                   <button
@@ -363,9 +363,9 @@ const EHRWallet = () => {
                     <p className="text-xs uppercase tracking-wide text-muted mb-2">📊 Lab Reports</p>
                     <div className="space-y-2">
                       {images.data.images_by_type.lab_report.map((rep) => (
-                        <div key={rep.image_id} className="flex items-center justify-between gap-3 rounded-xl border border-hairline bg-white px-4 py-3">
+                        <div key={rep.image_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-white px-4 py-3">
                           <div className="min-w-0">
-                            <p className="font-medium text-sm text-ink truncate m-0">{rep.description || rep.title || 'Lab Report'}</p>
+                            <p className="m-0 break-words text-sm font-medium text-ink">{rep.description || rep.title || 'Lab Report'}</p>
                             <p className="text-xs text-muted m-0">
                               📅 {rep.uploaded_at ? format(new Date(rep.uploaded_at), 'dd MMM yyyy') : '—'}
                               {rep.hospital_name ? ` · ${rep.hospital_name}` : ''}
@@ -375,7 +375,7 @@ const EHRWallet = () => {
                             href={rep.image_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="shrink-0 px-4 py-2 rounded-lg text-xs font-semibold text-white"
+                            className="inline-flex min-h-[44px] shrink-0 items-center px-4 py-2 rounded-lg text-xs font-semibold text-white"
                             style={{ backgroundColor: '#F97316' }}
                           >
                             View →
@@ -397,7 +397,7 @@ const EHRWallet = () => {
                     return (
                       <div key={t.value} className="mb-6">
                         <p className="text-xs uppercase tracking-wide text-muted mb-2">{t.label}</p>
-                        <div className="columns-2 md:columns-3 lg:columns-4 gap-4 [&>*]:mb-4">
+                        <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 gap-4 [&>*]:mb-4">
                           {list.map((img) => (
                             <div key={img.image_id} className="break-inside-avoid rounded-2xl border border-hairline bg-white overflow-hidden group">
                               <div className="relative overflow-hidden">
@@ -410,13 +410,13 @@ const EHRWallet = () => {
                                 <span className="absolute top-2 left-2 text-[10px] bg-ink/70 text-white px-2 py-0.5 rounded-full">{t.label}</span>
                               </div>
                               <div className="p-3">
-                                <div className="font-medium text-sm text-ink truncate">{img.title}</div>
+                                <div className="break-words text-sm font-medium text-ink">{img.title}</div>
                                 <div className="text-xs text-muted">
                                   {img.hospital_name || '—'}{img.scan_date ? ` · ${img.scan_date}` : ''}
                                 </div>
-                                <div className="flex gap-3 mt-2">
-                                  <button onClick={() => setLightbox(img)} className="text-xs text-orange-500 hover:underline">View Full</button>
-                                  <a href={img.image_url} download className="text-xs text-muted hover:underline">Download</a>
+                                <div className="mt-2 flex flex-wrap gap-x-3">
+                                  <button onClick={() => setLightbox(img)} className="inline-flex min-h-[44px] items-center text-xs text-orange-500 hover:underline">View Full</button>
+                                  <a href={img.image_url} download className="inline-flex min-h-[44px] items-center text-xs text-muted hover:underline">Download</a>
                                 </div>
                               </div>
                             </div>
@@ -429,17 +429,20 @@ const EHRWallet = () => {
               </section>
             ) : activeTab === 'allergies' ? (
               <section>
+                <button onClick={() => setShowAllergy(true)} className="btn-orange mb-4 inline-flex min-h-[44px] items-center gap-2">
+                  <FiPlus aria-hidden="true" /> Add Allergy
+                </button>
                 {(w.allergies || []).length === 0 ? (
                   <div className="dashboard-card text-sm text-muted">No allergies recorded.</div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {w.allergies.map((a) => (
                       <motion.div key={a.allergy_id} variants={cardVariants} className="dashboard-card">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="font-bricolage font-bold text-ink">{a.allergen}</div>
+                        <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 break-words font-bricolage font-bold text-ink">{a.allergen}</div>
                           <span className={SEVERITY_BADGE[a.severity] || 'badge-info'}>{a.severity}</span>
                         </div>
-                        <p className="text-sm text-muted">{a.reaction || '—'}</p>
+                        <p className="break-words text-sm text-muted">{a.reaction || '—'}</p>
                         <p className="text-xs text-gray-400 mt-2">Noted: {fmtDate(a.noted_at)}</p>
                       </motion.div>
                     ))}
@@ -459,46 +462,46 @@ const EHRWallet = () => {
                       const metaItems = sourceItems(r);
                       return (
                         <motion.div key={r.record_id} variants={cardVariants} className="dashboard-card">
-                          <div className="flex items-start justify-between gap-3">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 mb-1">
+                              <div className="mb-1 flex flex-wrap items-center gap-2">
                                 <Badge status="info" text={TYPE_TO_TAB[r._cat] || r._cat} />
                                 <span className="text-xs text-muted">{fmtDate(r.recorded_at)}</span>
                               </div>
-                              <div className="font-bricolage font-bold text-ink">{recordTitle(r)}</div>
+                              <div className="break-words font-bricolage font-bold text-ink">{recordTitle(r)}</div>
                               {metaItems.length > 0 && (
                                 <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
                                   {metaItems.map((item) => {
                                     const Icon = item.icon;
                                     return (
-                                      <span key={item.key} className="inline-flex items-center gap-1.5">
-                                        <Icon className="w-3.5 h-3.5 text-orange-500" />
-                                        {item.label}
+                                      <span key={item.key} className="inline-flex min-w-0 items-center gap-1.5 break-words">
+                                        <Icon className="w-3.5 h-3.5 shrink-0 text-orange-500" />
+                                        <span className="min-w-0">{item.label}</span>
                                       </span>
                                     );
                                   })}
                                 </div>
                               )}
                               {r.content && (
-                                <p className={`text-sm text-muted mt-1 ${isOpen ? '' : 'line-clamp-2'}`}>{r.content}</p>
+                                <p className={`mt-1 break-words text-sm text-muted ${isOpen ? '' : 'line-clamp-2'}`}>{r.content}</p>
                               )}
                             </div>
-                            <div className="flex flex-col items-end gap-2 shrink-0">
+                            <div className="flex shrink-0 flex-wrap items-center gap-x-4 sm:flex-col sm:items-end sm:gap-0">
                               {r._cat === 'prescriptions' && r.prescription_id ? (
                                 <button
                                   onClick={() => downloadPrescription(r.prescription_id)}
-                                  className="text-orange-500 hover:underline text-sm inline-flex items-center gap-1"
+                                  className="text-orange-500 hover:underline text-sm inline-flex min-h-[44px] items-center gap-1"
                                 >
                                   <FiDownload className="w-4 h-4" /> Download PDF
                                 </button>
                               ) : (
                                 r.file_url && (
-                                  <a href={r.file_url} target="_blank" rel="noopener noreferrer" className="text-orange-500 hover:underline text-sm inline-flex items-center gap-1">
+                                  <a href={r.file_url} target="_blank" rel="noopener noreferrer" className="text-orange-500 hover:underline text-sm inline-flex min-h-[44px] items-center gap-1">
                                     <FiDownload className="w-4 h-4" /> Download
                                   </a>
                                 )
                               )}
-                              <button onClick={() => toggle(r.record_id)} className="text-xs text-muted inline-flex items-center gap-1 hover:text-orange-500">
+                              <button onClick={() => toggle(r.record_id)} className="text-xs text-muted inline-flex min-h-[44px] items-center gap-1 hover:text-orange-500">
                                 {isOpen ? <FiChevronUp /> : <FiChevronDown />}
                                 {isOpen ? 'Collapse' : 'View Full'}
                               </button>
@@ -515,21 +518,10 @@ const EHRWallet = () => {
         </AnimatePresence>
       </motion.div>
 
-      {/* Floating action — add allergy (image upload is inline in the Images tab) */}
-      {activeTab === 'allergies' && (
-        <button
-          onClick={() => setShowAllergy(true)}
-          className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-orange-500 text-white shadow-lg shadow-orange-500/30 flex items-center justify-center hover:bg-orange-600 transition"
-          title="Add allergy"
-        >
-          <FiPlus className="w-6 h-6" />
-        </button>
-      )}
-
       {/* QR Share Modal */}
       <Modal isOpen={showQR && qr} onClose={() => setShowQR(false)} title="Share EHR via QR">
         <div className="text-center">
-          {qr?.qr_code && <img src={qr.qr_code} alt="QR" className="mx-auto w-48 h-48 sm:w-56 sm:h-56 object-contain" />}
+          {qr?.qr_code && <img src={qr.qr_code} alt="QR" className="mx-auto aspect-square w-full max-w-48 object-contain sm:max-w-56" />}
           <div className={`mt-4 inline-block px-4 py-2 rounded-full font-mono font-semibold ${
             remainingMs > 60_000 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'
           }`}>
@@ -539,12 +531,12 @@ const EHRWallet = () => {
           {qr?.short_code && (
             <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mt-4">
               <p className="text-sm text-orange-600 font-medium mb-2">📞 Tell this code to your doctor:</p>
-              <div className="flex flex-wrap sm:flex-nowrap items-center justify-center gap-2 sm:gap-3">
-                <div className="flex gap-1 sm:gap-2">
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+                <div className="flex min-w-0 max-w-full justify-center gap-1 sm:gap-2">
                   {qr.short_code.split('').map((digit, i) => (
                     <span
                       key={i}
-                      className="shrink-0 w-8 h-10 sm:w-10 sm:h-12 bg-white border-2 border-orange-300 rounded-xl flex items-center justify-center text-xl sm:text-2xl font-bricolage font-extrabold text-ink shadow-sm"
+                      className="min-w-0 w-8 h-10 sm:w-10 sm:h-12 bg-white border-2 border-orange-300 rounded-xl flex items-center justify-center text-xl sm:text-2xl font-bricolage font-extrabold text-ink shadow-sm"
                     >
                       {digit}
                     </span>
@@ -552,7 +544,8 @@ const EHRWallet = () => {
                 </div>
                 <button
                   onClick={() => { navigator.clipboard?.writeText(qr.short_code); toast.success('Code copied!'); }}
-                  className="bg-orange-500 text-white p-2 rounded-xl hover:bg-orange-600"
+                  aria-label="Copy sharing code"
+                  className="h-11 w-11 shrink-0 rounded-xl bg-orange-500 text-white hover:bg-orange-600"
                 >
                   📋
                 </button>
@@ -570,7 +563,7 @@ const EHRWallet = () => {
           {(qr?.token || qr?.consent_id) && (
             <div className="mt-2">
               <div className="flex items-center justify-center gap-2">
-                <code className="bg-cream border border-hairline rounded-xl px-3 sm:px-4 py-2 text-ink font-mono text-xs sm:text-sm font-bold tracking-wider select-all break-all text-left max-h-24 overflow-y-auto">
+                <code className="bg-cream border border-hairline rounded-xl px-3 sm:px-4 py-2 text-ink font-mono text-xs sm:text-sm font-bold tracking-wider select-all break-all text-left min-w-0 max-h-24 overflow-y-auto">
                   {qr.token || qr.consent_id}
                 </code>
                 <button
@@ -605,7 +598,7 @@ const EHRWallet = () => {
               { value: 'moderate', label: 'Moderate' },
               { value: 'severe', label: 'Severe' },
             ]} />
-          <div className="flex justify-end gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end sm:gap-3">
             <button type="button" onClick={() => setShowAllergy(false)} className="btn-orange-outline">Cancel</button>
             <button type="submit" disabled={submitting} className="btn-orange disabled:opacity-60">
               {submitting ? 'Saving…' : 'Save Allergy'}
@@ -615,11 +608,11 @@ const EHRWallet = () => {
       </Modal>
 
       {/* Image lightbox */}
-      <Modal isOpen={Boolean(lightbox)} onClose={() => setLightbox(null)} title={lightbox?.title || ''} size="lg">
+      <Modal isOpen={Boolean(lightbox)} onClose={() => setLightbox(null)} title={<span className="[overflow-wrap:anywhere]">{lightbox?.title}</span>} size="lg">
         {lightbox && (
           <div>
-            <img src={lightbox.image_url} alt={lightbox.title} className="w-full max-h-[70vh] object-contain rounded-lg" />
-            {lightbox.description && <p className="text-sm text-muted mt-3">{lightbox.description}</p>}
+            <img src={lightbox.image_url} alt={lightbox.title} className="w-full max-h-[60dvh] object-contain rounded-lg" />
+            {lightbox.description && <p className="mt-3 break-words text-sm text-muted">{lightbox.description}</p>}
           </div>
         )}
       </Modal>

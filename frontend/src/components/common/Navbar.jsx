@@ -99,10 +99,10 @@ const Navbar = ({ onToggleSidebar }) => {
 
   return (
     <nav className="bg-white text-ink border-b border-hairline shadow-sm sticky top-0 z-30">
-      <div className="px-4 sm:px-6 lg:px-8">
+      <div className="px-2 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Left: sidebar toggle + logo */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 sm:gap-3">
             {isAuthenticated && onToggleSidebar && (
               <button
                 onClick={onToggleSidebar}
@@ -121,7 +121,7 @@ const Navbar = ({ onToggleSidebar }) => {
           </div>
 
           {isAuthenticated ? (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 sm:gap-3">
               {/* Notifications bell */}
               <div className="relative" ref={notifRef}>
                 <button
@@ -194,7 +194,8 @@ const Navbar = ({ onToggleSidebar }) => {
               <div className="relative" ref={profileRef}>
                 <button
                   onClick={() => setProfileOpen((v) => !v)}
-                  className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full hover:bg-orange-50 transition"
+                  aria-label="Account menu"
+                  className="flex items-center gap-2 p-1.5 sm:pl-2 sm:pr-3 rounded-full hover:bg-orange-50 transition"
                 >
                   {user?.profile_photo ? (
                     <img
@@ -211,7 +212,7 @@ const Navbar = ({ onToggleSidebar }) => {
                     <div className="text-sm font-medium truncate max-w-[140px]">{fullName}</div>
                     <div className="text-[11px] opacity-70">{ROLE_LABELS[role] || role}</div>
                   </div>
-                  <FiChevronDown className="w-4 h-4 opacity-70" />
+                  <FiChevronDown className="hidden h-4 w-4 opacity-70 sm:block" />
                 </button>
 
                 {profileOpen && (

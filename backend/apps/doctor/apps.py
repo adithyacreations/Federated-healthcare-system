@@ -22,7 +22,7 @@ class DoctorConfig(AppConfig):
             cmd in argv for cmd in (
                 'makemigrations', 'migrate', 'shell', 'collectstatic',
                 'check', 'createsuperuser', 'send_appointment_reminders',
-                'test', 'dbshell',
+                'test', 'dbshell', 'bootstrap_platform_admin',
             )
         ) and 'manage.py' not in argv[-1:]
 

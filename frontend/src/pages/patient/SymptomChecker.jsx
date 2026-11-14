@@ -2,18 +2,11 @@ import { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { FiSearch, FiX, FiAlertOctagon, FiRefreshCw } from 'react-icons/fi';
+import { FiSearch, FiX, FiRefreshCw } from 'react-icons/fi';
 
 import DashboardLayout from '../../components/common/DashboardLayout';
 import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
-
-const SEVERITY_STYLES = {
-  low: 'bg-success/10 text-success border-success/30',
-  moderate: 'bg-yellow-50 text-warning border-yellow-200',
-  high: 'bg-orange-50 text-orange-700 border-orange-200',
-  critical: 'bg-red-50 text-danger border-red-200',
-};
 
 const SymptomChecker = () => {
   const navigate = useNavigate();
@@ -261,26 +254,12 @@ const SymptomChecker = () => {
           </motion.div>
         ) : (
           <motion.div key="result" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-            {/* Severity badge */}
-            <div className={`card mb-5 border-2 ${SEVERITY_STYLES[result.severity] || ''}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs uppercase tracking-wide opacity-70 mb-1">Severity</div>
-                  <div className={`text-3xl font-bold uppercase ${result.severity === 'critical' ? 'animate-pulse' : ''}`}>
-                    {result.severity}
-                  </div>
-                </div>
-                <FiAlertOctagon className="w-12 h-12 opacity-30" />
-              </div>
-              <p className="mt-3 text-sm leading-relaxed">{result.recommendation}</p>
-            </div>
-
             {/* Emergency banner */}
             {result.emergency_triggered && (
               <div className="card bg-red-50 border-2 border-red-200 mb-5">
-                <div className="font-bold text-danger mb-1">⚠️ High Severity Detected</div>
+                <div className="font-bold text-danger mb-1">When to seek help</div>
                 <p className="text-sm text-red-900 mb-3">
-                  Please seek immediate medical attention. Don't delay.
+                  Please seek medical attention now.
                 </p>
                 <Link to="/patient/emergency" className="btn-danger inline-block">Go to Emergency SOS</Link>
               </div>
@@ -311,6 +290,13 @@ const SymptomChecker = () => {
                 Model: {result.model_used === 'ml_model' ? 'Trained ML' : 'Rule-based'} · v{result.model_version}
               </div>
             </div>
+
+            {!result.emergency_triggered && result.recommendation && (
+              <div className="card mb-5">
+                <h3 className="font-semibold text-primary-500 mb-2">Suggested next steps</h3>
+                <p className="text-sm leading-relaxed text-gray-700">{result.recommendation}</p>
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-3">
               <Link to="/patient/consultations" className="btn-primary">Book a Doctor</Link>

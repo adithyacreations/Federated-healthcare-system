@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import ResetCodeInput from '../../components/auth/ResetCodeInput';
 import toast from 'react-hot-toast';
 import API from '../../api/axios';
 
@@ -11,12 +12,9 @@ const ForgotPasswordPage = () => {
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
-  const [otpDigits, setOtpDigits] = useState(Array(6).fill(''));
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const otpRefs = useRef([]);
 
   const requestOTP = async () => {
     if (!email) return;
@@ -24,8 +22,7 @@ const ForgotPasswordPage = () => {
       setLoading(true);
       const response = await API.post('/api/auth/password-reset/request/', { email });
       if (response.data.success) {
-        toast.success('OTP sent to your email!');
-        setOtpDigits(Array(6).fill(''));
+        toast.success(response.data.message || 'If this email is registered, you should receive a reset code.');
         setOtp('');
         setStep(2);
       }
@@ -57,8 +54,8 @@ const ForgotPasswordPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: '#FAF7F2' }}>
-      <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-lg">
+    <div className="min-h-[100dvh] flex items-center justify-center p-4" style={{ backgroundColor: '#FAF7F2' }}>
+      <div className="bg-white rounded-2xl p-4 sm:p-8 w-full max-w-md shadow-lg">
         {/* Logo */}
         <div className="flex items-center gap-2 mb-6">
           <div
@@ -77,10 +74,12 @@ const ForgotPasswordPage = () => {
             <p className="text-gray-500 text-sm mb-6">Enter your email to receive a 6-digit OTP</p>
             <input
               type="email"
+              aria-label="Email address"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="your@email.com"
-              className="w-full border border-gray-200 rounded-xl p-3 text-sm mb-4 focus:outline-none focus:border-orange-400"
+              className="w-full border border-gray-200 rounded-xl p-3 text-base mb-4 focus:outline-none focus:border-orange-400"
             />
             <button
               onClick={requestOTP}
@@ -98,53 +97,22 @@ const ForgotPasswordPage = () => {
           <>
             <h2 className="font-bold text-2xl mb-2 text-black">Enter OTP</h2>
             <p className="text-gray-500 text-sm mb-6">
-              We sent a 6-digit code to <b>{email}</b>
+              If <b className="break-all">{email}</b> is registered, check its inbox or spam folder for a 6-digit code.
             </p>
 
-            <div className="flex justify-center gap-2 mb-6">
-              {otpDigits.map((digit, i) => (
-                <input
-                  key={i}
-                  ref={(el) => { otpRefs.current[i] = el; }}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (!/^\d*$/.test(val)) return;
-                    const newDigits = [...otpDigits];
-                    newDigits[i] = val;
-                    setOtpDigits(newDigits);
-                    if (val && i < 5) otpRefs.current[i + 1]?.focus();
-                    if (i === 5 && val) {
-                      const code = newDigits.join('');
-                      if (code.length === 6) {
-                        setOtp(code);
-                        setStep(3);
-                      }
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Backspace' && !digit && i > 0) otpRefs.current[i - 1]?.focus();
-                  }}
-                  style={{
-                    width: '48px',
-                    height: '56px',
-                    textAlign: 'center',
-                    fontSize: '24px',
-                    fontWeight: '700',
-                    border: `2px solid ${digit ? ORANGE : '#E5E5E5'}`,
-                    borderRadius: '12px',
-                    outline: 'none',
-                  }}
-                />
-              ))}
-            </div>
+            <ResetCodeInput value={otp} onChange={setOtp} />
+            <button
+              onClick={() => setStep(3)}
+              disabled={otp.length !== 6 || loading}
+              className="mb-3 w-full rounded-full py-3 font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: ORANGE }}
+            >
+              Continue
+            </button>
 
             <p className="text-center text-sm text-gray-500 mb-4">
               Didn't receive?{' '}
-              <button onClick={requestOTP} className="font-medium underline" style={{ color: ORANGE }}>
+              <button onClick={requestOTP} disabled={loading} className="min-h-[44px] font-medium underline disabled:opacity-50" style={{ color: ORANGE }}>
                 Resend OTP
               </button>
             </p>
@@ -155,21 +123,26 @@ const ForgotPasswordPage = () => {
         {step === 3 && (
           <>
             <h2 className="font-bold text-2xl mb-2 text-black">New Password</h2>
-            <p className="text-gray-500 text-sm mb-6">Create a strong new password</p>
+            <p className="text-gray-500 text-sm mb-2">Create a strong new password</p>
+            <button type="button" onClick={() => setStep(2)} disabled={loading} className="min-h-[44px] text-sm font-medium text-orange-700">Edit reset code</button>
 
             <input
               type="password"
+              aria-label="New password"
+              autoComplete="new-password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="New password"
-              className="w-full border border-gray-200 rounded-xl p-3 text-sm mb-3 focus:outline-none focus:border-orange-400"
+              className="w-full border border-gray-200 rounded-xl p-3 text-base mb-3 focus:outline-none focus:border-orange-400"
             />
             <input
               type="password"
+              aria-label="Confirm password"
+              autoComplete="new-password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="Confirm password"
-              className="w-full border border-gray-200 rounded-xl p-3 text-sm mb-4 focus:outline-none focus:border-orange-400"
+              className="w-full border border-gray-200 rounded-xl p-3 text-base mb-4 focus:outline-none focus:border-orange-400"
             />
 
             {newPassword && confirmPassword && newPassword !== confirmPassword && (
