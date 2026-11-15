@@ -155,14 +155,17 @@ export default function FederCareChatbot() {
       // Attach the token only if the user is logged in (gets the higher limit);
       // guests send no auth header and the endpoint still answers them.
       const token = localStorage.getItem('access_token');
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) headers.Authorization = `Bearer ${token}`;
-
-      const res = await axios.post(
-        `${BASE_URL}/api/ai/chat/`,
-        { message: userMessage, history },
-        { headers }
-      );
+      const url = `${BASE_URL}/api/ai/chat/`;
+      const payload = { message: userMessage, history };
+      let res;
+      try {
+        res = await axios.post(url, payload, token
+          ? { headers: { Authorization: `Bearer ${token}` } }
+          : undefined);
+      } catch (error) {
+        if (!token || error.response?.status !== 401) throw error;
+        res = await axios.post(url, payload);
+      }
 
       const text = res.data?.success ? res.data.data?.reply : null;
       if (!text) throw new Error(res.data?.message || 'Empty response from AI');
@@ -172,7 +175,7 @@ export default function FederCareChatbot() {
         { role: 'assistant', content: text, time: formatTime() },
       ]);
     } catch (error) {
-      console.error('Chat error:', error);
+      console.error('Chat request failed:', error.response?.status ?? error.code);
       const rateLimited = error.response?.status === 429;
       setMessages((prev) => [
         ...prev,
