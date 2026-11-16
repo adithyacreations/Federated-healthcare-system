@@ -72,6 +72,7 @@ const DriverDashboard = () => {
   const wsRef = useRef(null);
   const alertRef = useRef(null); // mirrors emergencyAlert for the WS closure
   const dismissedRef = useRef(null); // last dispatch id this driver handled (poll guard)
+  const acceptingRef = useRef(false);
 
   const { data: dashData, refetch: refetchDash } = useApi('/api/emergency/dashboard/', { pollInterval: 10000 });
   // We use `unwrap: false` so we can access the `cancelled` and `message` metadata
@@ -249,23 +250,34 @@ const DriverDashboard = () => {
   const acceptDispatch = async () => {
     const dispatchId = emergencyAlert?.dispatch_id;
     if (!dispatchId) { setShowAlert(false); setEmergencyAlert(null); return; }
-    dismissedRef.current = dispatchId; // poll must not re-raise this one
+    if (acceptingRef.current) return;
+    acceptingRef.current = true;
     setAccepting(true);
     try {
       const res = await API.post(`/api/emergency/dispatch/${dispatchId}/accept/`);
+      dismissedRef.current = dispatchId;
       toast.success(res.data?.message || 'Dispatch accepted');
       setShowAlert(false);
       setEmergencyAlert(null);
       refetchDispatch();
       refetchDash();
-    } catch {
-      toast.error('Failed to accept dispatch');
+    } catch (error) {
+      if ([404, 409].includes(error?.response?.status)) {
+        dismissedRef.current = dispatchId;
+        setShowAlert(false);
+        setEmergencyAlert(null);
+        refetchDispatch();
+        refetchDash();
+      }
+      toast.error(error?.response?.data?.message || 'Failed to accept dispatch');
     } finally {
+      acceptingRef.current = false;
       setAccepting(false);
     }
   };
 
   const rejectDispatch = async () => {
+    if (acceptingRef.current) return;
     const dispatchId = emergencyAlert?.dispatch_id;
     setShowAlert(false);
     setEmergencyAlert(null);

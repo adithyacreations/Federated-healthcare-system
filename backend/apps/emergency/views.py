@@ -110,6 +110,15 @@ def free_ambulance(dispatch):
         print(f'[EMERGENCY] Ambulance free error: {exc}')
 
 
+def reject_pending_dispatch(dispatch):
+    updated = AmbulanceDispatch.objects.filter(
+        pk=dispatch.pk, dispatch_status='dispatched',
+    ).update(dispatch_status='rejected')
+    if updated:
+        dispatch.dispatch_status = 'rejected'
+    return bool(updated)
+
+
 # ─── Bed availability + real-time rerouting (Option B) ──────────────────────
 # Destination state lives on the EmergencyRequest (assigned_hospital_id /
 # assigned_bed_id). A reserved Bed is linked back to its emergency so the
@@ -533,8 +542,8 @@ def reap_stale_dispatches(driver=None):
         if not dispatch.dispatched_at:
             continue
         if dispatch.dispatched_at <= now - timedelta(seconds=max_age):
-            dispatch.dispatch_status = 'rejected'
-            dispatch.save(update_fields=['dispatch_status'])
+            if not reject_pending_dispatch(dispatch):
+                continue
             free_ambulance(dispatch)
             cancel_dispatch_timer(dispatch.dispatch_id, 'orphaned — swept on read')
             _release_bed_if_terminal(dispatch.emergency_id)
@@ -722,8 +731,8 @@ def schedule_dispatch_timeout(dispatch_id, seconds=None):
                 # wasn't released by the cancel/ImSafe path (race condition).
                 _release_bed_if_terminal(dispatch.emergency_id)
                 return
-            dispatch.dispatch_status = 'rejected'
-            dispatch.save(update_fields=['dispatch_status'])
+            if not reject_pending_dispatch(dispatch):
+                return
             free_ambulance(dispatch)
             # Dismiss the timed-out driver's popup so they don't keep seeing an
             # emergency that's now being offered to someone else.
@@ -1014,80 +1023,85 @@ class AcceptDispatchView(APIView):
             'ambulance_id',
         )
 
-        # Resolve which dispatch this accept refers to (fall back to the driver's
-        # latest live dispatch if the id is stale), then lock + validate + claim
-        # it atomically so two drivers can't both win the same emergency.
+        driver_dispatches = AmbulanceDispatch.objects.filter(ambulance_id__driver_id=driver)
+        cancelled = []
         with transaction.atomic():
-            locked = AmbulanceDispatch.objects.select_for_update().filter(
-                dispatch_id=dispatch_id, ambulance_id__driver_id=driver,
-            ).first()
-            if not locked:
-                locked = AmbulanceDispatch.objects.select_for_update().filter(
-                    ambulance_id__driver_id=driver,
+            target = driver_dispatches.filter(dispatch_id=dispatch_id).values_list('pk', 'emergency_id').first()
+            if target is None:
+                target = driver_dispatches.filter(
                     dispatch_status__in=['dispatched', 'en_route', 'arrived'],
-                ).order_by('-dispatched_at').first()
-            if not locked:
+                ).order_by('-dispatched_at').values_list('pk', 'emergency_id').first()
+            if target is None:
+                return err('No active dispatch found.', status_code=404)
+
+            target_id, emergency_id = target
+            # Lock the parent before any dispatch row to serialize competing accepts.
+            emergency = EmergencyRequest.objects.select_for_update(no_key=True).filter(pk=emergency_id).first()
+            if emergency is None:
+                return err('No active dispatch found.', status_code=404)
+            locked = driver_dispatches.select_for_update(of=('self',)).filter(pk=target_id).first()
+            if locked is None:
                 return err('No active dispatch found.', status_code=404)
 
             # Stale-acceptance guard: a dispatch that was reassigned (rejected),
             # cancelled, or completed can NOT be accepted. Only a still-pending
             # 'dispatched' one (or one this same driver already moved past, for
             # idempotent re-taps) is acceptable.
-            if locked.dispatch_status not in ('dispatched', 'en_route', 'arrived'):
+            if (
+                locked.dispatch_status not in ('dispatched', 'en_route', 'arrived')
+                or emergency.status in ('cancelled', 'completed', 'resolved', 'no_drivers')
+                or emergency.cancelled_by or emergency.patient_safe
+            ):
                 return err(
-                    'This emergency has already been handled by another driver.',
+                    'This emergency is no longer available to accept.',
                     status_code=409,
                 )
 
             first_accept = locked.dispatch_status == 'dispatched'
             if first_accept:
+                others = AmbulanceDispatch.objects.filter(emergency_id=emergency).exclude(pk=locked.pk)
+                if others.filter(dispatch_status__in=ACCEPTED_DISPATCH_STATUSES).exists():
+                    return err('This emergency has already been accepted by another driver.', status_code=409)
+
                 locked.dispatch_status = 'en_route'
                 if not locked.accepted_at:
                     locked.accepted_at = datetime.now(tz=timezone.utc)
                 locked.save(update_fields=['dispatch_status', 'accepted_at'])
 
-                # Driver accepted → kill this dispatch's auto-reassign timer so it
-                # can never fire and offer the emergency to the next driver.
-                cancel_dispatch_timer(locked.dispatch_id, 'driver accepted')
-
-                # Claim the emergency: cancel every OTHER live dispatch for it and
-                # tell those drivers to drop their popup. (Normally none exist —
-                # this closes the reassign-window race where a stale dispatch is
-                # still showing on another driver's screen.)
-                others = AmbulanceDispatch.objects.select_for_update().select_related(
+                # PostgreSQL can't lock through the optional ambulance driver join.
+                competing_dispatches = others.select_for_update(of=('self',)).select_related(
                     'ambulance_id', 'ambulance_id__driver_id',
                     'ambulance_id__driver_id__login_id',
-                ).filter(
-                    emergency_id=locked.emergency_id,
-                    dispatch_status__in=['dispatched', 'pending_acknowledgment'],
-                ).exclude(dispatch_id=locked.dispatch_id)
-                cancelled_count = 0
-                for other in others:
+                ).filter(dispatch_status='dispatched')
+                for other in competing_dispatches:
                     other.dispatch_status = 'cancelled'
                     other.save(update_fields=['dispatch_status'])
                     free_ambulance(other)
-                    cancel_dispatch_timer(other.dispatch_id, 'superseded by accept')
-                    push_dispatch_cancelled(other)
-                    cancelled_count += 1
-                if cancelled_count:
-                    print(f'[ACCEPT] Cancelled {cancelled_count} other dispatch(es) '
-                          f'for emergency {locked.emergency_id_id}')
+                    cancelled.append(other)
+
+                Ambulance.objects.filter(pk=locked.ambulance_id_id).update(is_available=False)
+                AmbulanceDriverRegistration.objects.filter(pk=driver.pk).update(is_available=False)
+                log_audit(
+                    login_id=request.user, action='Driver accepted dispatch', module='emergency',
+                    entity_type='AmbulanceDispatch', entity_id=locked.pk,
+                )
+
+        if first_accept:
+            cancel_dispatch_timer(locked.dispatch_id, 'driver accepted')
+            for other in cancelled:
+                cancel_dispatch_timer(other.dispatch_id, 'superseded by accept')
+                push_dispatch_cancelled(other)
 
         # Reload with related rows for the response/notifications.
         dispatch = AmbulanceDispatch.objects.select_related(*related).get(
             dispatch_id=locked.dispatch_id,
         )
+        if not first_accept:
+            return ok('Dispatch accepted.', DispatchSerializer(dispatch).data)
+
         emergency = dispatch.emergency_id
         patient = emergency.patient_id
         ambulance = dispatch.ambulance_id
-
-        # Lock the ambulance for the duration of the active trip so it
-        # cannot be dispatched to a second emergency.
-        ambulance.is_available = False
-        ambulance.save(update_fields=['is_available'])
-        driver.is_available = False
-        driver.save(update_fields=['is_available'])
-        print(f"Ambulance {ambulance.vehicle_no} set UNAVAILABLE")
 
         send_notification(
             login_id=patient.login_id,
@@ -1113,13 +1127,6 @@ class AcceptDispatchView(APIView):
             },
         )
 
-        log_audit(
-            login_id=request.user,
-            action='Driver accepted dispatch',
-            module='emergency',
-            entity_type='AmbulanceDispatch',
-            entity_id=str(dispatch.dispatch_id),
-        )
         return ok('Dispatch accepted.', DispatchSerializer(dispatch).data)
 
 
@@ -1142,17 +1149,11 @@ class RejectDispatchView(APIView):
         except AmbulanceDispatch.DoesNotExist:
             return err('Dispatch not found.', status_code=404)
 
-        if dispatch.dispatch_status != 'dispatched':
+        if not reject_pending_dispatch(dispatch):
             return err('This dispatch can no longer be rejected.', status_code=400)
 
-        # Cancel the auto-reassign timer FIRST — before flipping status — so it
-        # can't fire mid-reject and trigger a SECOND reroute alongside the one
-        # below (which would dispatch two drivers at once). The reassignment
-        # further down starts a fresh timer for the next driver.
+        # Only the request that changed the pending status can reassign it.
         cancel_dispatch_timer(dispatch.dispatch_id, 'driver rejected')
-
-        dispatch.dispatch_status = 'rejected'
-        dispatch.save(update_fields=['dispatch_status'])
 
         # Free this ambulance + driver so they remain eligible for others.
         free_ambulance(dispatch)
