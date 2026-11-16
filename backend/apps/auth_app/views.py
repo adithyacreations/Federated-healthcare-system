@@ -1,6 +1,7 @@
 import hashlib
 import io
 import base64
+import secrets
 from decimal import Decimal
 from datetime import date, datetime
 from uuid import UUID
@@ -16,6 +17,8 @@ from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import LoginCredentials, LoginSession, Developer, ProjectFeature
+from .attempts import limit_attempts
+from .authentication import session_stamp
 from .serializers import (
     LoginSerializer,
     PatientRegisterSerializer,
@@ -47,6 +50,7 @@ def make_tokens(login_obj):
     refresh = RefreshToken()
     refresh['login_id'] = str(login_obj.login_id)
     refresh['role'] = login_obj.role
+    refresh['session'] = session_stamp(login_obj)
     return str(refresh.access_token), str(refresh)
 
 
@@ -159,8 +163,12 @@ def phone_limit_error(phone_number):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     def post(self, request):
+        email = request.data.get('email')
+        if isinstance(email, str) and email.strip():
+            limit_attempts('login', email.strip().lower(), limit=10, window=900)
         serializer = LoginSerializer(data=request.data)
         try:
             serializer.is_valid(raise_exception=True)
@@ -814,8 +822,7 @@ class PlatformActionView(APIView):
             prof = getattr(login, 'vendor_profile', None)
             entity_name = (getattr(prof, 'company_name', None) if prof else None) or login.email
         # suspend / terminate block sign-in; resume restores it.
-        login.is_active = (action == 'resume')
-        login.save(update_fields=['is_active', 'updated_at'])
+        login.set_account_active(action == 'resume')
 
         if action == 'resume':
             email_sent = self._send_resume_email(login.email, entity_name, entity_type)
@@ -1112,6 +1119,8 @@ class ChangeFirstPasswordView(APIView):
         from django.contrib.auth.hashers import check_password
 
         login = request.user
+        if not login.force_password_change:
+            return err('Use the regular password change or reset flow.', status=403)
         new_password = (request.data.get('new_password') or '').strip()
         confirm_password = (request.data.get('confirm_password') or '').strip()
 
@@ -1153,13 +1162,13 @@ class PasswordResetRequestView(APIView):
     authentication_classes = []
 
     def post(self, request):
-        import secrets
         from django.core.cache import cache
         from email_utils import send_email
 
         email = (request.data.get('email') or '').strip().lower()
         if not email:
             return err('Email is required')
+        limit_attempts('reset-send', email, limit=3, window=900)
 
         # Use the same public response for unknown accounts and delivery failures.
         response = ok('If this email is registered, you should receive a reset code.')
@@ -1214,6 +1223,7 @@ class PasswordResetVerifyView(APIView):
 
         if not email or not otp or not new_password:
             return err('email, otp and new_password are required')
+        limit_attempts('reset-verify', email, limit=5, window=600)
         if len(new_password) < 6:
             return err('New password must be at least 6 characters')
 
@@ -1221,7 +1231,7 @@ class PasswordResetVerifyView(APIView):
         stored_otp = cache.get(cache_key)
         if not stored_otp:
             return err('OTP expired! Request a new one.', status=400)
-        if stored_otp != otp:
+        if not otp.isascii() or not secrets.compare_digest(stored_otp, otp):
             return err('Invalid OTP!', status=400)
 
         try:
@@ -1286,7 +1296,6 @@ class AuthenticatedPasswordResetView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        import random
         from django.contrib.auth.hashers import check_password
         from django.core.cache import cache
         from email_utils import send_email
@@ -1297,8 +1306,8 @@ class AuthenticatedPasswordResetView(APIView):
         cache_key = f'password_reset_otp_{email}'
 
         if action == 'send_otp':
-            otp = str(random.randint(100000, 999999))
-            cache.set(cache_key, otp, timeout=600)  # 10 minutes
+            limit_attempts('reset-send', email, limit=3, window=900)
+            otp = str(100000 + secrets.randbelow(900000))
 
             html = f"""
             <div style="font-family: Arial; max-width: 600px; margin: 0 auto;">
@@ -1316,14 +1325,14 @@ class AuthenticatedPasswordResetView(APIView):
                 </div>
             </div>
             """
-            try:
-                send_email(email, 'FederCare: Password Reset OTP', html)
-            except Exception as e:
-                print(f'OTP email error: {e}')
+            if not send_email(email, 'FederCare: Password Reset OTP', html):
+                return err('Could not send the reset code. Please try again.', status=503)
+            cache.set(cache_key, otp, timeout=600)
 
             return ok(f'OTP sent to {email}!')
 
         elif action == 'verify_and_reset':
+            limit_attempts('reset-verify', email, limit=5, window=600)
             otp = (request.data.get('otp') or '').strip()
             current_password = request.data.get('current_password') or ''
             new_password = (request.data.get('new_password') or '').strip()
@@ -1331,7 +1340,7 @@ class AuthenticatedPasswordResetView(APIView):
             stored_otp = cache.get(cache_key)
             if not stored_otp:
                 return err('OTP expired! Request a new one.', status=400)
-            if stored_otp != otp:
+            if not otp.isascii() or not secrets.compare_digest(stored_otp, otp):
                 return err('Invalid OTP!', status=400)
 
             if not check_password(current_password, login.password_hash):

@@ -166,8 +166,7 @@ def email_staff_credentials(login, full_name, role, hospital, temp_password):
     and email the new staff member their credentials. Returns True if the email
     was sent (so the UI can offer a "share manually" fallback if it failed)."""
     login.force_password_change = True
-    login.temp_password = temp_password
-    login.save(update_fields=['force_password_change', 'temp_password', 'updated_at'])
+    login.save(update_fields=['force_password_change', 'updated_at'])
     try:
         from email_utils import send_staff_welcome_email
         return send_staff_welcome_email(
@@ -740,8 +739,7 @@ class DeleteStaffView(APIView):
         email = staff.login_id.email
 
         # Deactivate the central login (blocks sign-in) — reversible by support.
-        staff.login_id.is_active = False
-        staff.login_id.save(update_fields=['is_active', 'updated_at'])
+        staff.login_id.set_account_active(False)
 
         hospital_email = getattr(hospital.login_id, 'email', 'federcaresupport@gmail.com')
         try:
@@ -797,8 +795,7 @@ class StaffActionView(APIView):
         email = staff.login_id.email
 
         # suspend / terminate block sign-in; resume restores it.
-        staff.login_id.is_active = (action == 'resume')
-        staff.login_id.save(update_fields=['is_active', 'updated_at'])
+        staff.login_id.set_account_active(action == 'resume')
 
         if role == 'doctor' and action in ('suspend', 'terminate'):
             staff.is_online = False

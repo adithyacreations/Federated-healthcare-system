@@ -4,10 +4,10 @@ from uuid import UUID
 
 from channels.db import database_sync_to_async
 from django.db.models import Q
-from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 
-from apps.auth_app.models import LoginCredentials
+from apps.auth_app.authentication import FederCareJWTAuthentication
 from apps.doctor.models import Consultation
 from apps.emergency.models import AmbulanceDispatch
 from apps.lab.models import LabOrder
@@ -36,18 +36,16 @@ def order_belongs_to(order_id, login_id):
 def authorize_socket(token, channel, kwargs):
     try:
         claims = AccessToken(token)
-        login_id = UUID(claims['login_id'])
+        user = FederCareJWTAuthentication().get_user(claims)
+        login_id = user.pk
         ids = {
             key: UUID(value) for key, value in kwargs.items()
             if key != 'user_type'
         }
-    except (TokenError, KeyError, ValueError, TypeError, AttributeError):
+    except (InvalidToken, TokenError, KeyError, ValueError, TypeError, AttributeError):
         return None
 
-    user = LoginCredentials.objects.filter(
-        pk=login_id, is_active=True, is_approved=True,
-    ).first()
-    if user is None or user.role != claims.get('role') or user.force_password_change:
+    if user.force_password_change:
         return None
 
     role = user.role
@@ -111,13 +109,16 @@ def protected_socket(consumer, channel):
                 message = {**message, 'subprotocol': 'federcare.jwt'}
             await send(message)
 
-        async def close_at_expiry():
+        async def monitor_authorization():
             nonlocal terminated
-            await asyncio.sleep(max(0, expires - time.time()))
+            while expires > time.time():
+                await asyncio.sleep(min(30, max(0, expires - time.time())))
+                if expires <= time.time() or not await authorize_socket(protocols[1], channel, kwargs):
+                    break
             terminated = True
             await send({'type': 'websocket.close', 'code': 4401})
 
-        expiry_task = asyncio.create_task(close_at_expiry())
+        expiry_task = asyncio.create_task(monitor_authorization())
         try:
             await consumer({**scope, 'user': user, 'url_route': route}, receive, send_message)
         finally:

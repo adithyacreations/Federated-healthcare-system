@@ -2008,8 +2008,7 @@ def check_false_alarms(patient, increment=False):
     if false_alarms >= 5:
         try:
             login = patient.login_id
-            login.is_active = False
-            login.save(update_fields=['is_active', 'updated_at'])
+            login.set_account_active(False)
             send_notification(
                 login, '🚫 Account Suspended',
                 'Your account has been suspended due to repeated false emergency alerts. '

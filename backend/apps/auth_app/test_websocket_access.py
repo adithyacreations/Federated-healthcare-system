@@ -3,9 +3,9 @@ from uuid import uuid4
 
 from channels.testing import WebsocketCommunicator
 from django.test import TransactionTestCase, override_settings
-from rest_framework_simplejwt.tokens import AccessToken
 
 from apps.auth_app.models import LoginCredentials
+from apps.auth_app.views import make_tokens
 from apps.doctor.models import Consultation, DoctorRegistration
 from apps.emergency.models import Ambulance, AmbulanceDispatch, AmbulanceDriverRegistration, EmergencyRequest
 from apps.hospital.models import HospitalRegistration
@@ -29,10 +29,7 @@ class SocketAuthorizationTests(TransactionTestCase):
 
     def socket(self, path, user=None, *, origin=ORIGIN, token=None):
         if user:
-            jwt = AccessToken()
-            jwt['login_id'] = str(user.pk)
-            jwt['role'] = user.role
-            token = str(jwt)
+            token, _ = make_tokens(user)
         return WebsocketCommunicator(
             application, path, headers=[(b'origin', origin)],
             subprotocols=['federcare.jwt', token] if token is not None else [],

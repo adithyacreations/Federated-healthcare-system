@@ -5,49 +5,6 @@ import API from '../../api/axios';
 
 const SECTION_EMOJI = ['🌟', '📋', '💡', '✅', '🎯', '👉', '⚕️'];
 
-const buildPrompt = (data) => `
-You are a friendly healthcare AI assistant for FederCare Health Network.
-
-Generate a warm, personalized health summary for this patient based on their recent records.
-
-Patient: ${data.basic_info.name}
-Age: ${data.basic_info.age}
-Blood Group: ${data.basic_info.blood_group}
-Gender: ${data.basic_info.gender}
-
-Overall Health Activity:
-- Total Consultations: ${data.stats.total_consultations}
-- Total Prescriptions: ${data.stats.total_prescriptions}
-- Total Lab Tests: ${data.stats.total_lab_tests}
-
-Recent Activity details (last 90 days):
-
-${data.consultations.length > 0 ? `Recent Consultations:
-${data.consultations.map((c) => `- ${c.date}: Dr. ${c.doctor}${c.diagnosis ? ' (' + c.diagnosis.slice(0, 50) + ')' : ''}`).join('\n')}` : 'No recent consultations.'}
-
-${data.prescriptions.length > 0 ? `Recent Medicines Prescribed:
-${data.prescriptions.map((p) => `- ${p.date}: ${p.medicines.slice(0, 3).join(', ')}`).join('\n')}` : 'No recent prescriptions.'}
-
-${data.lab_tests.length > 0 ? `Recent Lab Tests:
-${data.lab_tests.map((l) => `- ${l.date}: ${l.tests.slice(0, 3).join(', ')}${l.abnormal_count > 0 ? ' (' + l.abnormal_count + ' abnormal)' : ''}`).join('\n')}` : 'No recent lab tests.'}
-
-Please write a health summary with these sections:
-🌟 Overall Health Status
-📋 Recent Health Activity
-💡 Key Insights
-✅ What's Going Well
-🎯 Tips for Better Health
-👉 Next Steps
-
-Rules:
-- Be warm, friendly and encouraging
-- Use simple non-medical language
-- Keep under 250 words
-- Use the emoji headers shown above
-- Do NOT diagnose or prescribe
-- End with: "⚕️ Always consult your doctor for medical decisions"
-`;
-
 const generateDemoSummary = (data) => {
   const name = (data.basic_info.name || 'there').split(' ')[0];
   const hasConsults = data.stats.total_consultations > 0;
@@ -113,10 +70,7 @@ const AIHealthSummary = () => {
 
       // Gemini is called through the backend proxy — the API key stays on the
       // server and never reaches the browser.
-      const aiRes = await API.post('/api/ai/health-summary/', {
-        prompt: buildPrompt(data),
-        patient_id: data.basic_info?.patient_id,
-      });
+      const aiRes = await API.post('/api/ai/health-summary/', {});
 
       // Handle multiple possible response shapes — the backend wraps in
       // {success, data: {summary}} via the ok() helper, but be defensive.
@@ -137,8 +91,7 @@ const AIHealthSummary = () => {
         stats: data.stats,
       });
       setGenerated(true);
-    } catch (err) {
-      console.error('Health summary error:', err);
+    } catch {
       if (data) {
         setSummary({
           text: generateDemoSummary(data),

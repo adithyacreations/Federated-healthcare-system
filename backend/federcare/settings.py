@@ -26,7 +26,7 @@ def env_flag(name, default=False):
     raise ImproperlyConfigured(f'{name} must be true or false.')
 
 
-DEBUG = env_flag('DEBUG', default=True)
+DEBUG = env_flag('DEBUG', default=not bool(os.getenv('RENDER')))
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY') or (
     'django-insecure-local-development-only-key-for-federcare' if DEBUG else ''
 )
@@ -43,6 +43,7 @@ CORS_URLS_REGEX = r'^/(api|media)/'
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SECURE_SSL_REDIRECT = env_flag('SECURE_SSL_REDIRECT', default=not DEBUG)
+SECURE_HSTS_SECONDS = 0 if DEBUG else 300
 if env_flag('TRUST_PROXY_SSL_HEADER'):
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
@@ -128,6 +129,12 @@ ASGI_APPLICATION = 'federcare.asgi.application'
 
 redis_url = os.getenv('REDIS_URL', '').strip()
 if redis_url:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': redis_url,
+        }
+    }
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -166,7 +173,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_RENDERER_CLASSES': (
-        'rest_framework.renderers.JSONRenderer',
+        'federcare.media.MediaLinkRenderer',
     ),
 }
 
@@ -178,6 +185,7 @@ SIMPLE_JWT = {
     'UPDATE_LAST_LOGIN': True,
     'ALGORITHM': 'HS256',
     'AUTH_HEADER_TYPES': ('Bearer',),
+    'TOKEN_REFRESH_SERIALIZER': 'apps.auth_app.authentication.FederCareTokenRefreshSerializer',
 }
 
 # ── File storage ──────────────────────────────────────────────────────────────
@@ -190,7 +198,6 @@ SIMPLE_JWT = {
 #     'API_KEY': os.getenv('CLOUDINARY_API_KEY'),
 #     'API_SECRET': os.getenv('CLOUDINARY_API_SECRET'),
 # }
-DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
 RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET')

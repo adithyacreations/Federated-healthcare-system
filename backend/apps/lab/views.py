@@ -54,10 +54,9 @@ def save_lab_report_to_ehr(patient, report_url, test_names, hospital_name, uploa
             scan_date=dj_tz.now().date(),
             uploaded_by=uploaded_by,
         )
-        print(f'[EHR] Lab report auto-saved for {patient.full_name}: {names}')
         return True
     except Exception as e:
-        print(f'[EHR] lab report auto-save error: {e}')
+        print(f'[EHR] Lab report auto-save failed ({type(e).__name__})')
         return False
 
 
@@ -718,6 +717,10 @@ class UpdateLabOrderStatusView(APIView):
                 )
 
         report_url = request.data.get('report_url', '')
+        if report_url:
+            from federcare.media import media_path
+            if not isinstance(report_url, str) or media_path(report_url):
+                return err('Upload local report files through the report upload form.', status=400)
         results = request.data.get('results', {})
         flags = request.data.get('abnormal_flags', [])
 
@@ -758,13 +761,9 @@ class UpdateLabOrderStatusView(APIView):
             try:
                 send_lab_report_email(
                     to_email=order.patient_id.login_id.email,
-                    patient_name=order.patient_id.full_name,
-                    tests_done=[str(t) for t in test_names],
-                    abnormal_flags=flags,
-                    report_url=order.report_url or '',
                 )
             except Exception as exc:  # noqa: BLE001
-                print(f'[lab] patient report email error: {exc}')
+                print(f'[lab] Patient report email failed ({type(exc).__name__})')
         else:
             send_notification(
                 login_id=order.patient_id.login_id,
@@ -928,13 +927,9 @@ class UploadLabReportView(APIView):
         try:
             send_lab_report_email(
                 to_email=order.patient_id.login_id.email,
-                patient_name=order.patient_id.full_name,
-                tests_done=order.tests_ordered,
-                abnormal_flags=abnormal_flags,
-                report_url=report_url,
             )
         except Exception as exc:  # noqa: BLE001
-            print(f'[lab] report email error: {exc}')
+            print(f'[lab] Patient report email failed ({type(exc).__name__})')
 
         log_audit(
             login_id=request.user, action='Lab report uploaded',
@@ -989,13 +984,9 @@ class UploadLabReportView(APIView):
         try:
             send_lab_report_email(
                 to_email=order.patient_id.login_id.email,
-                patient_name=order.patient_id.full_name,
-                tests_done=[str(t) for t in test_names],
-                abnormal_flags=abnormal_flags,
-                report_url=report_url or '',
             )
         except Exception as exc:  # noqa: BLE001
-            print(f'[lab] patient report email error: {exc}')
+            print(f'[lab] Patient report email failed ({type(exc).__name__})')
 
         log_audit(
             login_id=request.user, action='Patient lab report uploaded',

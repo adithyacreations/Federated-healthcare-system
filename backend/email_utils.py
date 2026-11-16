@@ -553,66 +553,20 @@ def send_appointment_confirmation(to_email, patient_name, doctor_name, doctor_sp
     _send(to_email, "Appointment Confirmed — FederCare", html)
 
 
-def send_lab_report_email(to_email, patient_name, tests_done, abnormal_flags, report_url):
-    tests_html = ''.join(
-        f'<li style="padding:4px 0;color:#374151;">{t}</li>'
-        for t in (tests_done or [])
-    )
-
-    abnormal_html = ''
-    if abnormal_flags:
-        rows = ''.join(
-            f"""<tr>
-              <td style="padding:8px 12px;border-bottom:1px solid #fca5a5;color:#374151;">{f.get('test','')}</td>
-              <td style="padding:8px 12px;border-bottom:1px solid #fca5a5;color:{_DANGER};font-weight:bold;">{f.get('value','')} {f.get('unit','')}</td>
-              <td style="padding:8px 12px;border-bottom:1px solid #fca5a5;color:{_DANGER};">{f.get('status','')}</td>
-            </tr>"""
-            for f in abnormal_flags
-        )
-        abnormal_html = f"""
-        <p style="color:#991b1b;font-weight:bold;margin:24px 0 8px;">&#x26A0; Abnormal Values</p>
-        <table style="width:100%;border-collapse:collapse;background:#fef2f2;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-          <tr style="background:#fee2e2;">
-            <th style="padding:8px 12px;text-align:left;color:#7f1d1d;font-size:13px;">Test</th>
-            <th style="padding:8px 12px;text-align:left;color:#7f1d1d;font-size:13px;">Value</th>
-            <th style="padding:8px 12px;text-align:left;color:#7f1d1d;font-size:13px;">Status</th>
-          </tr>
-          {rows}
-        </table>
-        <p style="color:#6b7280;font-size:13px;margin:0 0 24px;">
-          Please consult your doctor regarding the abnormal values highlighted above.
-        </p>
-        """
-
-    download_btn = ''
-    if report_url:
-        download_btn = f"""
-        <a href="{report_url}"
-           style="display:inline-block;background:{_BRAND};color:#ffffff;text-decoration:none;
-                  padding:12px 24px;border-radius:8px;font-size:14px;font-weight:bold;margin-right:12px;">
-          Download Report
-        </a>
-        """
-
+def send_lab_report_email(to_email):
     body = f"""
     <h2 style="color:{_BRAND};margin:0 0 12px;">Your Lab Report is Ready</h2>
     <p style="color:#374151;font-size:15px;margin:0 0 20px;">
-      Hi <strong>{patient_name}</strong>, your lab test results are now available.
+      Sign in to FederCare to view or download your report from the EHR Wallet.
     </p>
-    <p style="color:#6b7280;font-size:13px;font-weight:bold;margin:0 0 8px;">Tests Completed:</p>
-    <ul style="margin:0 0 20px;padding-left:20px;">{tests_html}</ul>
-    {abnormal_html}
-    <div style="margin-bottom:12px;">
-      {download_btn}
-      <a href="{settings.FRONTEND_URL}/patient/consultations"
-         style="display:inline-block;background:{_ACCENT};color:#ffffff;text-decoration:none;
-                padding:12px 24px;border-radius:8px;font-size:14px;font-weight:bold;">
-        Consult Doctor
-      </a>
-    </div>
+    <a href="{settings.FRONTEND_URL}/patient/ehr"
+       style="display:inline-block;background:{_BRAND};color:#ffffff;text-decoration:none;
+              padding:12px 24px;border-radius:8px;font-size:14px;font-weight:bold;">
+      Open EHR Wallet
+    </a>
     """
     html = _base_layout(_BRAND, "Lab results available", body)
-    _send(to_email, "Your Lab Report is Ready — FederCare", html)
+    return _send(to_email, "Your Lab Report is Ready", html)
 
 
 def send_dispatch_email(to_email, hospital_name, product_name, quantity, vendor_name,

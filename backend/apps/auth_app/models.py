@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.contrib.auth.hashers import make_password
+from django.utils import timezone
 
 ROLE_CHOICES = [
     ('super_admin', 'Super Admin'),
@@ -36,6 +37,7 @@ class LoginCredentials(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     is_active = models.BooleanField(default=False)
     is_approved = models.BooleanField(default=False)
+    sessions_revoked_at = models.DateTimeField(null=True, blank=True)
     # Set when an account is created with a temporary password (e.g. staff added
     # by a hospital admin). The user is forced to set a new password on first login.
     force_password_change = models.BooleanField(
@@ -53,6 +55,14 @@ class LoginCredentials(models.Model):
 
     def set_password(self, raw_password):
         self.password_hash = make_password(raw_password)
+
+    def set_account_active(self, active):
+        self.is_active = active
+        fields = ['is_active', 'updated_at']
+        if not active:
+            self.sessions_revoked_at = timezone.now()
+            fields.append('sessions_revoked_at')
+        self.save(update_fields=fields)
 
     def __str__(self):
         return f"{self.email} ({self.role})"

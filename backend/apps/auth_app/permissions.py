@@ -1,7 +1,7 @@
 from rest_framework.permissions import BasePermission
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from .models import LoginCredentials
+from .authentication import FederCareJWTAuthentication
 
 
 def get_login_from_token(request):
@@ -12,9 +12,8 @@ def get_login_from_token(request):
     token_str = auth_header.split(' ', 1)[1]
     try:
         token = AccessToken(token_str)
-        login_id = token['login_id']
-        return LoginCredentials.objects.get(login_id=login_id)
-    except (InvalidToken, TokenError, KeyError, LoginCredentials.DoesNotExist):
+        return FederCareJWTAuthentication().get_user(token)
+    except (InvalidToken, TokenError):
         return None
 
 

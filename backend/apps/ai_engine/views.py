@@ -1,4 +1,5 @@
 import os
+import logging
 from decimal import Decimal
 from collections import Counter
 
@@ -25,6 +26,7 @@ from .serializers import (
 from . import ml_utils
 
 MODEL_VERSION = '1.0.0'
+logger = logging.getLogger(__name__)
 
 
 def ok(message, data=None, status_code=200):
@@ -925,49 +927,35 @@ def _call_gemini(payload):
     try:
         resp = requests.post(
             GEMINI_ENDPOINT,
-            params={'key': api_key},
+            headers={'x-goog-api-key': api_key},
             json=payload,
             timeout=30,
         )
     except requests.Timeout:
         return None, err('AI service timeout! Please try again.', status_code=504)
     except requests.RequestException as exc:
-        print(f'[GEMINI] request error: {exc}')
+        logger.warning('Gemini request failed (%s)', type(exc).__name__)
         return None, err('AI service unavailable!', status_code=502)
 
     if resp.status_code != 200:
-        print(f'[GEMINI] non-200 {resp.status_code}: {resp.text[:300]}')
+        logger.warning('Gemini returned HTTP %s', resp.status_code)
         return None, err('AI service error!', status_code=502)
 
     return _extract_gemini_text(resp.json()), None
 
 
 class GeminiHealthSummaryView(APIView):
-    """Generate a comprehensive AI health summary for a patient.
-
-    Accepts an optional frontend prompt but always enriches it with
-    server-side patient data (EHR records, prescriptions, allergies,
-    lab tests) so the Gemini model has full medical context.
-    """
-    permission_classes = [IsAuthenticated]
+    """Generate an AI health summary for the signed-in patient."""
+    permission_classes = [IsAuthenticated, IsPatient]
 
     def post(self, request):
         from datetime import date
         from ..patient.models import EHRRecord, Allergy, LabTestOrder
         from ..doctor.models import Prescription
 
-        # Resolve the patient — either from the posted patient_id or the
-        # logged-in user's own profile.
-        patient = None
+        patient = _get_patient(request.user)
         patient_id = request.data.get('patient_id')
-        if patient_id:
-            try:
-                patient = PatientRegistration.objects.get(patient_id=patient_id)
-            except PatientRegistration.DoesNotExist:
-                pass
-        if patient is None:
-            patient = _get_patient(request.user)
-        if patient is None:
+        if patient is None or (patient_id and str(patient.pk) != patient_id):
             return err('Patient profile not found.', status_code=404)
 
         # ── Build rich patient context ────────────────────────────────
@@ -976,7 +964,6 @@ class GeminiHealthSummaryView(APIView):
             return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
         patient_data = {
-            'name': patient.full_name,
             'age': str(calculate_age(patient.dob)) if patient.dob else 'Unknown',
             'gender': patient.gender or 'Not specified',
             'blood_group': patient.blood_group or 'Not specified',
@@ -1026,22 +1013,16 @@ class GeminiHealthSummaryView(APIView):
         lab_count = lab_orders.count()
 
         # ── Build comprehensive prompt ────────────────────────────────
-        # Use the frontend prompt as a base if provided, but always
-        # append the server-side medical data to ensure completeness.
-        frontend_prompt = (request.data.get('prompt') or '').strip()
-
         # Pre-format lists outside the f-string (backslashes aren't
         # allowed inside f-string expressions in Python 3.11).
         diagnoses_text = '\n'.join('- ' + d for d in diagnoses) if diagnoses else 'No diagnoses recorded'
         medicines_text = ', '.join(medicines_list) if medicines_list else 'No medications recorded'
         allergies_text = ', '.join(allergies) if allergies else 'No allergies recorded'
-        extra_context = ('ADDITIONAL CONTEXT FROM PATIENT RECORDS:\n' + frontend_prompt) if frontend_prompt else ''
 
         prompt = f"""You are a medical AI assistant for FederCare Health Network.
 Generate a comprehensive, detailed health summary for this patient.
 
 PATIENT INFORMATION:
-Name: {patient_data['name']}
 Age: {patient_data['age']} years
 Gender: {patient_data['gender']}
 Blood Group: {patient_data['blood_group']}
@@ -1061,8 +1042,6 @@ Known Allergies:
 
 Recent Lab Tests: {lab_count} completed test(s)
 
-{extra_context}
-
 Please provide a detailed health summary with these sections:
 🌟 Overall Health Status
 📋 Recent Health Activity
@@ -1080,8 +1059,6 @@ Rules:
 - End with: "⚕️ Always consult your doctor for medical decisions."
 """
 
-        print(f'[GEMINI] Health summary prompt ({len(prompt)} chars) for patient: {patient.full_name}')
-
         payload = {
             'contents': [{'parts': [{'text': prompt}]}],
             'generationConfig': {
@@ -1095,13 +1072,13 @@ Rules:
 
         summary_text = text or 'Unable to generate summary. Please try again.'
 
-        print(f'[GEMINI] Summary response length: {len(summary_text)} chars')
-
-        return ok('Summary generated.', {
+        response = ok('Summary generated.', {
             'summary': summary_text,
             'patient_name': patient.full_name,
             'model': GEMINI_MODEL,
         })
+        response['Cache-Control'] = 'private, no-store'
+        return response
 
 
 class GeminiChatView(APIView):
