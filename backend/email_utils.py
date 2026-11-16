@@ -3,6 +3,7 @@ import logging
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
+from federcare.gmail_backend import GmailAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,9 @@ def _send(to_email, subject, html_content, connection=None):
             connection=connection,
             fail_silently=False,
         ) == 1
+    except GmailAPIError as exc:
+        logger.warning('Email send failed: %s', exc)
+        return False
     except Exception as exc:
         logger.warning(
             'Email send failed (%s, SMTP code %s)',

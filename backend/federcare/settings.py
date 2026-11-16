@@ -206,7 +206,13 @@ RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET')
 # never sees this key; it calls our /api/ai/ proxy endpoints instead.
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_TRANSPORT = os.getenv('EMAIL_TRANSPORT', 'smtp').strip().lower()
+EMAIL_BACKEND = {
+    'smtp': 'django.core.mail.backends.smtp.EmailBackend',
+    'gmail_api': 'federcare.gmail_backend.GmailAPIBackend',
+}.get(EMAIL_TRANSPORT)
+if EMAIL_BACKEND is None:
+    raise ImproperlyConfigured('EMAIL_TRANSPORT must be smtp or gmail_api.')
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
@@ -214,6 +220,9 @@ EMAIL_TIMEOUT = 10
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER')
+GMAIL_CLIENT_ID = os.getenv('GMAIL_CLIENT_ID', '')
+GMAIL_CLIENT_SECRET = os.getenv('GMAIL_CLIENT_SECRET', '')
+GMAIL_REFRESH_TOKEN = os.getenv('GMAIL_REFRESH_TOKEN', '')
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
