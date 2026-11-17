@@ -46,12 +46,17 @@ class BookConsultationSerializer(serializers.Serializer):
 
         try:
             doctor = DoctorRegistration.objects.get(
-                doctor_id=data['doctor_id'], approval_status='approved'
+                doctor_id=data['doctor_id'], approval_status='approved',
+                login_id__is_active=True, login_id__is_approved=True,
+                hospital_id__approval_status='approved', hospital_id__login_id__is_active=True,
+                hospital_id__login_id__is_approved=True,
             )
         except DoctorRegistration.DoesNotExist:
             raise serializers.ValidationError(
                 {'doctor_id': 'Doctor not found or not approved.'}
             )
+        if not doctor.is_online:
+            raise serializers.ValidationError({'doctor_id': 'This doctor is offline. Please choose an online doctor.'})
 
         current_schedule = get_current_schedule_for_doctor(doctor)
         if not current_schedule:

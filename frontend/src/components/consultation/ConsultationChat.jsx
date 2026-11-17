@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../../api/urls';
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import API from '../../api/axios';
@@ -5,7 +6,6 @@ import API from '../../api/axios';
 const now = () =>
   new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-const wsBase = (API.defaults.baseURL || 'http://localhost:8000').replace(/^http/, 'ws');
 
 /**
  * Live consultation chat shared by doctor and patient. Both sides connect to
@@ -48,7 +48,7 @@ const ConsultationChat = ({ consultationId, sender = 'patient', senderName = '' 
       .catch(() => { /* start empty — the live socket still works */ })
       .finally(() => { if (!cancelled) setLoading(false); scrollToEnd(); });
 
-    const ws = new WebSocket(`${wsBase}/ws/consultation/${consultationId}/chat/`);
+    const ws = openBackendSocket(`/ws/consultation/${consultationId}/chat/`);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {

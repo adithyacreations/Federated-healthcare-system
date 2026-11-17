@@ -21,7 +21,7 @@ from apps.pharmacy.models import MedicineOrder
 
 PUBLIC_IMAGE_FOLDERS = {
     'developers', 'features', 'profile_photos', 'medicine_images',
-    'equipment_images', 'products',
+    'equipment_images', 'products', 'departments',
 }
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'}
 LINK_SALT = 'federcare.media'

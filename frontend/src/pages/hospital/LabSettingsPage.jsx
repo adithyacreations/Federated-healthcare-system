@@ -5,6 +5,7 @@ import DashboardLayout from '../../components/common/DashboardLayout';
 import API from '../../api/axios';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const LAB_SETTINGS_TIMEOUT = 20000;
 
 const LabSettingsPage = () => {
   const [config, setConfig] = useState({
@@ -16,20 +17,31 @@ const LabSettingsPage = () => {
     lunch_break_start: '13:00',
     lunch_break_end: '14:00',
   });
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    setLoading(true);
+    setLoadError(null);
+    const loadConfig = async () => {
       try {
-        const res = await API.get('/api/hospital/lab-config/');
-        if (!cancelled && res.data?.success) setConfig(res.data.data);
-      } catch (e) {
-        console.log(e);
+        const { data } = await API.get('/api/hospital/lab-config/', { signal, timeout: LAB_SETTINGS_TIMEOUT });
+        if (signal.aborted) return;
+        if (data?.success) setConfig(data.data);
+        else setLoadError(data?.message || 'Could not load lab settings.');
+      } catch (error) {
+        if (!signal.aborted) setLoadError(error?.response?.data?.message || 'Could not load lab settings.');
+      } finally {
+        if (!signal.aborted) setLoading(false);
       }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    };
+    loadConfig();
+    return () => controller.abort();
+  }, [loadAttempt]);
 
   const toggleDay = (index) => {
     setConfig((c) => {
@@ -44,15 +56,20 @@ const LabSettingsPage = () => {
   };
 
   const saveConfig = async () => {
+    if (saving || loading || loadError) return;
     try {
       setSaving(true);
-      const res = await API.put('/api/hospital/lab-config/', config);
-      if (res.data?.success) {
-        setConfig((c) => ({ ...c, configured: true }));
-        toast.success('✅ Lab config saved! Slots regenerated.');
+      const { data } = await API.put('/api/hospital/lab-config/', config, { timeout: LAB_SETTINGS_TIMEOUT });
+      if (!data?.success) {
+        toast.error(data?.message || 'Could not save lab settings.');
+        return;
       }
-    } catch (e) {
-      toast.error('Failed to save!');
+      setConfig((c) => ({ ...c, config_id: data.data.config_id, configured: true }));
+      toast.success('Lab settings saved and slots generated.');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || (error?.code === 'ECONNABORTED'
+        ? 'Saving took too long. Reload lab settings to check whether it completed.'
+        : 'Could not save lab settings.'));
     } finally {
       setSaving(false);
     }
@@ -67,6 +84,16 @@ const LabSettingsPage = () => {
           <h1 className="text-2xl font-bold text-black">🔬 Lab Settings</h1>
           <p className="text-gray-500 text-sm">Configure lab slot availability for patients</p>
         </div>
+
+        {loading && <p role="status" className="text-sm text-gray-500 mb-4">Loading lab settings…</p>}
+        {loadError && (
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <p role="alert" className="text-sm text-red-700">{loadError}</p>
+            <button type="button" className="btn-orange-outline" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+              Retry loading settings
+            </button>
+          </div>
+        )}
 
         {/* Not-configured warning — patients can't book until the admin saves. */}
         {config.configured === false && (
@@ -175,7 +202,7 @@ const LabSettingsPage = () => {
           <button
             type="button"
             onClick={saveConfig}
-            disabled={saving}
+            disabled={saving || loading || Boolean(loadError)}
             className="w-full py-3 rounded-2xl font-bold text-white disabled:opacity-50"
             style={{ backgroundColor: '#F97316' }}
           >

@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../../api/urls';
 import { Component, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -223,7 +224,7 @@ const EmergencyTracker = () => {
   // WebSocket for live ambulance GPS
   useEffect(() => {
     if (!dispatchId) return;
-    const ws = new WebSocket(`ws://localhost:8000/ws/gps/${dispatchId}/`);
+    const ws = openBackendSocket(`/ws/gps/${dispatchId}/`);
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);

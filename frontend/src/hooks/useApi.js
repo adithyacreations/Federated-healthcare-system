@@ -10,7 +10,7 @@ import API from '../api/axios';
  *   useApi(url, { unwrap: true }) — return res.data.data when backend wraps in {success, data}
  */
 const useApi = (url, options = {}) => {
-  const { params, enabled = true, unwrap = true, pollInterval = 0 } = options;
+  const { params, enabled = true, unwrap = true, pollInterval = 0, timeout } = options;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(Boolean(url) && enabled);
   const [refreshing, setRefreshing] = useState(false);
@@ -30,7 +30,7 @@ const useApi = (url, options = {}) => {
     else setLoading(true);
     setError(null);
     try {
-      const res = await API.get(url, { params: paramsRef.current });
+      const res = await API.get(url, { params: paramsRef.current, timeout });
       const payload = res.data;
       const value = unwrap && payload && typeof payload === 'object' && 'success' in payload
         ? payload.data
@@ -43,7 +43,7 @@ const useApi = (url, options = {}) => {
       if (silent) setRefreshing(false);
       else setLoading(false);
     }
-  }, [url, unwrap]);
+  }, [url, unwrap, timeout]);
 
   useEffect(() => {
     if (!enabled) return;

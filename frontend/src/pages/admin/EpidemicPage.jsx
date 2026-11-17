@@ -140,7 +140,14 @@ const EpidemicPage = () => {
         : { disease_name: 'General Health Advisory', alert_level: 'high', region: 'Kerala' };
       const res = await API.post('/api/federated/epidemic/broadcast/', payload);
       if (res.data?.success) {
-        toast.success(res.data.message || 'Alert sent to all staff!');
+        const { emails_sent, emails_failed, notified_count, recipient_count } = res.data.data;
+        if (recipient_count === 0) {
+          toast.error('No eligible hospital admins, doctors, or lab technicians to notify.');
+        } else {
+          const summary = `${res.data.message} Mail server accepted ${emails_sent} of ${recipient_count} emails.`;
+          if (emails_failed || notified_count < recipient_count) toast.error(summary);
+          else toast.success(summary);
+        }
       } else {
         toast.error(res.data?.message || 'Broadcast failed');
       }

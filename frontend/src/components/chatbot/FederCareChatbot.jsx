@@ -1,10 +1,10 @@
+import { backendUrl } from '../../api/urls';
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 
 // The chatbot is used by guests on the landing page too, so it must NOT use the
 // shared `API` instance — that one force-logs-out and redirects to /login on a
 // 401. We call the backend directly and attach the token only when present.
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const SUGGESTIONS = [
   'What is FederCare?',
@@ -155,7 +155,7 @@ export default function FederCareChatbot() {
       // Attach the token only if the user is logged in (gets the higher limit);
       // guests send no auth header and the endpoint still answers them.
       const token = localStorage.getItem('access_token');
-      const url = `${BASE_URL}/api/ai/chat/`;
+      const url = backendUrl('/api/ai/chat/');
       const payload = { message: userMessage, history };
       let res;
       try {

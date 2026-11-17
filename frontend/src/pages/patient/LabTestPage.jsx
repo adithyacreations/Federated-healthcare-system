@@ -13,6 +13,7 @@ import { openRazorpay } from '../../utils/payment';
 import { formatTime12hr } from '../../utils/timeUtils';
 
 const todayStr = new Date().toISOString().slice(0, 10);
+const LAB_REQUEST_TIMEOUT = 15000;
 
 // Local-time "today" (avoids the UTC off-by-one of toISOString near midnight).
 const localTodayStr = () => new Date().toLocaleDateString('en-CA');
@@ -36,8 +37,8 @@ const filterValidSlots = (slots, dateStr) => (slots || []).filter((s) => isFutur
 
 const LabTestPage = () => {
   const { user } = useAuth();
-  const hospitals = useApi('/api/patient/hospitals/');
-  const catalog = useApi('/api/patient/lab/catalog/');
+  const hospitals = useApi('/api/patient/hospitals/', { timeout: LAB_REQUEST_TIMEOUT });
+  const catalog = useApi('/api/patient/lab/catalog/', { timeout: LAB_REQUEST_TIMEOUT });
 
   const [hospitalId, setHospitalId] = useState('');
   const [hospitalPickerOpen, setHospitalPickerOpen] = useState(false);
@@ -54,47 +55,54 @@ const LabTestPage = () => {
   const [slotRestriction, setSlotRestriction] = useState(null);
   const [fastingRequired, setFastingRequired] = useState(false);
   const [slotMessage, setSlotMessage] = useState(null);
+  const [slotLoadFailed, setSlotLoadFailed] = useState(false);
+  const [slotLoadAttempt, setSlotLoadAttempt] = useState(0);
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  const selectedCount = selected.length;
+  const selectedTestIds = selected.map((test) => test.test_id).filter(Boolean).join(',');
   useEffect(() => {
+    setAvailableSlots([]);
+    setSelectedSlot(null);
+    setSlotMessage(null);
+    setSlotLoadFailed(false);
+    setSlotRestriction(null);
+    setFastingRequired(false);
     if (!hospitalId || !apptDate) {
-      setAvailableSlots([]);
-      setSelectedSlot(null);
-      setSlotMessage(null);
+      setLoadingSlots(false);
       return undefined;
     }
-    let cancelled = false;
-    (async () => {
+
+    const controller = new AbortController();
+    const { signal } = controller;
+    setLoadingSlots(true);
+    const loadSlots = async () => {
       try {
-        setLoadingSlots(true);
-        setSelectedSlot(null);
-        const testIds = selected.map((t) => t.test_id).filter(Boolean);
-        const res = await API.get('/api/lab/slots/', {
-          params: { hospital_id: hospitalId, date: apptDate, test_ids: testIds.join(',') },
+        const { data } = await API.get('/api/lab/slots/', {
+          params: { hospital_id: hospitalId, date: apptDate, test_ids: selectedTestIds },
+          timeout: LAB_REQUEST_TIMEOUT,
+          signal,
         });
-        if (cancelled) return;
-        if (res.data?.success) {
-          setSlotMessage(null);
-          // Defensive: drop any past slots (backend also filters them).
-          setAvailableSlots(filterValidSlots(res.data.data || [], apptDate));
-          setSlotRestriction(res.data.restriction_note || null);
-          setFastingRequired(Boolean(res.data.fasting_required));
+        if (signal.aborted) return;
+        if (data?.success) {
+          setAvailableSlots(filterValidSlots(data.data || [], apptDate));
+          setSlotRestriction(data.restriction_note || null);
+          setFastingRequired(Boolean(data.fasting_required));
         } else {
-          // Hospital has no lab configuration (or another soft error).
-          setAvailableSlots([]);
-          setSlotMessage(res.data?.message || 'No slots available for this hospital.');
+          setSlotMessage(data?.message || 'No slots available for this hospital.');
         }
-      } catch {
-        if (!cancelled) { setAvailableSlots([]); setSlotMessage(null); }
+      } catch (error) {
+        if (!signal.aborted) {
+          setSlotMessage(error?.response?.data?.message || 'Could not load available slots.');
+          setSlotLoadFailed(true);
+        }
       } finally {
-        if (!cancelled) setLoadingSlots(false);
+        if (!signal.aborted) setLoadingSlots(false);
       }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hospitalId, apptDate, selectedCount]);
+    };
+    loadSlots();
+    return () => controller.abort();
+  }, [hospitalId, apptDate, selectedTestIds, slotLoadAttempt]);
 
   // Every minute, drop slots that have just passed and deselect the chosen slot
   // if it lapsed while the patient lingered on the page.
@@ -280,6 +288,13 @@ const LabTestPage = () => {
             <AnimatedTabs tabs={catTabs} active={activeCat} onChange={setActiveCat} layoutId="lab-tab" />
             {catalog.loading ? (
               <div className="dashboard-card text-sm text-muted">Loading test catalog…</div>
+            ) : catalog.error ? (
+              <div className="dashboard-card text-sm">
+                <p role="alert">Could not load the test catalog.</p>
+                <button type="button" className="btn-orange-outline mt-2" onClick={() => catalog.refetch()}>
+                  Retry loading tests
+                </button>
+              </div>
             ) : visibleTests.length === 0 ? (
               <div className="dashboard-card text-sm text-muted text-center py-8">No tests in this category.</div>
             ) : (
@@ -401,10 +416,16 @@ const LabTestPage = () => {
                   <span id="lab-hospital-value" className="min-w-0 break-words">
                     {selectedHospital?.hospital_name || (hospitals.loading
                       ? 'Loading hospitals…'
-                      : hospitalList.length ? 'Select hospital…' : 'No hospitals available')}
+                      : hospitals.error ? 'Could not load hospitals'
+                        : hospitalList.length ? 'Select hospital…' : 'No hospitals available')}
                   </span>
                   <FiChevronDown aria-hidden="true" className="h-4 w-4 shrink-0" />
                 </button>
+                {hospitals.error && (
+                  <button type="button" className="btn-orange-outline mt-2" onClick={() => hospitals.refetch()}>
+                    Retry loading hospitals
+                  </button>
+                )}
                 <fieldset
                   id="lab-hospital-options"
                   aria-labelledby="lab-hospital-label"
@@ -426,6 +447,7 @@ const LabTestPage = () => {
                           setSelectedSlot(null);
                           setAvailableSlots([]);
                           setHospitalId(hospital.hospital_id);
+                          setHospitalPickerOpen(false);
                         }}
                         className="mt-1 shrink-0 accent-orange-500"
                       />
@@ -447,8 +469,9 @@ const LabTestPage = () => {
                 )}
               </div>
 
-              <label className="text-xs text-muted block mb-1">Date</label>
+              <label htmlFor="lab-appointment-date" className="text-xs text-muted block mb-1">Date</label>
               <input
+                id="lab-appointment-date"
                 type="date"
                 min={todayStr}
                 value={apptDate}
@@ -494,12 +517,23 @@ const LabTestPage = () => {
                 </div>
               )}
 
-              {!apptDate ? (
+              {!hospitalId ? (
+                <p className="text-xs text-gray-400 mb-4">Select a hospital to see available slots.</p>
+              ) : !apptDate ? (
                 <p className="text-xs text-gray-400 mb-4">Pick a date to see available slots.</p>
               ) : loadingSlots ? (
-                <div className="text-center py-4">
+                <div role="status" className="text-center py-4">
                   <div className="w-6 h-6 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto mb-2" />
                   <p className="text-xs text-gray-400">Loading available slots...</p>
+                </div>
+              ) : slotMessage ? (
+                <div className="rounded-xl p-3 mb-3 bg-red-50 border border-red-200">
+                  <p role="alert" className="text-sm text-red-700">{slotMessage}</p>
+                  {slotLoadFailed && (
+                    <button type="button" className="btn-orange-outline mt-2" onClick={() => setSlotLoadAttempt((attempt) => attempt + 1)}>
+                      Retry loading slots
+                    </button>
+                  )}
                 </div>
               ) : availableSlots.length === 0 ? (
                 <div className="text-center py-4 mb-2">
@@ -555,13 +589,6 @@ const LabTestPage = () => {
                       </button>
                     );
                   })}
-                </div>
-              )}
-
-              {/* Lab not configured (or no slots) message */}
-              {slotMessage && (
-                <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5' }}>
-                  <p className="text-[13px] font-medium m-0" style={{ color: '#EF4444' }}>⚠️ {slotMessage}</p>
                 </div>
               )}
 

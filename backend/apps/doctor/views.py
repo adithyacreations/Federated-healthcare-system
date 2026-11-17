@@ -4,6 +4,7 @@ import io
 from datetime import date, datetime, timezone, timedelta
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
@@ -253,8 +254,10 @@ class ToggleOnlineStatusView(APIView):
         if not doctor:
             return err('Doctor profile not found.', status_code=404)
 
-        doctor.is_online = not doctor.is_online
-        doctor.save(update_fields=['is_online'])
+        with transaction.atomic():
+            doctor = DoctorRegistration.objects.select_for_update(no_key=True).get(pk=doctor.pk)
+            doctor.is_online = not doctor.is_online
+            doctor.save(update_fields=['is_online'])
 
         state = 'online' if doctor.is_online else 'offline'
         log_audit(
@@ -264,6 +267,7 @@ class ToggleOnlineStatusView(APIView):
             entity_type='DoctorRegistration',
             entity_id=str(doctor.doctor_id),
         )
+        broadcast_new_slots_to_patients(doctor_id=doctor.pk, availability_changed=True)
         return ok(f'You are now {state}.', {'is_online': doctor.is_online})
 
 

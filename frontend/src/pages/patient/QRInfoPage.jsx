@@ -1,7 +1,7 @@
+import { backendUrl } from '../../api/urls';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
-const API_BASE = 'http://localhost:8000';
 
 const RISK_STYLES = {
   low: 'bg-success/15 text-success',
@@ -16,7 +16,7 @@ const QRInfoPage = () => {
 
   useEffect(() => {
     let active = true;
-    fetch(`${API_BASE}/api/patient/qr-info/${token}/`)
+    fetch(backendUrl(`/api/patient/qr-info/${token}/`))
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
         if (!active) return;

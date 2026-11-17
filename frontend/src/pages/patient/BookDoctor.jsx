@@ -21,7 +21,7 @@ const doctorPhoto = (doctor) => doctor?.profile_photo || doctor?.doctor_profile_
 const departmentPhoto = (doctor) => doctor?.department_photo || doctor?.dept_photo || '';
 
 const BookDoctor = () => {
-  const doctors = useApi('/api/patient/doctors/');
+  const doctors = useApi('/api/patient/doctors/', { pollInterval: 15000 });
   const [search, setSearch] = useState('');
   const [hospitalFilter, setHospitalFilter] = useState('');
   const [activeDoctor, setActiveDoctor] = useState(null);   // doctor object for modal
@@ -41,6 +41,7 @@ const BookDoctor = () => {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return list.filter((d) => {
+      if (!d.is_online || d.available_slots_count <= 0) return false;
       if (hospitalFilter && d.hospital_id !== hospitalFilter) return false;
       if (!q) return true;
       return (

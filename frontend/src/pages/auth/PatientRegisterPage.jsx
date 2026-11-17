@@ -16,6 +16,19 @@ import API from '../../api/axios';
 const STEPS = ['Account', 'Personal', 'Health Info'];
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
+const HEIGHT_RANGE = { min: 40, max: 275 };
+const WEIGHT_RANGE = { min: 2, max: 650 };
+const MAX_STORED_BMI = 99.99;
+const DOB_YEAR_ERROR = 'Enter a four-digit birth year.';
+
+const measurementError = (value, { min, max }, unit) => {
+  if (value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < min || number > max) {
+    return `Enter a value between ${min} and ${max} ${unit}.`;
+  }
+  return null;
+};
 
 const initial = {
   email: '', password: '', confirm: '',
@@ -35,12 +48,19 @@ const PatientRegisterPage = () => {
   const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
   // PhoneInput hands back the raw digit string (not an event).
   const setVal = (k) => (val) => setForm((p) => ({ ...p, [k]: val }));
+  const setDob = ({ target: { value } }) => {
+    const invalidYear = value !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(value);
+    setVal('dob')(invalidYear ? '' : value);
+    setErrors((previous) => ({ ...previous, dob: invalidYear ? DOB_YEAR_ERROR : null }));
+  };
 
   const bmi = useMemo(() => {
-    const h = parseFloat(form.height_cm);
-    const w = parseFloat(form.weight_kg);
-    if (!h || !w || h <= 0) return null;
-    return (w / Math.pow(h / 100, 2)).toFixed(2);
+    const { height_cm, weight_kg } = form;
+    if (!height_cm || !weight_kg
+        || measurementError(height_cm, HEIGHT_RANGE, 'cm')
+        || measurementError(weight_kg, WEIGHT_RANGE, 'kg')) return null;
+    const result = (Number(weight_kg) / (Number(height_cm) / 100) ** 2).toFixed(2);
+    return Number(result) <= MAX_STORED_BMI ? result : null;
   }, [form.height_cm, form.weight_kg]);
 
   // Returns the errors object for the current step ({} when valid).
@@ -52,9 +72,11 @@ const PatientRegisterPage = () => {
       e.confirm = validators.confirmPassword(form.confirm, form.password);
     } else if (step === 2) {
       e.full_name = validators.name(form.full_name);
-      e.dob = validators.patientAge(form.dob);
+      e.dob = errors.dob === DOB_YEAR_ERROR ? DOB_YEAR_ERROR : validators.patientAge(form.dob);
       e.phone = validators.phone(form.phone);
     } else if (step === 3) {
+      e.height_cm = measurementError(form.height_cm, HEIGHT_RANGE, 'cm');
+      e.weight_kg = measurementError(form.weight_kg, WEIGHT_RANGE, 'kg');
       // Emergency contact is optional, but must be a valid mobile if entered.
       e.emergency_contact = validators.phoneOptional(form.emergency_contact);
     }
@@ -74,16 +96,16 @@ const PatientRegisterPage = () => {
   };
   const back = () => setStep((s) => Math.max(s - 1, 1));
 
-  const submit = async (ev) => {
-    ev.preventDefault();
+  const register = async ({ currentTarget }) => {
+    if (step !== STEPS.length || submitting) return;
+
     const e = validateStep();
-    if (submitting || Object.keys(e).length) {
-      if (Object.keys(e).length) {
-        toast.error('Please fix the highlighted fields before continuing.');
-        scrollToFirstError();
-      }
+    if (Object.keys(e).length) {
+      toast.error('Please fix the highlighted fields before continuing.');
+      scrollToFirstError();
       return;
     }
+    if (!currentTarget.form.reportValidity()) return;
     setSubmitting(true);
     try {
       const payload = {
@@ -214,7 +236,7 @@ const PatientRegisterPage = () => {
     <AuthShell title="Patient Registration" subtitle="Create your FederCare patient account">
       <StepIndicator steps={STEPS} current={step} />
 
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={(event) => event.preventDefault()} className="space-y-4">
         <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
@@ -235,8 +257,8 @@ const PatientRegisterPage = () => {
               <FormInput label="Full Name" icon={FiUser} placeholder="Your full name"
                 value={form.full_name} onChange={set('full_name')} error={errors.full_name} required />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormInput label="Date of Birth" type="date"
-                  value={form.dob} onChange={set('dob')} error={errors.dob} required />
+                <FormInput label="Date of Birth" type="date" max="9999-12-31"
+                  value={form.dob} onChange={setDob} error={errors.dob} required />
                 <FormInput label="Gender" as="select" value={form.gender} onChange={set('gender')}
                   options={[
                     { value: '', label: 'Select…' },
@@ -262,8 +284,10 @@ const PatientRegisterPage = () => {
           {step === 3 && (
             <motion.div key="s3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormInput label="Height (cm)" type="number" step="0.1" value={form.height_cm} onChange={set('height_cm')} />
-                <FormInput label="Weight (kg)" type="number" step="0.1" value={form.weight_kg} onChange={set('weight_kg')} />
+                <FormInput label="Height (cm)" type="number" step="0.01" {...HEIGHT_RANGE}
+                  hint="40–275 cm (optional)" value={form.height_cm} onChange={set('height_cm')} error={errors.height_cm} />
+                <FormInput label="Weight (kg)" type="number" step="0.01" {...WEIGHT_RANGE}
+                  hint="2–650 kg (optional)" value={form.weight_kg} onChange={set('weight_kg')} error={errors.weight_kg} />
               </div>
               {bmi && (
                 <div className="bg-orange-50 border border-orange-100 rounded-xl px-4 py-3 text-sm text-orange-600">
@@ -283,9 +307,9 @@ const PatientRegisterPage = () => {
             <button type="button" onClick={back} className="btn-secondary">Back</button>
           ) : <span />}
           {step < STEPS.length ? (
-            <button type="button" onClick={next} className="btn-primary">Continue</button>
+            <button key="continue" type="button" onClick={next} className="btn-primary">Continue</button>
           ) : (
-            <button type="submit" disabled={submitting} className="btn-primary disabled:opacity-60">
+            <button key="register" type="button" onClick={register} disabled={submitting} className="btn-primary disabled:opacity-60">
               {submitting ? 'Registering…' : 'Register'}
             </button>
           )}

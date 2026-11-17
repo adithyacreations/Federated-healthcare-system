@@ -1,3 +1,4 @@
+import { openBackendSocket, backendUrl } from '../../api/urls';
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -17,12 +18,11 @@ import useApi from '../../hooks/useApi';
 import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 
-const API_HOST = 'http://localhost:8000';
 
 const rxFileUrl = (o) => {
   const path = o.prescription_local_url || o.prescription_url || '';
   if (!path) return '';
-  return path.startsWith('http') ? path : `${API_HOST}${path}`;
+  return backendUrl(path);
 };
 const isPdf = (url) => url.toLowerCase().split('?')[0].endsWith('.pdf');
 
@@ -104,7 +104,7 @@ const PharmacistDashboard = () => {
 
     const connect = () => {
       try {
-        ws = new WebSocket(`ws://localhost:8000/ws/medicine/${loginId}/`);
+        ws = openBackendSocket(`/ws/medicine/${loginId}/`);
       } catch {
         return; // The 30s REST poll still keeps the orders list fresh.
       }

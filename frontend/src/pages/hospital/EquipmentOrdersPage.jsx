@@ -54,17 +54,26 @@ const getHistoryTime = (order, status) => {
   const entry = history.find(h => h.status === status);
   return entry ? entry.timestamp : null;
 };
+const isClosedOrder = (order) => ['cancelled', 'refunded'].includes(order.order_status);
 
 const loadRazorpay = () =>
   new Promise((resolve) => {
     if (window.Razorpay) { resolve(true); return; }
-    const existing = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
-    if (existing) { existing.addEventListener('load', () => resolve(true)); return; }
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
+    const url = 'https://checkout.razorpay.com/v1/checkout.js';
+    const script = document.querySelector(`script[src="${url}"]`) || document.createElement('script');
+    const finish = (ready) => {
+      clearTimeout(timer);
+      script.removeEventListener('load', loaded);
+      script.removeEventListener('error', failed);
+      if (!ready) script.remove();
+      resolve(ready);
+    };
+    const loaded = () => finish(Boolean(window.Razorpay));
+    const failed = () => finish(false);
+    const timer = setTimeout(failed, 15000);
+    script.addEventListener('load', loaded);
+    script.addEventListener('error', failed);
+    if (!script.parentNode) { script.src = url; document.body.appendChild(script); }
   });
 
 // ─── ProductImage ──────────────────────────────────────────────────────────────
@@ -225,6 +234,14 @@ const EquipmentOrdersPage = () => {
   const [orderModal, setOrderModal]     = useState(null);
   const [qty, setQty]                   = useState(1);
   const [placing, setPlacing]           = useState(false);
+  const [payingId, setPayingId]         = useState(null);
+  const [paymentErrors, setPaymentErrors] = useState({});
+  const [cancellingId, setCancellingId] = useState(null);
+  const [cancelOrderModal, setCancelOrderModal] = useState(null);
+  const [cancelledIds, setCancelledIds] = useState(() => new Set());
+  const maxOrderQuantity = orderModal
+    ? Math.max(0, Math.min(orderModal.max_order_qty ?? 100, orderModal.stock_qty))
+    : 0;
   const [activeTab, setActiveTab]       = useState('catalog');
   const [successOrder, setSuccessOrder] = useState(null);
 
@@ -323,7 +340,14 @@ const EquipmentOrdersPage = () => {
   };
 
   const catalogList = Array.isArray(catalog.data) ? catalog.data : [];
-  const orderList   = Array.isArray(orders.data)  ? orders.data  : [];
+  const orderList = useMemo(() => (Array.isArray(orders.data) ? orders.data : []).map((order) => (
+    cancelledIds.has(order.eq_order_id) && ['pending', 'confirmed'].includes(order.order_status)
+      ? { ...order, order_status: 'cancelled', can_cancel: false }
+      : order
+  )), [orders.data, cancelledIds]);
+  const currentOrders = orderList.filter((order) => !isClosedOrder(order));
+  const closedOrders = orderList.filter(isClosedOrder);
+  const visibleOrders = activeTab === 'cancelled' ? closedOrders : currentOrders;
 
   // Derived filter options
   const categories = useMemo(() => {
@@ -347,79 +371,125 @@ const EquipmentOrdersPage = () => {
 
   const openOrder = (product) => { setOrderModal(product); setQty(1); setSuccessOrder(null); };
 
-  // ─── Place order + Razorpay ───────────────────────────────────────────────
-  const handlePlaceOrder = async () => {
-    if (!orderModal) return;
-    if (qty < 1 || qty > orderModal.stock_qty) {
-      toast.error(`Quantity must be between 1 and ${orderModal.stock_qty}`);
+  const cancelOrder = async () => {
+    if (!cancelOrderModal || cancellingId) return;
+    setCancellingId(cancelOrderModal.eq_order_id);
+    try {
+      const { data } = await API.post(`/api/vendor/orders/${cancelOrderModal.eq_order_id}/cancel/`);
+      setCancelledIds((current) => new Set(current).add(cancelOrderModal.eq_order_id));
+      toast.success(data.message);
+      setCancelOrderModal(null);
+      orders.refetch();
+      catalog.refetch();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Could not cancel order.');
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  const checkoutEquipment = async (order, payment) => {
+    if (!payment.razorpay_order_id || !payment.key_id) {
+      const message = payment.error || 'Order saved, but payment is unavailable. Use Pay Now in My Orders to retry.';
+      setPaymentErrors((current) => ({ ...current, [order.eq_order_id]: message }));
+      toast.error(message, { duration: 8000 });
       return;
     }
-    setPlacing(true);
-
-    const productName   = orderModal.product_name;
-    const vendorName    = orderModal.vendor_name;
-    const orderedQty    = qty;
-    const computedTotal = (parseFloat(orderModal.price || 0) * orderedQty).toFixed(2);
-
-    try {
-      const { data } = await API.post('/api/vendor/place-order/', {
-        product_id: orderModal.product_id,
-        quantity:   orderedQty,
-      });
-      const d = data?.data || {};
-      const eqOrderId = d.eq_order_id;
-
-      if (!d.razorpay_order_id || !d.razorpay_key) {
-        toast.success('Order placed successfully!');
-        setOrderModal(null);
-        orders.refetch();
-        catalog.refetch();
-        return;
-      }
-
-      if (!eqOrderId) {
-        toast.error('Order ID missing in server response.');
-        return;
-      }
-
-      const loaded = await loadRazorpay();
-      if (!loaded) { toast.error('Could not load payment gateway. Try again.'); return; }
-
+    const loaded = await loadRazorpay();
+    if (!loaded) {
+      toast.error('Could not load payment gateway. Use Pay Now in My Orders to retry.');
+      return;
+    }
+    await new Promise((resolve) => {
       const rzp = new window.Razorpay({
-        key:         d.razorpay_key,
-        amount:      Math.round(parseFloat(d.total_price) * 100),
-        currency:    'INR',
-        name:        'FederCare Equipment',
-        description: `${productName} × ${orderedQty}`,
-        order_id:    d.razorpay_order_id,
+        key: payment.key_id,
+        amount: payment.amount,
+        currency: 'INR',
+        name: 'FederCare Equipment',
+        description: `${order.product_name} × ${order.quantity}`,
+        order_id: payment.razorpay_order_id,
         handler: async (response) => {
           try {
-            await API.post('/api/payment/verify/', {
-              razorpay_order_id:   response.razorpay_order_id,
+            const result = await API.post('/api/payment/verify/', {
+              razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature:  response.razorpay_signature,
-              payment_type: 'equipment',
-              object_id:    eqOrderId,
+              razorpay_signature: response.razorpay_signature,
+              payment_type: 'equipment', object_id: order.eq_order_id,
             });
+            if (!result.data?.success) throw new Error('Payment verification failed.');
             toast.success('Payment successful! Order confirmed.');
-            setOrderModal(null);
-            setSuccessOrder({ product_name: productName, vendor_name: vendorName, quantity: orderedQty, total_price: computedTotal });
-            setActiveTab('orders');
+            setPaymentErrors((current) => ({ ...current, [order.eq_order_id]: '' }));
+            setSuccessOrder(order);
+          } catch (error) {
+            toast.error(error?.response?.data?.message || 'Payment could not be confirmed. Contact support before paying again.');
+          } finally {
             orders.refetch();
             catalog.refetch();
-          } catch (err) {
-            console.error('Verify error:', err?.response?.data || err);
-            toast.error(err?.response?.data?.message || 'Payment verification failed');
+            resolve();
           }
         },
         prefill: { name: 'Hospital Admin' },
-        theme:   { color: '#1A3C6E' },
-        modal:   { ondismiss: () => { setPlacing(false); toast('Payment cancelled', { icon: 'ℹ️' }); } },
+        theme: { color: '#ff4f01' },
+        modal: { ondismiss: () => {
+          toast('Payment not completed. You can use Pay Now in My Orders.', { icon: 'ℹ️' });
+          orders.refetch();
+          resolve();
+        } },
       });
       rzp.open();
-    } catch (err) {
-      console.error('Place order error:', err?.response?.data || err);
-      toast.error(err?.response?.data?.message || 'Failed to place order');
+    });
+  };
+
+  const handlePayOrder = async (order) => {
+    if (payingId || placing) return;
+    setPayingId(order.eq_order_id);
+    setPaymentErrors((current) => ({ ...current, [order.eq_order_id]: '' }));
+    setSuccessOrder(null);
+    try {
+      const { data } = await API.post('/api/payment/create-order/', {
+        payment_type: 'equipment', object_id: order.eq_order_id, amount: order.total_price,
+      });
+      await checkoutEquipment(order, data.data || {});
+    } catch (error) {
+      const message = error?.response?.data?.message || 'Could not start payment. Try again shortly.';
+      setPaymentErrors((current) => ({ ...current, [order.eq_order_id]: message }));
+      toast.error(message, { duration: 8000 });
+      orders.refetch();
+    } finally {
+      setPayingId(null);
+    }
+  };
+
+  // ─── Place order + Razorpay ───────────────────────────────────────────────
+  const handlePlaceOrder = async () => {
+    if (!orderModal || placing || payingId) return;
+    if (!Number.isInteger(qty) || qty < 1 || qty > maxOrderQuantity) {
+      toast.error(`Quantity must be between 1 and ${maxOrderQuantity} units per order.`);
+      return;
+    }
+    setPlacing(true);
+    const product = orderModal;
+    const orderedQty = qty;
+    try {
+      const { data } = await API.post('/api/vendor/place-order/', {
+        product_id: product.product_id, quantity: orderedQty,
+      });
+      const d = data?.data || {};
+      if (!d.eq_order_id) throw new Error('Order ID missing in server response.');
+      setOrderModal(null);
+      setActiveTab('orders');
+      orders.refetch();
+      catalog.refetch();
+      await checkoutEquipment({
+        ...d, product_name: product.product_name, vendor_name: product.vendor_name,
+        quantity: orderedQty,
+      }, {
+        razorpay_order_id: d.razorpay_order_id, key_id: d.razorpay_key,
+        error: d.payment_error,
+        amount: Math.round(parseFloat(d.total_price) * 100),
+      });
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Could not complete checkout. Check My Orders before ordering again.');
     } finally {
       setPlacing(false);
     }
@@ -465,7 +535,7 @@ const EquipmentOrdersPage = () => {
           <div className="flex items-start gap-3">
             <FiCheckCircle className="w-6 h-6 text-green-500 mt-0.5 shrink-0" />
             <div>
-              <p className="font-bold text-green-800 text-base mb-2">Order Placed Successfully!</p>
+              <p className="font-bold text-green-800 text-base mb-2">Payment Successful!</p>
               <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm text-green-700">
                 <span className="text-green-500">Product</span><span className="font-medium">{successOrder.product_name}</span>
                 <span className="text-green-500">Vendor</span><span className="font-medium">{successOrder.vendor_name}</span>
@@ -480,10 +550,14 @@ const EquipmentOrdersPage = () => {
       )}
 
       {/* ─── Tabs ─────────────────────────────────────────────── */}
-      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
-        {[{ key: 'catalog', label: 'Browse Catalog' }, { key: 'orders', label: `My Orders (${orderList.length})` }].map(({ key, label }) => (
+      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit max-w-full overflow-x-auto">
+        {[
+          { key: 'catalog', label: 'Browse Catalog' },
+          { key: 'orders', label: `My Orders (${currentOrders.length})` },
+          { key: 'cancelled', label: `Cancelled / Refunded (${closedOrders.length})` },
+        ].map(({ key, label }) => (
           <button key={key} onClick={() => setActiveTab(key)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === key ? 'bg-white text-primary-500 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`shrink-0 whitespace-nowrap px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === key ? 'bg-white text-primary-500 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
           </button>
         ))}
@@ -572,17 +646,17 @@ const EquipmentOrdersPage = () => {
       )}
 
       {/* ─── My Orders Tab ────────────────────────────────────── */}
-      {activeTab === 'orders' && (
+      {['orders', 'cancelled'].includes(activeTab) && (
         <div className="space-y-4">
           {orders.loading ? (
             <div className="card text-center text-gray-400 py-8">Loading orders…</div>
-          ) : orderList.length === 0 ? (
+          ) : visibleOrders.length === 0 ? (
             <div className="card text-center py-12">
               <div className="text-4xl mb-3">📋</div>
-              <p className="text-gray-500">No equipment orders yet.</p>
+              <p className="text-gray-500">{activeTab === 'cancelled' ? 'No cancelled or refunded orders.' : 'No equipment orders to show.'}</p>
             </div>
           ) : (
-            orderList.map((o) => (
+            visibleOrders.map((o) => (
               <div key={o.eq_order_id} className="card">
                 {/* Header */}
                 <div className="flex items-start justify-between mb-1">
@@ -601,7 +675,19 @@ const EquipmentOrdersPage = () => {
                 </div>
 
                 {/* Status tracker with timestamps */}
-                <StatusTracker order={o} />
+                {isClosedOrder(o) ? (
+                  <div className="my-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                    <p className="font-semibold text-gray-800">{o.order_status === 'refunded' ? 'Order Refunded' : 'Order Cancelled'}</p>
+                    {o.order_status === 'refunded' && <p className="mt-1 text-xs text-gray-600">The vendor has refunded your payment.</p>}
+                    {o.order_status === 'cancelled' && (
+                      <p className="mt-1 text-xs text-gray-600">
+                        {o.refund_status === 'pending' ? 'Refund processing.'
+                          : o.refund_status === 'failed' ? 'Refund failed. Contact the vendor.'
+                            : o.payment_status === 'paid' ? 'Awaiting vendor refund.' : 'No captured payment to refund.'}
+                      </p>
+                    )}
+                  </div>
+                ) : <StatusTracker order={o} />}
 
                 {/* Dispatched info */}
                 {o.order_status === 'dispatched' && (
@@ -648,20 +734,28 @@ const EquipmentOrdersPage = () => {
                   </div>
                 )}
 
-                {/* Refunded info */}
-                {o.order_status === 'refunded' && (
-                  <div className="mt-2 bg-purple-50 border border-purple-200 rounded-xl p-3 text-sm">
-                    <p className="font-semibold text-purple-800">Order Refunded</p>
-                    <p className="text-purple-700 text-xs">The vendor has refunded your payment.</p>
-                  </div>
+                {['pending', 'confirmed'].includes(o.order_status) && ['pending', 'failed'].includes(o.payment_status) && (
+                  <p className="mt-3 text-sm text-orange-700">Payment pending. Pay to confirm your order before the vendor can dispatch it.</p>
                 )}
-
                 {/* Action buttons */}
+                {!isClosedOrder(o) && paymentErrors[o.eq_order_id] && (
+                  <p role="alert" className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">{paymentErrors[o.eq_order_id]}</p>
+                )}
                 <div className="flex gap-2 mt-3 flex-wrap">
-                  <button onClick={() => setTrackModal(o)}
+                  {['pending', 'confirmed'].includes(o.order_status) && ['pending', 'failed'].includes(o.payment_status) && (
+                    <button type="button" onClick={() => handlePayOrder(o)} disabled={Boolean(payingId) || placing}
+                      className="btn-orange w-full sm:w-auto disabled:opacity-50">
+                      {payingId === o.eq_order_id ? 'Opening Payment…' : 'Pay Now'}
+                    </button>
+                  )}
+                  {!isClosedOrder(o) && o.can_cancel && <button type="button" onClick={() => setCancelOrderModal(o)}
+                    className="text-xs text-red-700 border border-red-200 px-3 py-1.5 rounded-lg w-full sm:w-auto">
+                    Cancel Order
+                  </button>}
+                  {!isClosedOrder(o) && <button onClick={() => setTrackModal(o)}
                     className="inline-flex items-center justify-center gap-1.5 text-xs text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition w-full sm:w-auto">
                     <FiPackage className="w-3.5 h-3.5" /> Track Order
-                  </button>
+                  </button>}
                   {['paid', 'refunded'].includes(o.payment_status) && (
                     <button
                       type="button"
@@ -680,12 +774,12 @@ const EquipmentOrdersPage = () => {
                   >
                     📞 Contact Vendor
                   </button>
-                  <button
+                  {!isClosedOrder(o) && <button
                     onClick={() => { setSelectedOrder(o); setShowVendorComplaintModal(true); }}
                     className="px-4 py-2 rounded-full text-sm font-medium text-white transition-all bg-orange-500 border-2 border-orange-500 hover:bg-orange-600 hover:border-orange-600 w-full sm:w-auto text-center"
                   >
                     🚩 File Complaint
-                  </button>
+                  </button>}
                   {o.order_status === 'dispatched' && (
                     <>
                       <button onClick={() => setReportIssueModal(o)}
@@ -706,6 +800,18 @@ const EquipmentOrdersPage = () => {
       )}
 
       {/* ─── Place Order Modal ────────────────────────────────── */}
+      <Modal isOpen={Boolean(cancelOrderModal)} onClose={() => !cancellingId && setCancelOrderModal(null)} title="Cancel Order">
+        {cancelOrderModal && <div className="space-y-4">
+          <p>Cancel the order for {cancelOrderModal.product_name}?</p>
+          {cancelOrderModal.payment_status === 'paid' && <p>The vendor can refund the captured payment after cancellation.</p>}
+          <div className="flex gap-3">
+            <button type="button" onClick={() => setCancelOrderModal(null)} disabled={Boolean(cancellingId)} className="btn-secondary">Keep Order</button>
+            <button type="button" onClick={cancelOrder} disabled={Boolean(cancellingId)} className="btn-orange disabled:opacity-50">
+              {cancellingId ? 'Cancelling…' : 'Confirm Cancellation'}
+            </button>
+          </div>
+        </div>}
+      </Modal>
       <Modal isOpen={Boolean(orderModal)} onClose={() => setOrderModal(null)}
         title={`Order: ${orderModal?.product_name}`}>
         {orderModal && (
@@ -717,7 +823,7 @@ const EquipmentOrdersPage = () => {
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
+              <label htmlFor="equipment-order-quantity" className="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setQty(Math.max(1, qty - 1))}
@@ -726,18 +832,18 @@ const EquipmentOrdersPage = () => {
                 >
                   −
                 </button>
-                <input type="number" min={1} max={Math.min(orderModal.max_order_qty || 100, orderModal.stock_qty)} value={qty}
-                  onChange={(e) => setQty(Math.max(1, Math.min(Math.min(orderModal.max_order_qty || 100, orderModal.stock_qty), parseInt(e.target.value) || 1)))}
+                <input id="equipment-order-quantity" type="number" min={1} max={maxOrderQuantity} step={1} value={qty}
+                  onChange={(e) => setQty(Math.max(1, Math.min(maxOrderQuantity, parseInt(e.target.value, 10) || 1)))}
                   className="flex-1 text-center border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 font-semibold" />
                 <button
-                  onClick={() => setQty(Math.min(Math.min(orderModal.max_order_qty || 100, orderModal.stock_qty), qty + 1))}
-                  disabled={qty >= Math.min(orderModal.max_order_qty || 100, orderModal.stock_qty)}
+                  onClick={() => setQty(Math.min(maxOrderQuantity, qty + 1))}
+                  disabled={qty >= maxOrderQuantity}
                   className="w-10 h-10 flex items-center justify-center border border-gray-200 rounded-xl text-gray-600 font-bold hover:bg-gray-50 disabled:opacity-50"
                 >
                   +
                 </button>
               </div>
-              <p className="text-xs text-gray-400 mt-1.5">Max limit: {orderModal.max_order_qty || 100} units per order</p>
+              <p className="text-xs text-gray-400 mt-1.5">Max limit: {orderModal.max_order_qty ?? 100} units per order</p>
             </div>
 
             <div className="bg-blue-50 rounded-xl p-3 mb-5 flex items-center justify-between">
@@ -747,7 +853,7 @@ const EquipmentOrdersPage = () => {
 
             <div className="flex justify-end gap-3">
               <button onClick={() => setOrderModal(null)} className="btn-secondary">Cancel</button>
-              <button onClick={handlePlaceOrder} disabled={placing}
+              <button onClick={handlePlaceOrder} disabled={placing || Boolean(payingId) || maxOrderQuantity < 1}
                 className="inline-flex items-center gap-2 bg-orange-500 text-white px-5 py-2 rounded-xl text-sm font-semibold hover:bg-orange-600 transition shadow-md disabled:opacity-60">
                 <FiShoppingCart className="w-4 h-4" />
                 {placing ? 'Processing…' : 'Place Order & Pay'}

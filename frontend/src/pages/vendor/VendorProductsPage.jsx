@@ -39,6 +39,19 @@ const stockLevel = (qty) => {
 };
 
 const emptyForm = { product_name: '', category: '', specifications: '', price: '', stock_qty: '', max_order_qty: 100, image_url: '' };
+const PRODUCT_FIELDS = [
+  { label: 'Product Name', key: 'product_name', placeholder: 'e.g. Digital Stethoscope', maxLength: 200 },
+  { label: 'Category', key: 'category', placeholder: 'e.g. Diagnostic', maxLength: 100 },
+  { label: 'Price (₹)', key: 'price', placeholder: '0.00', type: 'number', min: '0.01', step: '0.01' },
+  { label: 'Stock Qty', key: 'stock_qty', placeholder: '0', type: 'number', min: '0', step: '1' },
+  { label: 'Max Order Limit', key: 'max_order_qty', placeholder: '100', type: 'number', min: '1', step: '1' },
+];
+
+const errorText = (value) => {
+  if (Array.isArray(value)) return value.map(errorText).join(' ');
+  if (value && typeof value === 'object') return Object.values(value).map(errorText).join(' ');
+  return String(value);
+};
 
 const VendorProductsPage = () => {
   const location = useLocation();
@@ -47,6 +60,7 @@ const VendorProductsPage = () => {
   const [productModal, setProductModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -63,6 +77,7 @@ const VendorProductsPage = () => {
   function openAdd() {
     setEditProduct(null);
     setForm(emptyForm);
+    setErrors({});
     setImageFile(null);
     setImagePreview('');
     setProductModal(true);
@@ -118,15 +133,16 @@ const VendorProductsPage = () => {
 
   const openEdit = (p) => {
     setEditProduct(p);
+    setErrors({});
     setForm({
       product_name: p.product_name || '',
       category: p.category || '',
       specifications: typeof p.specifications === 'object'
         ? JSON.stringify(p.specifications, null, 2)
         : p.specifications || '',
-      price: p.price || '',
-      stock_qty: p.stock_qty || '',
-      max_order_qty: p.max_order_qty || 100,
+      price: p.price ?? '',
+      stock_qty: p.stock_qty ?? '',
+      max_order_qty: p.max_order_qty ?? 100,
       image_url: p.image_url || '',
     });
     setImageFile(null);
@@ -134,18 +150,50 @@ const VendorProductsPage = () => {
     setProductModal(true);
   };
 
+  const updateField = (key, value) => {
+    setForm((previous) => ({ ...previous, [key]: value }));
+    setErrors((previous) => ({ ...previous, [key]: undefined, non_field_errors: undefined }));
+  };
+
   const saveProduct = async () => {
-    if (!form.product_name || !form.price) {
-      toast.error('Product name and price are required.');
+    if (saving || uploadingImage) return;
+    const validation = {};
+    const stock = String(form.stock_qty).trim() || '0';
+    const limit = String(form.max_order_qty).trim() || '100';
+    const price = String(form.price).trim();
+    if (!form.product_name.trim()) validation.product_name = 'Enter a product name.';
+    if (!/^\d+(\.\d{1,2})?$/.test(price) || Number(price) <= 0 || Number(price) >= 10000000000) {
+      validation.price = 'Enter a price greater than 0, below 10,000,000,000, with up to 2 decimal places.';
+    }
+    if (!/^\d+$/.test(stock) || !Number.isSafeInteger(Number(stock)) || Number(stock) > 2147483647) {
+      validation.stock_qty = 'Enter a whole number from 0 to 2,147,483,647.';
+    }
+    if (!/^\d+$/.test(limit) || !Number.isSafeInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 2147483647) {
+      validation.max_order_qty = 'Enter a whole number from 1 to 2,147,483,647.';
+    }
+    let specs = {};
+    try {
+      specs = form.specifications.trim() ? JSON.parse(form.specifications) : {};
+      if (specs === null || Array.isArray(specs) || typeof specs !== 'object') {
+        validation.specifications = 'Use a JSON object, for example {"weight":"200g"}, or leave this blank.';
+      }
+    } catch {
+      validation.specifications = 'Enter valid JSON, for example {"weight":"200g"}, or leave this blank.';
+    }
+    setErrors(validation);
+    if (Object.keys(validation).length) {
+      toast.error('Please correct the highlighted product fields.');
       return;
     }
     setSaving(true);
     try {
-      let specs = form.specifications;
-      try { specs = JSON.parse(form.specifications); } catch { /* keep as string */ }
       let imageUrl = form.image_url;
       if (imageFile) imageUrl = await uploadImage(imageFile);
-      const payload = { ...form, specifications: specs, image_url: imageUrl };
+      const payload = {
+        ...form, product_name: form.product_name.trim(), category: form.category.trim(),
+        price, stock_qty: Number(stock), max_order_qty: Number(limit),
+        specifications: specs, image_url: imageUrl,
+      };
       if (editProduct) {
         await API.put(`/api/vendor/products/${editProduct.product_id}/`, payload);
         toast.success('Product updated');
@@ -158,7 +206,15 @@ const VendorProductsPage = () => {
       setImagePreview('');
       refetch();
     } catch (err) {
-      toast.error(err?.response?.data?.message || err.message || 'Save failed');
+      const fieldErrors = err?.response?.data?.errors;
+      if (fieldErrors && typeof fieldErrors === 'object' && Object.keys(fieldErrors).length) {
+        setErrors(Object.fromEntries(Object.entries(fieldErrors).map(([key, value]) => [key, errorText(value)])));
+        toast.error('Please correct the highlighted product fields.');
+      } else {
+        const message = err?.response?.data?.message || err.message || 'Could not save product.';
+        setErrors({ non_field_errors: message });
+        toast.error(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -290,22 +346,21 @@ const VendorProductsPage = () => {
         size="md"
       >
         <div className="space-y-4">
-          {[
-            { label: 'Product Name', key: 'product_name', placeholder: 'e.g. Digital Stethoscope' },
-            { label: 'Category', key: 'category', placeholder: 'e.g. Diagnostic' },
-            { label: 'Price (₹)', key: 'price', placeholder: '0.00', type: 'number' },
-            { label: 'Stock Qty', key: 'stock_qty', placeholder: '0', type: 'number' },
-            { label: 'Max Order Limit', key: 'max_order_qty', placeholder: '100', type: 'number' },
-          ].map(({ label, key, placeholder, type = 'text' }) => (
+          {PRODUCT_FIELDS.map(({ label, key, placeholder, type = 'text', ...constraints }) => (
             <div key={key}>
-              <label className="text-xs text-muted">{label}</label>
+              <label htmlFor={`vendor-product-${key}`} className="text-xs text-muted">{label}</label>
               <input
+                id={`vendor-product-${key}`}
                 type={type}
+                {...constraints}
+                aria-invalid={Boolean(errors[key])}
+                aria-describedby={errors[key] ? `vendor-product-${key}-error` : undefined}
                 className="input mt-1"
                 value={form[key]}
-                onChange={(e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))}
+                onChange={(e) => updateField(key, e.target.value)}
                 placeholder={placeholder}
               />
+              {errors[key] && <p id={`vendor-product-${key}-error`} role="alert" className="mt-1 text-xs text-red-700">{errors[key]}</p>}
             </div>
           ))}
 
@@ -335,15 +390,21 @@ const VendorProductsPage = () => {
           </div>
 
           <div>
-            <label className="text-xs text-muted">Specifications (JSON)</label>
+            <label htmlFor="vendor-product-specifications" className="text-xs text-muted">Specifications (JSON, optional)</label>
             <textarea
+              id="vendor-product-specifications"
+              aria-invalid={Boolean(errors.specifications)}
+              aria-describedby={errors.specifications ? 'vendor-product-specifications-error' : undefined}
               className="input mt-1 h-24 resize-none font-mono text-xs"
               value={form.specifications}
-              onChange={(e) => setForm((p) => ({ ...p, specifications: e.target.value }))}
+              onChange={(e) => updateField('specifications', e.target.value)}
               placeholder='{"weight": "200g", "warranty": "1 year"}'
             />
+            {errors.specifications && <p id="vendor-product-specifications-error" role="alert" className="mt-1 text-xs text-red-700">{errors.specifications}</p>}
           </div>
 
+          {Object.entries(errors).filter(([key, value]) => value && key !== 'specifications' && !PRODUCT_FIELDS.some((field) => field.key === key))
+            .map(([key, value]) => <p key={key} role="alert" className="text-sm text-red-700">{value}</p>)}
           <button onClick={saveProduct} disabled={saving || uploadingImage} className="btn-orange w-full">
             {uploadingImage ? 'Uploading image…' : saving ? 'Saving…' : editProduct ? 'Update Product' : 'Add Product'}
           </button>

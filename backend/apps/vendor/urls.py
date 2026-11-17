@@ -1,4 +1,5 @@
 from django.urls import path
+from .order_actions import CancelEquipmentOrderView, RefundEquipmentOrderView
 from .views import (
     VendorDashboardView,
     ListProductsView,
@@ -28,6 +29,8 @@ urlpatterns = [
     path('products/create/', CreateProductView.as_view()),
     path('products/<uuid:product_id>/', UpdateProductView.as_view()),
     path('orders/', ListOrdersView.as_view()),
+    path('orders/<uuid:order_id>/cancel/', CancelEquipmentOrderView.as_view()),
+    path('orders/<uuid:order_id>/refund/', RefundEquipmentOrderView.as_view()),
     path('orders/<uuid:order_id>/', GetOrderDetailView.as_view()),
     path('orders/<uuid:order_id>/status/', UpdateOrderStatusView.as_view()),
     path('orders/<uuid:order_id>/dispatch/', DispatchOrderView.as_view()),

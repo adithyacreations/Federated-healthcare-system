@@ -1,3 +1,4 @@
+import { openBackendSocket, backendUrl } from '../../api/urls';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -10,7 +11,6 @@ import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import { openRazorpay } from '../../utils/payment';
 
-const API_HOST = 'http://localhost:8000';
 
 const CATEGORY_EMOJI = {
   tablet: '💊', syrup: '🧴', injection: '💉', cream: '🧴', drops: '👁️', capsule: '💊', other: '🏥',
@@ -28,7 +28,7 @@ const CATEGORY_FILTERS = [
 
 const imgUrl = (path) => {
   if (!path) return '';
-  return path.startsWith('http') ? path : `${API_HOST}${path}`;
+  return backendUrl(path);
 };
 
 // Max strips of a single medicine allowed in one order (matches backend).
@@ -249,7 +249,7 @@ const OrderMedicinePage = () => {
 
     let ws;
     try {
-      ws = new WebSocket(`ws://localhost:8000/ws/medicine/${loginId}/`);
+      ws = openBackendSocket(`/ws/medicine/${loginId}/`);
       ws.onmessage = (event) => {
         let msg;
         try { msg = JSON.parse(event.data); } catch { return; }
@@ -286,7 +286,7 @@ const OrderMedicinePage = () => {
 
     const connect = () => {
       try {
-        ws = new WebSocket('ws://localhost:8000/ws/pharmacy/');
+        ws = openBackendSocket('/ws/pharmacy/');
       } catch {
         return; // 60s catalog poll still keeps things fresh.
       }

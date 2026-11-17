@@ -1,10 +1,10 @@
+import { BACKEND_URL } from './urls';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
-const BASE_URL = (process.env.REACT_APP_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 const API = axios.create({
-  baseURL: BASE_URL,
+  baseURL: BACKEND_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -45,6 +45,8 @@ const forceLogout = () => {
 API.interceptors.response.use(
   (response) => response,
   async (error) => {
+    if (axios.isCancel(error)) return Promise.reject(error);
+
     if (!error.response) {
       toast.error('Network error. Check your connection or backend server.');
       return Promise.reject(error);
@@ -80,7 +82,7 @@ API.interceptors.response.use(
 
       try {
         const { data } = await axios.post(
-          `${BASE_URL}/api/auth/token/refresh/`,
+          `${BACKEND_URL}/api/auth/token/refresh/`,
           { refresh: refreshToken },
           { headers: { 'Content-Type': 'application/json' }, _isRefresh: true }
         );

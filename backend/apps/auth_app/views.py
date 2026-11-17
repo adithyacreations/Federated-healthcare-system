@@ -8,6 +8,8 @@ from uuid import UUID
 
 from django.contrib.auth.hashers import make_password
 from django.db import transaction
+from django.db.models import OuterRef, Subquery, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -16,7 +18,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import LoginCredentials, LoginSession, Developer, ProjectFeature
+from .models import AuditLog, LoginCredentials, LoginSession, Developer, ProjectFeature
 from .attempts import limit_attempts
 from .authentication import session_stamp
 from .serializers import (
@@ -274,11 +276,13 @@ class PatientRegisterView(APIView):
             if not created:
                 return err('Validation failed', {'email': ['An account with this email already exists']})
 
-            # BMI calculation
+            # Keep accepted measurements when the result exceeds the BMI column's precision.
             bmi = None
             if d.get('height_cm') and d.get('weight_kg'):
-                h = float(d['height_cm']) / 100
-                bmi = round(float(d['weight_kg']) / (h ** 2), 2)
+                height_m = d['height_cm'] / 100
+                calculated_bmi = round(d['weight_kg'] / height_m ** 2, 2)
+                if calculated_bmi <= Decimal('99.99'):
+                    bmi = calculated_bmi
 
             patient = PatientRegistration.objects.create(
                 login_id=login,
@@ -767,7 +771,17 @@ class AllUsersView(APIView):
             }
 
         hospital_admins = []
-        for h in HospitalRegistration.objects.select_related('login_id').all():
+        latest_hospital_action = AuditLog.objects.filter(
+            entity_type='LoginCredentials',
+            entity_id=OuterRef('login_id_id'),
+            action__in=['hospital_suspend', 'hospital_terminate', 'hospital_resume'],
+        ).order_by('-logged_at', '-log_id').values('action')[:1]
+        hospitals = HospitalRegistration.objects.select_related('login_id').filter(
+            approval_status='approved', login_id__is_approved=True,
+        ).annotate(latest_platform_action=Coalesce(Subquery(latest_hospital_action), Value(''))).exclude(
+            latest_platform_action='hospital_terminate',
+        )
+        for h in hospitals:
             d = base(h.login_id)
             d.update({'hospital_name': h.hospital_name, 'city': h.city,
                       'approval_status': h.approval_status})
@@ -821,8 +835,14 @@ class PlatformActionView(APIView):
         else:
             prof = getattr(login, 'vendor_profile', None)
             entity_name = (getattr(prof, 'company_name', None) if prof else None) or login.email
-        # suspend / terminate block sign-in; resume restores it.
-        login.set_account_active(action == 'resume')
+        with transaction.atomic():
+            login = LoginCredentials.objects.select_for_update().get(pk=login.pk)
+            login.set_account_active(action == 'resume')
+            log_audit(
+                request.user, f'{entity_type}_{action}', module='auth',
+                entity_type='LoginCredentials', entity_id=login.login_id,
+                ip_address=request.META.get('REMOTE_ADDR'),
+            )
 
         if action == 'resume':
             email_sent = self._send_resume_email(login.email, entity_name, entity_type)
@@ -833,12 +853,6 @@ class PlatformActionView(APIView):
             except Exception as e:  # noqa: BLE001
                 print(f'[PLATFORM] action email error: {e}')
                 email_sent = False
-
-        log_audit(
-            request.user, f'{entity_type}_{action}', module='auth',
-            entity_type='LoginCredentials', entity_id=login.login_id,
-            ip_address=request.META.get('REMOTE_ADDR'),
-        )
 
         action_msg = {'suspend': 'suspended', 'terminate': 'terminated', 'resume': 'reactivated'}[action]
         return ok(

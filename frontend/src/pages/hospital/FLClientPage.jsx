@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../../api/urls';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -52,9 +53,7 @@ const FLClientPage = () => {
 
   // ─── Real-time FL updates via WebSocket ─────────────────────────────────
   useEffect(() => {
-    const wsHost = window.location.hostname || 'localhost';
-    const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${wsProto}://${wsHost}:8000/ws/fl/global/`);
+    const ws = openBackendSocket(`/ws/fl/global/`);
 
     ws.onopen = () => console.log('[FL] WebSocket connected');
 

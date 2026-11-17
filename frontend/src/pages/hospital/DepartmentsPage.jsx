@@ -5,6 +5,12 @@ import DashboardLayout from '../../components/common/DashboardLayout';
 import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
 
+const departmentError = (error, fallback) => {
+  const { status, data } = error?.response || {};
+  if (status === 403) return 'Sign in with your hospital admin account to manage departments.';
+  return data?.message || data?.detail || fallback;
+};
+
 const DepartmentsPage = () => {
   const departments = useApi('/api/hospital/departments/');
   const [form, setForm] = useState({ dept_name: '', description: '' });
@@ -41,7 +47,7 @@ const DepartmentsPage = () => {
       setDeptPhoto(null);
       setDeptPhotoPreview(null);
     } catch (err) {
-      toast.error(err?.response?.data?.message || 'Failed to add department');
+      toast.error(departmentError(err, 'Failed to add department'));
     } finally {
       setAdding(false);
     }
@@ -58,7 +64,7 @@ const DepartmentsPage = () => {
       toast.success('Department photo updated');
       departments.refetch();
     } catch (err) {
-      toast.error(err?.response?.data?.message || 'Failed to update photo');
+      toast.error(departmentError(err, 'Failed to update photo'));
     }
   };
 
@@ -154,6 +160,10 @@ const DepartmentsPage = () => {
         </h2>
         {departments.loading ? (
           <div className="card text-center text-gray-400 py-8">Loading departments…</div>
+        ) : departments.error ? (
+          <div className="card text-center text-red-700 py-8" role="alert">
+            {departmentError(departments.error, 'Failed to load departments. Try refreshing.')}
+          </div>
         ) : deptList.length === 0 ? (
           <div className="card text-center py-12">
             <div className="text-4xl mb-3">🏥</div>

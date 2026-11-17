@@ -11,7 +11,8 @@ from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
-from django.db.models import F, Q
+from django.db import transaction
+from django.db.models import F, Prefetch, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -1458,6 +1459,10 @@ class ListHospitalEquipmentOrdersView(APIView):
                 'total_price': float(o.total_price),
                 'order_status': o.order_status,
                 'payment_status': o.payment_status,
+                'can_cancel': o.can_cancel,
+                'can_refund': o.can_refund,
+                'return_deadline': o.return_deadline.isoformat() if o.return_deadline else None,
+                'refund_status': o.refund_status,
                 'tracking_info': o.tracking_info,
                 'estimated_delivery_days': o.estimated_delivery_days,
                 'otp_expiry': o.otp_expiry.isoformat() if o.otp_expiry else None,
@@ -1473,6 +1478,7 @@ class ListHospitalEquipmentOrdersView(APIView):
 class ConfirmDeliveryView(APIView):
     permission_classes = [IsAuthenticated, IsHospitalAdmin]
 
+    @transaction.atomic
     def post(self, request, order_id):
         from apps.vendor.models import EquipmentOrder
         hospital = get_hospital(request)
@@ -1482,7 +1488,7 @@ class ConfirmDeliveryView(APIView):
             return err('OTP is required.')
 
         try:
-            order = EquipmentOrder.objects.select_related(
+            order = EquipmentOrder.objects.select_for_update(of=('self',)).select_related(
                 'product_id', 'vendor_id'
             ).get(eq_order_id=order_id, hospital_id=hospital, order_status='dispatched')
         except EquipmentOrder.DoesNotExist:
@@ -2342,14 +2348,17 @@ class DoctorScheduleView(APIView):
                 & (Q(is_blocked=True) | Q(status='blocked'))
                 & Q(block_reason__in=AUTO_OBSOLETE_BLOCK_REASONS)
             )
-            slots = slots.select_related('schedule', 'hospital').order_by('start_time')
+            slots = slots.prefetch_related(Prefetch(
+                'consultation',
+                queryset=Consultation.objects.filter(
+                    status__in=['scheduled', 'ongoing', 'completed'],
+                ).select_related('patient_id'),
+                to_attr='board_consultations',
+            )).order_by('start_time')
 
             slot_list = []
             for slot in slots:
-                consultation = Consultation.objects.filter(
-                    slot_id=slot,
-                    status__in=['scheduled', 'ongoing', 'completed'],
-                ).select_related('patient_id').first()
+                consultation = next(iter(slot.board_consultations), None)
 
                 if slot.is_blocked or slot.status == 'blocked':
                     slot_status = 'blocked'
@@ -2369,7 +2378,7 @@ class DoctorScheduleView(APIView):
 
                 slot_list.append({
                     'slot_id': str(slot.slot_id),
-                    'schedule_id': str(slot.schedule.schedule_id) if slot.schedule else None,
+                    'schedule_id': str(slot.schedule_id) if slot.schedule_id else None,
                     'start_time': str(slot.start_time),
                     'end_time': str(slot.end_time),
                     'consult_type': slot.consult_type,
@@ -2430,7 +2439,24 @@ class DoctorScheduleView(APIView):
         })
 
 
-# ─── Lab slot configuration (Option B+) ─────────────────────────────────────
+# ─── Doctor schedule configuration ─────────────────────────────────────────
+
+def _save_doctor_schedule(schedule, data, *, prune_available):
+    from apps.doctor.utils import deactivate_duplicate_schedules, generate_slots_for_schedule
+
+    schedule.working_days = data['working_days']
+    schedule.start_time = data['start_time']
+    schedule.end_time = data['end_time']
+    schedule.slot_duration_minutes = data['slot_duration_minutes']
+    schedule.consultation_type = data['consultation_type']
+    schedule.consultation_fee = data['consultation_fee']
+    schedule.is_active = data['is_active']
+    schedule.save()
+    days_ahead = data['days_ahead']
+    generation = generate_slots_for_schedule(schedule, days_ahead=days_ahead, prune_available=prune_available)
+    duplicate_cleanup = deactivate_duplicate_schedules(schedule, days_ahead=days_ahead)
+    return generation, duplicate_cleanup
+
 
 class DoctorScheduleConfigView(APIView):
     permission_classes = [IsAuthenticated, IsHospitalAdmin]
@@ -2460,9 +2486,8 @@ class DoctorScheduleConfigView(APIView):
         })
 
     def post(self, request):
-        from apps.doctor.models import DoctorSchedule
+        from apps.doctor.models import DoctorRegistration, DoctorSchedule
         from apps.doctor.serializers import DoctorScheduleSerializer, DoctorScheduleWriteSerializer
-        from apps.doctor.utils import deactivate_duplicate_schedules, generate_slots_for_schedule
 
         hospital = get_hospital(request)
         if not hospital:
@@ -2474,38 +2499,20 @@ class DoctorScheduleConfigView(APIView):
 
         data = serializer.validated_data
         doctor = data['_doctor']
-        schedule = (
-            DoctorSchedule.objects
-            .filter(hospital=hospital, doctor=doctor)
-            .order_by('-is_active', '-updated_at', '-created_at')
-            .first()
-        )
-        created = schedule is None
-        if created:
-            schedule = DoctorSchedule(hospital=hospital, doctor=doctor)
-
-        schedule.working_days = data['working_days']
-        schedule.start_time = data['start_time']
-        schedule.end_time = data['end_time']
-        schedule.slot_duration_minutes = data['slot_duration_minutes']
-        schedule.consultation_type = data['consultation_type']
-        schedule.consultation_fee = data['consultation_fee']
-        schedule.is_active = data.get('is_active', True)
-        schedule.save()
-
         try:
-            generation = generate_slots_for_schedule(
-                schedule,
-                days_ahead=data.get('days_ahead', 30),
-                prune_available=not created,
-            )
-            duplicate_cleanup = deactivate_duplicate_schedules(
-                schedule,
-                days_ahead=data.get('days_ahead', 30),
-            )
+            with transaction.atomic():
+                DoctorRegistration.objects.select_for_update(no_key=True).only('pk').get(pk=doctor.pk)
+                schedule = (
+                    DoctorSchedule.objects
+                    .filter(hospital=hospital, doctor=doctor)
+                    .order_by('-is_active', '-updated_at', '-created_at')
+                    .first()
+                )
+                created = schedule is None
+                if created:
+                    schedule = DoctorSchedule(hospital=hospital, doctor=doctor)
+                generation, duplicate_cleanup = _save_doctor_schedule(schedule, data, prune_available=not created)
         except ValueError as exc:
-            if created:
-                schedule.delete()
             return err(str(exc), status=400)
 
         send_notification(
@@ -2514,6 +2521,7 @@ class DoctorScheduleConfigView(APIView):
             f'{hospital.hospital_name} {"created" if created else "updated"} your consultation schedule.',
             notif_type='info',
             related_id=str(schedule.schedule_id),
+            push_timeout=2,
         )
         try:
             broadcast_new_slots_to_patients(doctor_name=doctor.full_name, doctor_id=doctor.doctor_id)
@@ -2544,8 +2552,7 @@ class DoctorScheduleConfigDetailView(APIView):
         return self._update(request, schedule_id)
 
     def delete(self, request, schedule_id):
-        from django.db import transaction
-        from apps.doctor.models import DoctorSchedule
+        from apps.doctor.models import DoctorRegistration, DoctorSchedule
 
         hospital = get_hospital(request)
         if not hospital:
@@ -2561,6 +2568,7 @@ class DoctorScheduleConfigDetailView(APIView):
 
         doctor = schedule.doctor
         with transaction.atomic():
+            DoctorRegistration.objects.select_for_update(no_key=True).only('pk').get(pk=doctor.pk)
             preserved_slot_ids = list(schedule.slots.filter(
                 Q(is_booked=True)
                 | Q(status='booked')
@@ -2590,69 +2598,44 @@ class DoctorScheduleConfigDetailView(APIView):
         })
 
     def _update(self, request, schedule_id):
-        from apps.doctor.models import DoctorSchedule
+        from apps.doctor.models import DoctorRegistration, DoctorSchedule
         from apps.doctor.serializers import DoctorScheduleSerializer, DoctorScheduleWriteSerializer
-        from apps.doctor.utils import deactivate_duplicate_schedules, generate_slots_for_schedule
 
         hospital = get_hospital(request)
         if not hospital:
             return err('Hospital profile not found.', status=404)
 
         try:
-            schedule = DoctorSchedule.objects.select_related('doctor', 'hospital').get(
-                schedule_id=schedule_id,
-                hospital=hospital,
-            )
+            with transaction.atomic():
+                schedule = DoctorSchedule.objects.get(schedule_id=schedule_id, hospital=hospital)
+                DoctorRegistration.objects.select_for_update(no_key=True).only('pk').get(pk=schedule.doctor_id)
+                schedule.refresh_from_db()
+                payload = {
+                    'doctor_id': str(schedule.doctor_id),
+                    'working_days': schedule.working_days,
+                    'start_time': schedule.start_time.strftime('%H:%M'),
+                    'end_time': schedule.end_time.strftime('%H:%M'),
+                    'slot_duration_minutes': schedule.slot_duration_minutes,
+                    'consultation_type': schedule.consultation_type,
+                    'consultation_fee': str(schedule.consultation_fee),
+                    'is_active': schedule.is_active,
+                    'days_ahead': request.data.get('days_ahead', 30),
+                }
+                requested_doctor_id = request.data.get('doctor_id')
+                if requested_doctor_id and str(requested_doctor_id) != payload['doctor_id']:
+                    return err('Doctor cannot be changed for an existing schedule. Create a new schedule instead.', status=400)
+                for key in payload.keys() - {'doctor_id', 'days_ahead'}:
+                    if key in request.data:
+                        payload[key] = request.data[key]
+
+                serializer = DoctorScheduleWriteSerializer(data=payload, context={'hospital': hospital})
+                if not serializer.is_valid():
+                    return err('Validation failed', serializer.errors)
+                generation, duplicate_cleanup = _save_doctor_schedule(
+                    schedule, serializer.validated_data, prune_available=True,
+                )
         except DoctorSchedule.DoesNotExist:
             return err('Doctor schedule not found.', status=404)
-
-        requested_doctor_id = request.data.get('doctor_id')
-        if requested_doctor_id and str(requested_doctor_id) != str(schedule.doctor.doctor_id):
-            return err('Doctor cannot be changed for an existing schedule. Create a new schedule instead.', status=400)
-
-        payload = {
-            'doctor_id': str(schedule.doctor.doctor_id),
-            'working_days': schedule.working_days,
-            'start_time': schedule.start_time.strftime('%H:%M'),
-            'end_time': schedule.end_time.strftime('%H:%M'),
-            'slot_duration_minutes': schedule.slot_duration_minutes,
-            'consultation_type': schedule.consultation_type,
-            'consultation_fee': str(schedule.consultation_fee),
-            'is_active': schedule.is_active,
-            'days_ahead': request.data.get('days_ahead', 30),
-        }
-        for key in [
-            'working_days', 'start_time', 'end_time',
-            'slot_duration_minutes', 'consultation_type', 'consultation_fee',
-            'is_active',
-        ]:
-            if key in request.data:
-                payload[key] = request.data[key]
-
-        serializer = DoctorScheduleWriteSerializer(data=payload, context={'hospital': hospital})
-        if not serializer.is_valid():
-            return err('Validation failed', serializer.errors)
-
-        data = serializer.validated_data
-        schedule.working_days = data['working_days']
-        schedule.start_time = data['start_time']
-        schedule.end_time = data['end_time']
-        schedule.slot_duration_minutes = data['slot_duration_minutes']
-        schedule.consultation_type = data['consultation_type']
-        schedule.consultation_fee = data['consultation_fee']
-        schedule.is_active = data.get('is_active', True)
-        schedule.save()
-
-        try:
-            generation = generate_slots_for_schedule(
-                schedule,
-                days_ahead=data.get('days_ahead', 30),
-                prune_available=True,
-            )
-            duplicate_cleanup = deactivate_duplicate_schedules(
-                schedule,
-                days_ahead=data.get('days_ahead', 30),
-            )
         except ValueError as exc:
             return err(str(exc), status=400)
 
@@ -2662,6 +2645,7 @@ class DoctorScheduleConfigDetailView(APIView):
             f'{hospital.hospital_name} updated your consultation schedule.',
             notif_type='info',
             related_id=str(schedule.schedule_id),
+            push_timeout=2,
         )
         try:
             broadcast_new_slots_to_patients(
@@ -2777,42 +2761,37 @@ class HospitalLabConfigView(APIView):
         if not hospital:
             return err('Hospital profile not found.', status=404)
 
-        config, _ = HospitalLabConfig.objects.get_or_create(hospital_id=hospital)
-
         def parse_time(value):
             parts = str(value).split(':')
             return time(int(parts[0]), int(parts[1]))
 
         d = request.data
-        if 'working_days' in d:
-            config.working_days = d['working_days']
-        if d.get('start_time'):
-            config.start_time = parse_time(d['start_time'])
-        if d.get('end_time'):
-            config.end_time = parse_time(d['end_time'])
-        if 'slot_duration_minutes' in d:
-            config.slot_duration_minutes = int(d['slot_duration_minutes'])
-        if 'max_patients_per_slot' in d:
-            config.max_patients_per_slot = int(d['max_patients_per_slot'])
-        if d.get('lunch_break_start'):
-            config.lunch_break_start = parse_time(d['lunch_break_start'])
-        if d.get('lunch_break_end'):
-            config.lunch_break_end = parse_time(d['lunch_break_end'])
-        config.save()
+        with transaction.atomic():
+            # Serialize saves even when the hospital has no config yet.
+            HospitalRegistration.objects.select_for_update(no_key=True).only('pk').get(pk=hospital.pk)
+            config = HospitalLabConfig.objects.filter(hospital_id=hospital).first()
+            if config is None:
+                config = HospitalLabConfig(hospital_id=hospital)
+            if 'working_days' in d:
+                days = d['working_days']
+                if not isinstance(days, list) or any(type(day) is not int or not 0 <= day <= 6 for day in days):
+                    return err('Working days must be weekday numbers from 0 to 6.')
+                config.working_days = days
+            try:
+                for field in ('start_time', 'end_time', 'lunch_break_start', 'lunch_break_end'):
+                    if d.get(field):
+                        setattr(config, field, parse_time(d[field]))
+                for field in ('slot_duration_minutes', 'max_patients_per_slot'):
+                    if field in d:
+                        setattr(config, field, int(d[field]))
+            except (ValueError, TypeError, IndexError, OverflowError):
+                return err('Enter valid lab hours, slot duration, and capacity.')
+            if config.end_time <= config.start_time:
+                return err('Lab closing time must be after opening time.')
+            if not 1 <= config.slot_duration_minutes <= 1440 or config.max_patients_per_slot < 1:
+                return err('Slot duration and capacity must be positive, and duration cannot exceed one day.')
 
-        generate_lab_slots(hospital, days_ahead=30)
-        return ok('Lab config updated! Slots regenerated.', {'config_id': str(config.config_id)})
-        if d.get('end_time'):
-            config.end_time = parse_time(d['end_time'])
-        if 'slot_duration_minutes' in d:
-            config.slot_duration_minutes = int(d['slot_duration_minutes'])
-        if 'max_patients_per_slot' in d:
-            config.max_patients_per_slot = int(d['max_patients_per_slot'])
-        if d.get('lunch_break_start'):
-            config.lunch_break_start = parse_time(d['lunch_break_start'])
-        if d.get('lunch_break_end'):
-            config.lunch_break_end = parse_time(d['lunch_break_end'])
-        config.save()
+            config.save()
+            generate_lab_slots(config)
 
-        generate_lab_slots(hospital, days_ahead=30)
         return ok('Lab config updated! Slots regenerated.', {'config_id': str(config.config_id)})

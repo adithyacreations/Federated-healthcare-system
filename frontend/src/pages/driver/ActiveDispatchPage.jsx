@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../../api/urls';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
@@ -128,7 +129,7 @@ const ActiveDispatchPage = () => {
     if (!loginId) return undefined;
     let ws;
     try {
-      ws = new WebSocket(`ws://localhost:8000/ws/emergency/${loginId}/`);
+      ws = openBackendSocket(`/ws/emergency/${loginId}/`);
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
@@ -174,7 +175,7 @@ const ActiveDispatchPage = () => {
 
   useEffect(() => {
     if (!dispatch?.id) return undefined;
-    const ws = new WebSocket(`ws://localhost:8000/ws/gps/${dispatch.id}/`);
+    const ws = openBackendSocket(`/ws/gps/${dispatch.id}/`);
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);

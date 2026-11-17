@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../api/urls';
 import {
   createContext, useContext, useEffect, useRef, useState, useCallback,
 } from 'react';
@@ -38,7 +39,7 @@ export function PatientWSProvider({ children }) {
     const connect = () => {
       let ws;
       try {
-        ws = new WebSocket(`ws://localhost:8000/ws/notifications/${loginId}/`);
+        ws = openBackendSocket(`/ws/notifications/${loginId}/`);
       } catch {
         return; // REST polling on each page still keeps data fresh.
       }

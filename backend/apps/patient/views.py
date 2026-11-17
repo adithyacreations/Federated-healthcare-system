@@ -446,10 +446,21 @@ class BrowseDoctorsView(APIView):
         current_time = now.time()
         specialization = request.query_params.get('specialization', '').strip()
         hospital_id = request.query_params.get('hospital_id', '').strip()
+        try:
+            slot_date = date.fromisoformat(request.query_params.get('date', today.isoformat()))
+        except ValueError:
+            return err('Enter a valid appointment date.')
+        if slot_date < today:
+            return ok('Doctors fetched', {'doctors': []})
 
         qs = (
             DoctorRegistration.objects
-            .filter(approval_status='approved')
+            .filter(
+                approval_status='approved', is_online=True,
+                login_id__is_active=True, login_id__is_approved=True,
+                hospital_id__approval_status='approved',
+                hospital_id__login_id__is_active=True, hospital_id__login_id__is_approved=True,
+            )
             .select_related('hospital_id', 'dept_id')
         )
 
@@ -464,7 +475,7 @@ class BrowseDoctorsView(APIView):
             available_slots = DoctorSlot.objects.none()
             if current_schedule:
                 try:
-                    generate_slots_for_schedule(current_schedule, days_ahead=30, prune_available=False)
+                    generate_slots_for_schedule(current_schedule, days_ahead=1, start_date=slot_date, prune_available=False)
                 except ValueError:
                     pass
                 available_slots = DoctorSlot.objects.filter(
@@ -473,11 +484,14 @@ class BrowseDoctorsView(APIView):
                     is_booked=False,
                     is_blocked=False,
                     status='available',
+                    slot_date=slot_date,
                 ).filter(
                     Q(slot_date__gt=today)
                     | Q(slot_date=today, start_time__gt=current_time)
                 )
             available_slots_count = available_slots.count()
+            if not available_slots_count:
+                continue
             starting_fee = available_slots.aggregate(
                 value=Min('consultation_fee')
             )['value']
@@ -529,12 +543,17 @@ class DoctorSlotsView(APIView):
 
         release_expired_consultation_holds()
         try:
-            doctor = DoctorRegistration.objects.get(doctor_id=doctor_id, approval_status='approved')
+            doctor = DoctorRegistration.objects.get(
+                doctor_id=doctor_id, approval_status='approved',
+                login_id__is_active=True, login_id__is_approved=True,
+                hospital_id__approval_status='approved', hospital_id__login_id__is_active=True,
+                hospital_id__login_id__is_approved=True,
+            )
         except DoctorRegistration.DoesNotExist:
             return err('Doctor not found.', status=404)
 
         current_schedule = get_current_schedule_for_doctor(doctor)
-        if not current_schedule:
+        if not doctor.is_online or not current_schedule:
             return ok('Slots fetched', {
                 'doctor_id': str(doctor.doctor_id),
                 'doctor_name': doctor.full_name,
@@ -614,6 +633,10 @@ class BookConsultationView(APIView):
 
         hold_expires_at = timezone.now() + timedelta(minutes=10)
         with transaction.atomic():
+            from apps.doctor.models import DoctorRegistration
+            doctor = DoctorRegistration.objects.select_for_update(no_key=True).get(pk=doctor.pk)
+            if not doctor.is_online:
+                return err('This doctor is offline. Please choose an online doctor.', status=409)
             slot = DoctorSlot.objects.select_for_update().get(slot_id=slot.slot_id)
             if slot.is_booked or slot.is_blocked or slot.status != 'available':
                 return err('Slot is already reserved or booked.', status=409)

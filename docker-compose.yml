@@ -3,14 +3,15 @@ version: '3.8'
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: federcare_backend
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
-      - backend_media:/app/media
+      - ./backend:/app/backend
+      - ./ml_models:/app/ml_models
+      - backend_media:/app/backend/media
     environment:
       - DEBUG=True
       - DJANGO_SETTINGS_MODULE=federcare.settings

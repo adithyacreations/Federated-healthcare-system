@@ -1647,34 +1647,30 @@ class HospitalListView(APIView):
     permission_classes = [IsAuthenticated, IsPatient]
 
     def get(self, request):
-        from datetime import date as _date, timedelta as _td
+        from django.db.models import Count, Exists, F, OuterRef, Q
         from apps.hospital.models import HospitalRegistration
-        from apps.lab.models import LabTechRegistration, HospitalLabConfig, LabSlot
-        qs = HospitalRegistration.objects.filter(approval_status='approved')
-        tomorrow = _date.today() + _td(days=1)
+        from apps.lab.models import HospitalLabConfig, LabSlot
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        qs = HospitalRegistration.objects.filter(approval_status='approved').annotate(
+            lab_count=Count('lab_technicians', filter=Q(lab_technicians__approval_status='approved')),
+            lab_configured=Exists(HospitalLabConfig.objects.filter(hospital_id=OuterRef('pk'), is_active=True)),
+            has_slots=Exists(LabSlot.objects.filter(
+                hospital_id=OuterRef('pk'), slot_date__gte=tomorrow, is_blocked=False,
+                booked_count__lt=F('max_patients'),
+            )),
+        )
         result = []
         for h in qs:
-            lab_count = LabTechRegistration.objects.filter(
-                hospital_id=h, approval_status='approved'
-            ).count()
-            # A hospital can only be booked for lab tests once its admin has set
-            # up a lab schedule (an active HospitalLabConfig).
-            lab_configured = HospitalLabConfig.objects.filter(
-                hospital_id=h, is_active=True
-            ).exists()
-            has_slots = bool(lab_configured) and LabSlot.objects.filter(
-                hospital_id=h, slot_date__gte=tomorrow, is_blocked=False,
-            ).exists()
             result.append({
                 'hospital_id': str(h.hospital_id),
                 'hospital_name': h.hospital_name,
                 'city': h.city,
                 'address': h.address,
-                'lab_techs_available': lab_count,
-                'lab_configured': lab_configured,
-                'has_available_slots': has_slots,
+                'lab_techs_available': h.lab_count,
+                'lab_configured': h.lab_configured,
+                'has_available_slots': h.lab_configured and h.has_slots,
                 # Selectable when configured; the slot picker handles per-date availability.
-                'lab_available': lab_configured,
+                'lab_available': h.lab_configured,
             })
         return ok('Hospitals fetched', {'hospitals': result})
 

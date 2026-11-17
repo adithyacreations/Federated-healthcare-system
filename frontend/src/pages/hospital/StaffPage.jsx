@@ -8,6 +8,18 @@ import API from '../../api/axios';
 import useApi from '../../hooks/useApi';
 
 const TABS = ['Doctors', 'Lab Technicians', 'Drivers'];
+const STAFF_PHONE_LENGTH = 10;
+const DRIVER_IDENTIFIER_LENGTH = 12;
+const normalizeStaffPhone = (value) => value.replace(/\D/g, '').slice(0, STAFF_PHONE_LENGTH);
+const normalizeDriverIdentifier = (value) =>
+  value.replace(/[^A-Za-z0-9]/g, '').slice(0, DRIVER_IDENTIFIER_LENGTH);
+
+const staffContactErrors = (form, role, { phoneRequired = false } = {}) => ({
+  name: /\p{N}/u.test(form.full_name) ? `${role} name cannot contain numbers.` : null,
+  phone: (phoneRequired || form.phone) && form.phone.length !== STAFF_PHONE_LENGTH
+    ? 'Enter a 10-digit phone number.'
+    : null,
+});
 
 const STATUS_DOT = ({ ok }) => (
   <span className={`inline-block w-2 h-2 rounded-full ${ok ? 'bg-success' : 'bg-gray-300'}`} />
@@ -81,8 +93,17 @@ const StaffPage = () => {
   const departmentList = Array.isArray(deptsApi.data) ? deptsApi.data : deptsApi.data?.data || [];
 
   const [doctorForm, setDoctorForm] = useState(BLANK_DOCTOR);
+  const [phoneTouched, setPhoneTouched] = useState(false);
+  const [showDriverIdentifierErrors, setShowDriverIdentifierErrors] = useState(false);
   const [labForm,    setLabForm]    = useState(BLANK_LAB);
   const [driverForm, setDriverForm] = useState(BLANK_DRIVER);
+  const doctorErrors = staffContactErrors(doctorForm, 'Doctor');
+  const labErrors = staffContactErrors(labForm, 'Lab technician');
+  const driverErrors = {
+    ...staffContactErrors(driverForm, 'Driver', { phoneRequired: true }),
+    license: driverForm.license_no ? null : 'Driving license number is required.',
+    vehicle: driverForm.vehicle_no ? null : 'Vehicle number is required.',
+  };
 
   // Inline "set department" fix for doctors created before department selection.
   const [editingDoctor, setEditingDoctor] = useState(null);
@@ -145,17 +166,24 @@ const StaffPage = () => {
   const closeModal = () => {
     setModal(null);
     setDoctorForm(BLANK_DOCTOR);
+    setPhoneTouched(false);
+    setShowDriverIdentifierErrors(false);
     setLabForm(BLANK_LAB);
     setDriverForm(BLANK_DRIVER);
   };
 
   const handleAdd = async (kind) => {
     const map = {
-      doctor: { url: '/api/hospital/add-doctor/',   form: doctorForm, label: 'Doctor' },
-      lab:    { url: '/api/hospital/add-lab-tech/', form: labForm,    label: 'Lab Technician' },
-      driver: { url: '/api/hospital/add-driver/',   form: driverForm, label: 'Driver' },
+      doctor: { url: '/api/hospital/add-doctor/',   form: doctorForm, label: 'Doctor', errors: doctorErrors },
+      lab:    { url: '/api/hospital/add-lab-tech/', form: labForm,    label: 'Lab Technician', errors: labErrors },
+      driver: { url: '/api/hospital/add-driver/',   form: driverForm, label: 'Driver', errors: driverErrors },
     };
-    const { url, form, label } = map[kind];
+    const { url, form, label, errors } = map[kind];
+    if (errors?.name || errors?.phone || errors?.license || errors?.vehicle) {
+      setPhoneTouched(true);
+      if (errors.license || errors.vehicle) setShowDriverIdentifierErrors(true);
+      return;
+    }
     setSubmitting(true);
     try {
       const { data } = await API.post(url, form);
@@ -464,7 +492,8 @@ const StaffPage = () => {
       {/* ─── Add Doctor Modal ─────────────────────────────────── */}
       <Modal isOpen={modal === 'doctor'} onClose={closeModal} title="Add Doctor">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormInput label="Full Name" value={doctorForm.full_name} onChange={(e) => setDoctorForm({ ...doctorForm, full_name: e.target.value })} />
+          <FormInput label="Full Name" aria-label="Doctor full name" value={doctorForm.full_name}
+            onChange={(e) => setDoctorForm({ ...doctorForm, full_name: e.target.value })} error={doctorErrors.name} />
           <FormInput label="Specialization" value={doctorForm.specialization} onChange={(e) => setDoctorForm({ ...doctorForm, specialization: e.target.value })} />
           {/* Department — picked from this hospital's own departments */}
           {departmentList.length === 0 ? (
@@ -490,7 +519,10 @@ const StaffPage = () => {
           <FormInput label="Experience (years)" type="number" value={doctorForm.experience_years} onChange={(e) => setDoctorForm({ ...doctorForm, experience_years: e.target.value })} />
           <FormInput label="Consultation Fee (₹)" type="number" value={doctorForm.consultation_fee} onChange={(e) => setDoctorForm({ ...doctorForm, consultation_fee: e.target.value })} />
           <FormInput label="Email" type="email" value={doctorForm.email} onChange={(e) => setDoctorForm({ ...doctorForm, email: e.target.value })} />
-          <FormInput label="Phone" value={doctorForm.phone} onChange={(e) => setDoctorForm({ ...doctorForm, phone: e.target.value })} />
+          <FormInput label="Phone" aria-label="Doctor phone number" type="tel" inputMode="numeric"
+            maxLength={STAFF_PHONE_LENGTH} hint="10 digits (optional)" value={doctorForm.phone}
+            onChange={(e) => setDoctorForm({ ...doctorForm, phone: normalizeStaffPhone(e.target.value) })}
+            onBlur={() => setPhoneTouched(true)} error={phoneTouched ? doctorErrors.phone : null} />
         </div>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
           <button onClick={closeModal} className="btn-secondary">Cancel</button>
@@ -503,10 +535,14 @@ const StaffPage = () => {
       {/* ─── Add Lab Tech Modal ───────────────────────────────── */}
       <Modal isOpen={modal === 'lab'} onClose={closeModal} title="Add Lab Technician">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormInput label="Full Name" value={labForm.full_name} onChange={(e) => setLabForm({ ...labForm, full_name: e.target.value })} />
+          <FormInput label="Full Name" aria-label="Lab technician full name" value={labForm.full_name}
+            onChange={(e) => setLabForm({ ...labForm, full_name: e.target.value })} error={labErrors.name} />
           <FormInput label="Qualification" value={labForm.qualification} onChange={(e) => setLabForm({ ...labForm, qualification: e.target.value })} />
           <FormInput label="Specialization" value={labForm.specialization} onChange={(e) => setLabForm({ ...labForm, specialization: e.target.value })} />
-          <FormInput label="Phone" value={labForm.phone} onChange={(e) => setLabForm({ ...labForm, phone: e.target.value })} />
+          <FormInput label="Phone" aria-label="Lab technician phone number" type="tel" inputMode="numeric"
+            maxLength={STAFF_PHONE_LENGTH} hint="10 digits (optional)" value={labForm.phone}
+            onChange={(e) => setLabForm({ ...labForm, phone: normalizeStaffPhone(e.target.value) })}
+            onBlur={() => setPhoneTouched(true)} error={phoneTouched ? labErrors.phone : null} />
           <FormInput label="Email" type="email" value={labForm.email} onChange={(e) => setLabForm({ ...labForm, email: e.target.value })} />
         </div>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
@@ -520,11 +556,27 @@ const StaffPage = () => {
       {/* ─── Add Driver Modal ─────────────────────────────────── */}
       <Modal isOpen={modal === 'driver'} onClose={closeModal} title="Add Ambulance Driver">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormInput label="Full Name" value={driverForm.full_name} onChange={(e) => setDriverForm({ ...driverForm, full_name: e.target.value })} />
-          <FormInput label="Driving License No" value={driverForm.license_no} onChange={(e) => setDriverForm({ ...driverForm, license_no: e.target.value })} />
-          <FormInput label="Phone" value={driverForm.phone} onChange={(e) => setDriverForm({ ...driverForm, phone: e.target.value })} />
+          <FormInput label="Full Name" aria-label="Driver full name" value={driverForm.full_name}
+            onChange={(e) => setDriverForm({ ...driverForm, full_name: e.target.value })} error={driverErrors.name} />
+          <FormInput label="Driving License No" aria-label="Driving license number" required
+            hint="Up to 12 letters or digits" value={driverForm.license_no}
+            onChange={(e) => setDriverForm({
+              ...driverForm,
+              license_no: normalizeDriverIdentifier(e.target.value),
+            })}
+            error={showDriverIdentifierErrors ? driverErrors.license : null} />
+          <FormInput label="Phone" aria-label="Driver phone number" type="tel" inputMode="numeric" required
+            maxLength={STAFF_PHONE_LENGTH} hint="10 digits (required)" value={driverForm.phone}
+            onChange={(e) => setDriverForm({ ...driverForm, phone: normalizeStaffPhone(e.target.value) })}
+            onBlur={() => setPhoneTouched(true)} error={phoneTouched ? driverErrors.phone : null} />
           <FormInput label="Email" type="email" value={driverForm.email} onChange={(e) => setDriverForm({ ...driverForm, email: e.target.value })} />
-          <FormInput label="Vehicle No" value={driverForm.vehicle_no} onChange={(e) => setDriverForm({ ...driverForm, vehicle_no: e.target.value })} />
+          <FormInput label="Vehicle No" aria-label="Vehicle number" required
+            hint="Up to 12 letters or digits" value={driverForm.vehicle_no}
+            onChange={(e) => setDriverForm({
+              ...driverForm,
+              vehicle_no: normalizeDriverIdentifier(e.target.value),
+            })}
+            error={showDriverIdentifierErrors ? driverErrors.vehicle : null} />
           <FormInput label="Ambulance Type" as="select" value={driverForm.ambulance_type}
             onChange={(e) => setDriverForm({ ...driverForm, ambulance_type: e.target.value })}
             options={[

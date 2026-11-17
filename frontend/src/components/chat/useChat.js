@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../../api/urls';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import API from '../../api/axios';
 
@@ -45,7 +46,7 @@ const useChat = ({ chatId, userType, userLoginId }) => {
     if (!userLoginId || !userType) return undefined;
     let socket;
     try {
-      socket = new WebSocket(`ws://localhost:8000/ws/chat/${userType}/${userLoginId}/`);
+      socket = openBackendSocket(`/ws/chat/${userType}/${userLoginId}/`);
     } catch {
       return undefined;
     }

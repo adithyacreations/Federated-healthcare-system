@@ -1,5 +1,7 @@
 """Lab slot helpers — auto-generation and 12-hour time formatting."""
-from datetime import date, timedelta, datetime, time
+from datetime import datetime, timedelta
+
+from django.utils import timezone
 
 
 def fmt_12hr(t):
@@ -106,64 +108,49 @@ def _maybe_warn_repeat_no_shows(patient, now):
         print(f'[no-show] repeat-warning error: {e}')
 
 
-def generate_lab_slots(hospital, days_ahead=30):
-    """Create LabSlot rows for the hospital's working days within `days_ahead`.
+LAB_BOOKING_DAYS = 30
 
-    Idempotent — uses get_or_create so re-running only fills gaps. Creates a
-    sensible default HospitalLabConfig the first time if none exists.
-    """
-    from apps.lab.models import HospitalLabConfig, LabSlot
 
-    try:
-        config = HospitalLabConfig.objects.get(hospital_id=hospital, is_active=True)
-    except HospitalLabConfig.DoesNotExist:
-        config = HospitalLabConfig.objects.create(
-            hospital_id=hospital,
-            working_days=[0, 1, 2, 3, 4, 5],
-            start_time=time(8, 0),
-            end_time=time(18, 0),
-            slot_duration_minutes=30,
-            max_patients_per_slot=5,
-            lunch_break_start=time(13, 0),
-            lunch_break_end=time(14, 0),
-        )
+def generate_lab_slots(config, *, start_date=None, days_ahead=LAB_BOOKING_DAYS):
+    """Fill missing slots in a date range without changing existing bookings."""
+    from apps.lab.models import LabSlot
 
-    today = date.today()
-    slots_created = 0
-    slot_duration = timedelta(minutes=config.slot_duration_minutes or 30)
+    if not config.is_active or config.slot_duration_minutes <= 0:
+        return
 
-    for day_offset in range(1, (days_ahead or config.advance_booking_days) + 1):
-        slot_date = today + timedelta(days=day_offset)
-        if slot_date.weekday() not in (config.working_days or []):
-            continue
+    start_date = start_date or timezone.localdate() + timedelta(days=1)
+    end_date = start_date + timedelta(days=days_ahead - 1)
+    working_days = config.working_days or []
+    dates = [
+        start_date + timedelta(days=offset) for offset in range(days_ahead)
+        if (start_date.weekday() + offset) % 7 in working_days
+    ]
+    if not dates:
+        return
 
+    hospital_id = config.hospital_id_id
+    existing = set(LabSlot.objects.filter(
+        hospital_id_id=hospital_id, slot_date__range=(start_date, end_date),
+    ).order_by().values_list('slot_date', 'start_time'))
+    duration = timedelta(minutes=config.slot_duration_minutes)
+    new_slots = []
+    for slot_date in dates:
         current_time = datetime.combine(slot_date, config.start_time)
         end_datetime = datetime.combine(slot_date, config.end_time)
 
         while current_time < end_datetime:
             slot_start = current_time.time()
-            slot_end = (current_time + slot_duration).time()
-
-            # Skip slots that start during the lunch break.
-            if config.lunch_break_start and config.lunch_break_end:
-                if config.lunch_break_start <= slot_start < config.lunch_break_end:
-                    current_time += slot_duration
-                    continue
-
-            _, created = LabSlot.objects.get_or_create(
-                hospital_id=hospital,
-                slot_date=slot_date,
-                start_time=slot_start,
-                defaults={
-                    'end_time': slot_end,
-                    'max_patients': config.max_patients_per_slot,
-                    'is_blocked': False,
-                },
+            current_time += duration
+            during_lunch = (
+                config.lunch_break_start and config.lunch_break_end
+                and config.lunch_break_start <= slot_start < config.lunch_break_end
             )
-            if created:
-                slots_created += 1
+            if during_lunch or (slot_date, slot_start) in existing:
+                continue
+            new_slots.append(LabSlot(
+                hospital_id_id=hospital_id, slot_date=slot_date, start_time=slot_start,
+                end_time=current_time.time(), max_patients=config.max_patients_per_slot,
+            ))
 
-            current_time += slot_duration
-
-    print(f"[SLOTS] Generated {slots_created} new slots for {hospital.hospital_name}")
-    return slots_created
+    # A concurrent request may have already filled the same missing slots.
+    LabSlot.objects.bulk_create(new_slots, batch_size=500, ignore_conflicts=True)

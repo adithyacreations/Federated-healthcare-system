@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../../api/urls';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -137,7 +138,7 @@ const PatientDashboard = () => {
 
     let ws;
     try {
-      ws = new WebSocket(`ws://localhost:8000/ws/notifications/${loginId}/`);
+      ws = openBackendSocket(`/ws/notifications/${loginId}/`);
       wsRef.current = ws;
       ws.onmessage = (event) => {
         let msg;

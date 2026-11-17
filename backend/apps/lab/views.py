@@ -1544,10 +1544,11 @@ class LabSlotsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from datetime import date as date_cls, datetime as dt
-        from apps.lab.models import LabSlot, LabTestSlotRule
+        from datetime import datetime as dt, timedelta
+        from django.utils import timezone as dj_tz
+        from apps.lab.models import HospitalLabConfig, LabSlot, LabTestSlotRule
         from apps.hospital.models import HospitalRegistration
-        from apps.lab.utils import generate_lab_slots, fmt_12hr
+        from apps.lab.utils import LAB_BOOKING_DAYS, generate_lab_slots, fmt_12hr
         from apps.patient.views_extra import AVAILABLE_TESTS
 
         hospital_id = request.GET.get('hospital_id')
@@ -1559,15 +1560,14 @@ class LabSlotsView(APIView):
         except (HospitalRegistration.DoesNotExist, ValueError, TypeError):
             return err('Hospital not found', status_code=404)
 
-        try:
-            slot_date = dt.strptime(date_str, '%Y-%m-%d').date()
-        except (ValueError, TypeError):
-            slot_date = date_cls.today()
-
-        from django.utils import timezone as dj_tz
         now_local = dj_tz.localtime(dj_tz.now())
         today = now_local.date()
         current_time = now_local.time()
+
+        try:
+            slot_date = dt.strptime(date_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            slot_date = today
 
         # Past dates can never be booked.
         if slot_date < today:
@@ -1580,8 +1580,8 @@ class LabSlotsView(APIView):
         # Block booking for hospitals that haven't set up their lab schedule.
         # (Generating slots here used to silently auto-create a config — we now
         # require the admin to configure the lab explicitly first.)
-        from apps.lab.models import HospitalLabConfig
-        if not HospitalLabConfig.objects.filter(hospital_id=hospital, is_active=True).exists():
+        config = HospitalLabConfig.objects.filter(hospital_id=hospital, is_active=True).first()
+        if config is None:
             return Response({
                 'success': False,
                 'lab_configured': False,
@@ -1590,7 +1590,8 @@ class LabSlotsView(APIView):
                 'data': [],
             }, status=200)
 
-        generate_lab_slots(hospital, days_ahead=30)
+        if today < slot_date <= today + timedelta(days=LAB_BOOKING_DAYS):
+            generate_lab_slots(config, start_date=slot_date, days_ahead=1)
 
         by_id = {t['test_id']: t for t in AVAILABLE_TESTS}
         test_names = [(by_id.get(tid, {}).get('name') or tid).lower() for tid in test_ids]

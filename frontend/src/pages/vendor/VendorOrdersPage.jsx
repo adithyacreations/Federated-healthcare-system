@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   FiRefreshCw, FiTruck, FiMessageCircle, FiSearch,
@@ -11,9 +11,10 @@ import Modal from '../../components/common/Modal';
 import useApi from '../../hooks/useApi';
 import API from '../../api/axios';
 import { colorFor, initials, STATUS_LABEL } from './vendorHelpers';
+import { canRefundEquipmentOrder, equipmentReturnDeadline } from '../../utils/equipmentOrders';
 import './vendor-design.css';
 
-const STATUS_TABS = ['all', 'pending', 'confirmed', 'dispatched', 'delivered', 'wrong_product'];
+const STATUS_TABS = ['all', 'pending', 'confirmed', 'dispatched', 'delivered', 'cancelled', 'refunded', 'wrong_product'];
 
 const PAY_PILL = {
   paid: { bg: 'var(--v-green-soft)', color: '#1B5C39' },
@@ -22,7 +23,7 @@ const PAY_PILL = {
 };
 
 const VendorOrdersPage = () => {
-  const { data: ordersRaw, refetch } = useApi('/api/vendor/orders/');
+  const { data: ordersRaw, refetch } = useApi('/api/vendor/orders/', { pollInterval: 15000 });
   const { data: driversRaw, refetch: refetchDrivers } = useApi('/api/vendor/drivers/');
   const orders = Array.isArray(ordersRaw) ? ordersRaw : [];
   const drivers = Array.isArray(driversRaw) ? driversRaw : [];
@@ -50,6 +51,33 @@ const VendorOrdersPage = () => {
   const [resolving, setResolving] = useState(false);
 
   const [openingChat, setOpeningChat] = useState(null);
+  const [refundModal, setRefundModal] = useState(null);
+  const [returnReceived, setReturnReceived] = useState(false);
+  const [refunding, setRefunding] = useState(false);
+  const [now, setNow] = useState(Date.now);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const refundOrder = async () => {
+    if (!refundModal || refunding) return;
+    setRefunding(true);
+    try {
+      const { data } = await API.post(`/api/vendor/orders/${refundModal.eq_order_id}/refund/`, {
+        return_received: returnReceived,
+      });
+      if (data.data?.refund_status === 'failed') toast.error(data.message);
+      else toast.success(data.message);
+      setRefundModal(null);
+      refetch();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Could not process refund.');
+    } finally {
+      setRefunding(false);
+    }
+  };
 
   const counts = useMemo(() => {
     const c = { all: orders.length };
@@ -158,11 +186,12 @@ const VendorOrdersPage = () => {
     }
     setResolving(true);
     try {
-      await API.put(`/api/vendor/orders/${resolveModal.eq_order_id}/resolve-issue/`, {
+      const { data } = await API.put(`/api/vendor/orders/${resolveModal.eq_order_id}/resolve-issue/`, {
         resolution: resolveAction,
         new_driver_id: resolveAction === 'redeliver' ? resolveDriver : undefined,
       });
-      toast.success(`Issue resolved via ${resolveAction}`);
+      if (data.data?.refund_status === 'failed') toast.error(data.message);
+      else toast.success(data.message || 'Issue resolved.');
       setResolveModal(null);
       refetch();
       if (resolveAction === 'redeliver') refetchDrivers();
@@ -319,15 +348,21 @@ const VendorOrdersPage = () => {
                       {confirmingId === order.eq_order_id ? '…' : 'Confirm'}
                     </button>
                   )}
-                  {order.order_status === 'confirmed' && (
+                  {['pending', 'confirmed'].includes(order.order_status) && (
+                    <div>
                     <button
                       type="button"
                       onClick={() => openDispatch(order)}
-                      className="v-btn-primary"
+                      disabled={order.payment_status !== 'paid'}
+                      className="v-btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ padding: '7px 14px', fontSize: 12 }}
                     >
                       <FiTruck style={{ width: 13, height: 13 }} /> Dispatch
                     </button>
+                    {order.payment_status !== 'paid' && (
+                      <p className="text-xs text-gray-500 mt-1">Awaiting payment before dispatch.</p>
+                    )}
+                    </div>
                   )}
                   {order.order_status === 'dispatched' && (
                     <button
@@ -359,6 +394,24 @@ const VendorOrdersPage = () => {
                   {order.order_status === 'refunded' && (
                     <span style={{ fontSize: 12, color: 'var(--v-red)', fontWeight: 600 }}>Refunded ✓</span>
                   )}
+                  {['cancelled', 'delivered', 'wrong_product'].includes(order.order_status) && (
+                    <div>
+                      <button type="button" className="v-btn-ghost disabled:opacity-50"
+                        disabled={order.refund_status !== 'pending' && !canRefundEquipmentOrder(order, now)}
+                        onClick={() => { setRefundModal(order); setReturnReceived(false); }}
+                        style={{ padding: '7px 12px', fontSize: 12 }}>
+                        {order.refund_status === 'pending' ? 'Check Refund Status' : order.refund_status === 'failed' ? 'Refund Failed' : 'Refund'}
+                      </button>
+                      {order.payment_status !== 'paid' && (
+                        <p className="text-xs text-gray-500 mt-1">No recorded payment to refund.</p>
+                      )}
+                      {order.order_status !== 'cancelled' && equipmentReturnDeadline(order) !== null && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {now >= equipmentReturnDeadline(order) ? '7-day return period expired' : 'Return within 7 days of delivery'}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => openChatWithHospital(order)}
@@ -378,6 +431,28 @@ const VendorOrdersPage = () => {
       </motion.div>
 
       {/* Dispatch modal */}
+      <Modal isOpen={Boolean(refundModal)} onClose={() => !refunding && setRefundModal(null)} title="Refund Order">
+        {refundModal && <div className="space-y-4">
+          <p>{refundModal.product_name} · ₹{Number(refundModal.total_price).toLocaleString('en-IN')}</p>
+          {refundModal.refund_status === 'pending' ? (
+            <p>The payment provider is processing this refund. Check its current status.</p>
+          ) : <>
+            <p>Issue a full refund to the hospital’s original payment method.</p>
+            {refundModal.order_status !== 'cancelled' && <label className="flex gap-2 items-start text-sm">
+              <input type="checkbox" checked={returnReceived} onChange={(event) => setReturnReceived(event.target.checked)} />
+              I confirm the returned product has been received.
+            </label>}
+          </>}
+          <button type="button" onClick={refundOrder}
+            disabled={refunding || (refundModal.refund_status !== 'pending' && (
+              !canRefundEquipmentOrder(refundModal, now) || (refundModal.order_status !== 'cancelled' && !returnReceived)
+            ))}
+            className="btn-orange w-full disabled:opacity-50">
+            {refunding ? 'Processing…' : refundModal.refund_status === 'pending' ? 'Check Refund Status' : 'Issue Full Refund'}
+          </button>
+        </div>}
+      </Modal>
+
       <Modal isOpen={Boolean(dispatchModal)} onClose={() => setDispatchModal(null)} title="Dispatch Order">
         {dispatchModal && (
           <div className="space-y-4">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -42,6 +42,7 @@ const STATUS_STYLE = {
 };
 
 const todayISO = () => new Date().toISOString().split('T')[0];
+const BOUNDED_REQUEST = { timeout: 30000 };
 
 const typeLabel = (value) => {
   if (value === 'both') return 'Online or offline';
@@ -55,6 +56,9 @@ const DoctorSchedulePage = () => {
   const [schedules, setSchedules] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [selectedDate, setSelectedDate] = useState(todayISO());
+  const selectedDateRef = useRef(selectedDate);
+  const boardRequest = useRef(0);
+  const schedulesRequest = useRef(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [expandedDoctor, setExpandedDoctor] = useState(null);
@@ -85,17 +89,27 @@ const DoctorSchedulePage = () => {
     [visibleSchedules],
   );
 
+  const selectDate = (date) => {
+    selectedDateRef.current = date;
+    setSelectedDate(date);
+  };
+
   const fetchBoard = async () => {
-    const res = await API.get(`/api/hospital/doctor-schedule/?date=${selectedDate}`);
-    if (res.data?.success) {
+    const date = selectedDateRef.current;
+    const request = ++boardRequest.current;
+    const res = await API.get(`/api/hospital/doctor-schedule/?date=${date}`, BOUNDED_REQUEST);
+    if (request === boardRequest.current && date === selectedDateRef.current && res.data?.success) {
       setDailySchedule(res.data.data || []);
       setSummary(res.data.summary || null);
     }
   };
 
   const fetchSchedules = async () => {
-    const res = await API.get('/api/hospital/doctor-schedules/');
-    if (res.data?.success) setSchedules(res.data.data?.schedules || []);
+    const request = ++schedulesRequest.current;
+    const res = await API.get('/api/hospital/doctor-schedules/', BOUNDED_REQUEST);
+    if (request === schedulesRequest.current && res.data?.success) {
+      setSchedules(res.data.data?.schedules || []);
+    }
   };
 
   const fetchDoctors = async () => {
@@ -148,8 +162,22 @@ const DoctorSchedulePage = () => {
     });
   };
 
+  const applySavedSchedule = (response) => {
+    const schedule = response.data.data.schedule;
+    setSchedules((current) => {
+      const index = current.findIndex((item) => item.doctor === schedule.doctor);
+      if (index === -1) {
+        return [...current, schedule].sort((a, b) => a.doctor_name.localeCompare(b.doctor_name));
+      }
+      return current.map((item, position) => position === index ? schedule : item);
+    });
+    fetchBoard().catch(() => toast.error('Schedule saved. Use Refresh to reload the calendar.'));
+    fetchSchedules().catch(() => {});
+  };
+
   const submitSchedule = async (e) => {
     e.preventDefault();
+    if (saving) return;
     if (!form.doctor_id) return toast.error('Select a doctor');
     if (!editingSchedule && scheduledDoctorIds.has(String(form.doctor_id))) {
       return toast.error('This doctor already has a schedule. Click Edit to change it.');
@@ -164,18 +192,21 @@ const DoctorSchedulePage = () => {
         days_ahead: Number(form.days_ahead || 30),
       };
       const response = editingSchedule
-        ? await API.put(`/api/hospital/doctor-schedules/${editingSchedule.schedule_id}/`, payload)
-        : await API.post('/api/hospital/doctor-schedules/', payload);
+        ? await API.put(`/api/hospital/doctor-schedules/${editingSchedule.schedule_id}/`, payload, BOUNDED_REQUEST)
+        : await API.post('/api/hospital/doctor-schedules/', payload, BOUNDED_REQUEST);
+      applySavedSchedule(response);
       toast.success(response.data?.message || 'Doctor schedule created successfully');
       if (response.data?.data?.slot_message) toast.success(response.data.data.slot_message);
       resetForm();
-      await Promise.all([fetchBoard(), fetchSchedules()]);
     } catch (err) {
       const data = err?.response?.data;
       const errors = data?.errors && typeof data.errors === 'object'
         ? Object.values(data.errors).flat().join(' ')
         : '';
-      toast.error(errors || data?.message || 'Could not save schedule');
+      const fallback = err?.code === 'ECONNABORTED'
+        ? 'The save timed out. Use Refresh to check whether it completed.'
+        : 'Could not save schedule';
+      toast.error(errors || data?.message || fallback);
     } finally {
       setSaving(false);
     }
@@ -194,9 +225,9 @@ const DoctorSchedulePage = () => {
         is_active: !schedule.is_active,
         days_ahead: 30,
       };
-      const response = await API.put(`/api/hospital/doctor-schedules/${schedule.schedule_id}/`, payload);
+      const response = await API.put(`/api/hospital/doctor-schedules/${schedule.schedule_id}/`, payload, BOUNDED_REQUEST);
+      applySavedSchedule(response);
       toast.success(response.data?.message || 'Doctor schedule updated successfully');
-      await Promise.all([fetchBoard(), fetchSchedules()]);
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Could not update schedule');
     }
@@ -254,11 +285,11 @@ const DoctorSchedulePage = () => {
             <input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => selectDate(e.target.value)}
               className="border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-orange-400 bg-white"
             />
             <button
-              onClick={() => setSelectedDate(todayISO())}
+              onClick={() => selectDate(todayISO())}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white"
               style={{ backgroundColor: '#ff4f01' }}
             >
@@ -291,8 +322,9 @@ const DoctorSchedulePage = () => {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1">Doctor</label>
+                <label htmlFor="schedule-doctor" className="block text-xs font-semibold text-gray-500 mb-1">Doctor</label>
                 <select
+                  id="schedule-doctor"
                   value={form.doctor_id}
                   onChange={(e) => setForm({ ...form, doctor_id: e.target.value })}
                   disabled={Boolean(editingSchedule)}
@@ -457,19 +489,21 @@ const DoctorSchedulePage = () => {
                       <div className="flex gap-2 mt-4">
                         <button
                           onClick={() => editSchedule(schedule)}
+                          disabled={saving}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white bg-black"
                         >
                           <FiEdit2 className="w-3.5 h-3.5" /> Edit
                         </button>
                         <button
                           onClick={() => toggleScheduleActive(schedule)}
+                          disabled={saving}
                           className="px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 bg-white"
                         >
                           {schedule.is_active ? 'Deactivate' : 'Activate'}
                         </button>
                         <button
                           onClick={() => deleteSchedule(schedule)}
-                          disabled={deletingSchedule === schedule.schedule_id}
+                          disabled={saving || deletingSchedule === schedule.schedule_id}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-60"
                         >
                           <FiTrash2 className="w-3.5 h-3.5" />

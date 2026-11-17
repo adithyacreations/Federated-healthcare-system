@@ -92,10 +92,12 @@ class PatientRegisterSerializer(serializers.Serializer):
     )
     blood_group = serializers.CharField(max_length=5, required=False, allow_blank=True, default='')
     height_cm = serializers.DecimalField(
-        max_digits=5, decimal_places=2, required=False, allow_null=True, default=None
+        max_digits=5, decimal_places=2, min_value=40, max_value=275,
+        required=False, allow_null=True, default=None,
     )
     weight_kg = serializers.DecimalField(
-        max_digits=5, decimal_places=2, required=False, allow_null=True, default=None
+        max_digits=5, decimal_places=2, min_value=2, max_value=650,
+        required=False, allow_null=True, default=None,
     )
     address = serializers.CharField(required=False, allow_blank=True, default='')
     emergency_contact = serializers.CharField(max_length=15, required=False, allow_blank=True, default='')

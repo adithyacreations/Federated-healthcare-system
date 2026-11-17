@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../../api/urls';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -145,7 +146,7 @@ const DriverDashboard = () => {
   const connectWs = useCallback((dispatchId) => {
     if (!dispatchId) return;
     if (wsRef.current) wsRef.current.close();
-    const ws = new WebSocket(`ws://localhost:8000/ws/gps/${dispatchId}/`);
+    const ws = openBackendSocket(`/ws/gps/${dispatchId}/`);
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
@@ -173,7 +174,7 @@ const DriverDashboard = () => {
 
     let ws;
     try {
-      ws = new WebSocket(`ws://localhost:8000/ws/emergency/${loginId}/`);
+      ws = openBackendSocket(`/ws/emergency/${loginId}/`);
       ws.onmessage = (e) => {
         let msg;
         try { msg = JSON.parse(e.data); } catch { return; }

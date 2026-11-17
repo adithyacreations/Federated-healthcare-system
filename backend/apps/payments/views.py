@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -12,6 +13,8 @@ from payment_utils import (
     process_payment_success,
     attach_order_id_to_record,
     _fetch_record,
+    get_razorpay_client,
+    classify_razorpay_error,
 )
 from .serializers import (
     CreateOrderSerializer,
@@ -39,6 +42,64 @@ def err(message, errors=None, status_code=400):
 class CreatePaymentOrderView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
+    def equipment_checkout(self, request, object_id):
+        from apps.vendor.models import EquipmentOrder
+
+        record = EquipmentOrder.objects.select_for_update(of=('self',)).filter(
+            pk=object_id, hospital_id__login_id=request.user,
+        ).first()
+        if request.user.role != 'hospital_admin' or record is None:
+            return err('Equipment order not found.', status_code=404)
+        if record.order_status not in ('pending', 'confirmed'):
+            return err('This equipment order cannot be paid.', status_code=409)
+        if record.payment_status not in ('pending', 'failed'):
+            return err('This equipment order is already paid or refunded.', status_code=409)
+        if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+            return err('Equipment payments are unavailable. Contact support.', status_code=503)
+
+        amount = int(record.total_price * 100)
+        if amount <= 0:
+            return err('Invalid equipment order total.', status_code=409)
+        try:
+            gateway = get_razorpay_client()
+            if record.razorpay_order_id:
+                payment_order = gateway.order.fetch(record.razorpay_order_id, timeout=15)
+            else:
+                payment_order = gateway.order.create({
+                    'amount': amount, 'currency': 'INR', 'payment_capture': 1,
+                    'receipt': f'equ_{str(record.pk)[:30]}',
+                    'notes': {'payment_type': 'equipment', 'object_id': str(record.pk)},
+                }, timeout=15)
+        except Exception as exception:
+            error = classify_razorpay_error(exception)
+            return err(
+                error['public_message'], errors={'code': error['error_code']},
+                status_code=error['http_status'],
+            )
+
+        if payment_order.get('status') == 'paid' or payment_order.get('amount_paid', 0):
+            return err('A payment has already been received. Contact support to confirm it before retrying.', status_code=409)
+        if (
+            payment_order.get('amount') != amount
+            or payment_order.get('currency') != 'INR'
+            or payment_order.get('status') not in ('created', 'attempted')
+        ):
+            return err('Payment details could not be confirmed. Contact support.', status_code=409)
+        if not record.razorpay_order_id:
+            record.razorpay_order_id = payment_order['id']
+            record.save(update_fields=['razorpay_order_id'])
+        log_audit(
+            login_id=request.user, action='equipment_checkout', module='payments',
+            entity_type='equipment', entity_id=str(record.pk),
+            new_value={'razorpay_order_id': record.razorpay_order_id, 'amount': str(record.total_price)},
+        )
+        return ok('Payment checkout ready.', {
+            'razorpay_order_id': record.razorpay_order_id,
+            'amount': amount, 'currency': 'INR', 'key_id': settings.RAZORPAY_KEY_ID,
+            'payment_type': 'equipment', 'object_id': str(record.pk),
+        })
+
     def post(self, request):
         ser = CreateOrderSerializer(data=request.data)
         if not ser.is_valid():
@@ -47,6 +108,9 @@ class CreatePaymentOrderView(APIView):
         payment_type = ser.validated_data['payment_type']
         object_id = str(ser.validated_data['object_id'])
         amount = ser.validated_data['amount']
+
+        if payment_type == 'equipment':
+            return self.equipment_checkout(request, object_id)
 
         # Make sure the underlying record exists before charging
         record = _fetch_record(payment_type, object_id)
@@ -112,6 +176,17 @@ class VerifyPaymentView(APIView):
             return err('Validation failed.', ser.errors)
 
         d = ser.validated_data
+        if d['payment_type'] == 'equipment':
+            from apps.vendor.models import EquipmentOrder
+
+            record = EquipmentOrder.objects.filter(
+                pk=d['object_id'], hospital_id__login_id=request.user,
+            ).first()
+            if request.user.role != 'hospital_admin' or record is None:
+                return err('Equipment order not found.', status_code=404)
+            if not record.razorpay_order_id or record.razorpay_order_id != d['razorpay_order_id']:
+                return err('Payment does not belong to this equipment order.', status_code=400)
+
         verified = verify_razorpay_payment(
             d['razorpay_order_id'], d['razorpay_payment_id'], d['razorpay_signature']
         )
@@ -248,6 +323,12 @@ class RefundRequestView(APIView):
         record = _fetch_record(payment_type, object_id)
         if record is None:
             return err(f'No {payment_type} record found for object_id {object_id}.', status_code=404)
+
+        if payment_type == 'equipment':
+            if request.user.pk not in (record.hospital_id.login_id_id, record.vendor_id.login_id_id):
+                return err('Order not found.', status_code=404)
+            if not record.can_refund:
+                return err('Refunds require a paid cancelled order or a return within 7 days of delivery.', status_code=400)
 
         if getattr(record, 'payment_status', '') != 'paid':
             return err('Refund can only be requested for paid orders.', status_code=400)

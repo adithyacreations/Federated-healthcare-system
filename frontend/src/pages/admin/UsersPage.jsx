@@ -95,8 +95,7 @@ const UsersPage = () => {
   const [modal, setModal] = useState(null);
   const { data, loading, refetch } = useApi('/api/auth/users/');
 
-  // Terminated accounts stay in the backend payload (login simply deactivated),
-  // so we hide them from the directory immediately after a terminate.
+  // Hide the row immediately while the authoritative directory reloads.
   const [removedIds, setRemovedIds] = useState(() => new Set());
 
   const rows = (data?.[tab] || []).filter((r) => !removedIds.has(r.login_id));
@@ -128,10 +127,8 @@ const UsersPage = () => {
       if (action.type === 'terminate') {
         // Drop the row from the directory right away — no page refresh needed.
         setRemovedIds((prev) => new Set(prev).add(action.login_id));
-      } else {
-        // Suspend / resume: refresh so the is_active badge + button toggle update.
-        refetch();
       }
+      refetch();
       setAction(null);
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Action failed!');
@@ -226,7 +223,7 @@ const UsersPage = () => {
               <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
                 tab === key ? 'bg-primary-100 text-primary-600' : 'bg-gray-200 text-gray-500'
               }`}>
-                {data[key].length}
+                {data[key].filter((row) => !removedIds.has(row.login_id)).length}
               </span>
             )}
           </button>

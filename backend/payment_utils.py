@@ -8,6 +8,7 @@ import hmac
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 
@@ -26,6 +27,30 @@ def get_razorpay_client():
 
 
 # ─── Order creation ─────────────────────────────────────────────────────────
+
+def classify_razorpay_error(exception):
+    """Return safe checkout errors without exposing gateway responses or credentials."""
+    message = str(exception).lower()
+    if 'amount' in message and any(word in message for word in ('maximum', 'limit', 'exceed')):
+        return {
+            'error_code': 'payment_amount_limit', 'http_status': 422,
+            'public_message': 'This order total exceeds the Razorpay transaction limit for this account. Cancel this unpaid order and place a smaller order, or contact support.',
+        }
+    if 'amount' in message and any(word in message for word in ('minimum', 'at least', 'less than')):
+        return {
+            'error_code': 'payment_amount_minimum', 'http_status': 422,
+            'public_message': 'This order total is below the minimum amount supported by Razorpay.',
+        }
+    if any(word in message for word in ('authentication', 'unauthorized', 'api key')):
+        return {
+            'error_code': 'payment_configuration', 'http_status': 503,
+            'public_message': 'The payment gateway configuration was rejected. Contact support.',
+        }
+    return {
+        'error_code': 'payment_gateway_unavailable', 'http_status': 502,
+        'public_message': 'Could not connect to the payment gateway. Try Pay Now again shortly.',
+    }
+
 
 def create_razorpay_order(amount, currency='INR', receipt=None, notes=None):
     """Create a Razorpay order. Amount is in rupees and is converted to paise here.
@@ -59,7 +84,7 @@ def create_razorpay_order(amount, currency='INR', receipt=None, notes=None):
         }
     except Exception as exc:
         logger.warning('Razorpay order creation failed: %s', exc)
-        return {'success': False, 'error': str(exc)}
+        return {'success': False, 'error': str(exc), **classify_razorpay_error(exc)}
 
 
 # ─── Signature verification ─────────────────────────────────────────────────
@@ -146,12 +171,37 @@ def get_amount_for_record(payment_type, record):
 
 def process_payment_success(payment_type, object_id, razorpay_payment_id, actor_login=None,
                             razorpay_signature=None, razorpay_order_id=None):
+    arguments = (payment_type, object_id, razorpay_payment_id, actor_login, razorpay_signature, razorpay_order_id)
+    if payment_type == 'equipment':
+        from apps.vendor.models import EquipmentOrder
+        with transaction.atomic():
+            EquipmentOrder.objects.select_for_update().filter(pk=object_id).first()
+            return _process_payment_success(*arguments)
+    return _process_payment_success(*arguments)
+
+
+def _process_payment_success(payment_type, object_id, razorpay_payment_id, actor_login=None,
+                            razorpay_signature=None, razorpay_order_id=None):
     """Update the matching record + downstream notifications + audit log."""
     from utils import log_audit, send_notification, broadcast_medicine_update
 
     record = _fetch_record(payment_type, object_id)
     if record is None:
         return {'success': False, 'error': f'{payment_type} record not found'}
+
+    if payment_type == 'equipment' and record.payment_status in ('paid', 'refunded'):
+        if record.razorpay_payment_id and record.razorpay_payment_id != razorpay_payment_id:
+            return {'success': False, 'error': 'A different payment is already recorded for this equipment order.'}
+        if record.razorpay_payment_id:
+            return {'success': True, 'payment_type': payment_type, 'object_id': str(record.pk)}
+
+    if payment_type == 'equipment' and record.order_status in ('cancelled', 'refunded'):
+        if record.payment_status != 'refunded':
+            record.razorpay_payment_id = razorpay_payment_id
+            record.razorpay_signature = razorpay_signature or record.razorpay_signature
+            record.payment_status = 'paid'
+            record.save(update_fields=['razorpay_payment_id', 'razorpay_signature', 'payment_status'])
+        return {'success': True, 'payment_type': payment_type, 'object_id': str(record.pk)}
 
     if payment_type == 'consultation':
         from apps.doctor.utils import release_expired_consultation_holds

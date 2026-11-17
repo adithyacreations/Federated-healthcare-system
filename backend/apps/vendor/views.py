@@ -6,11 +6,13 @@ from datetime import datetime, timezone, timedelta
 
 import payment_utils
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Case, When, IntegerField, Sum
 from django.utils import timezone as dj_tz
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import serializers
 
 from apps.auth_app.permissions import IsVendor, IsHospitalAdmin
 from utils import log_audit, send_notification
@@ -177,10 +179,20 @@ class UpdateProductView(APIView):
         except EquipmentCatalog.DoesNotExist:
             return err('Product not found.', status_code=404)
 
-        updatable = ['product_name', 'category', 'specifications', 'price', 'stock_qty', 'max_order_qty', 'image_url']
+        validated_limit = None
+        if 'max_order_qty' in request.data:
+            try:
+                validated_limit = serializers.IntegerField(min_value=1, max_value=2147483647).run_validation(
+                    request.data['max_order_qty'],
+                )
+            except serializers.ValidationError as exc:
+                return err('Validation failed.', errors={'max_order_qty': exc.detail})
+        updatable = ['product_name', 'category', 'specifications', 'price', 'stock_qty', 'image_url']
         for field in updatable:
             if field in request.data:
                 setattr(product, field, request.data[field])
+        if validated_limit is not None:
+            product.max_order_qty = validated_limit
         product.save()
 
         log_audit(
@@ -269,13 +281,14 @@ class GetOrderDetailView(APIView):
 class UpdateOrderStatusView(APIView):
     permission_classes = [IsAuthenticated, IsVendor]
 
+    @transaction.atomic
     def put(self, request, order_id):
         vendor = get_vendor(request)
         if not vendor:
             return err('Vendor profile not found.', status_code=404)
 
         try:
-            order = EquipmentOrder.objects.select_related(
+            order = EquipmentOrder.objects.select_for_update(of=('self',)).select_related(
                 'hospital_id', 'product_id'
             ).get(eq_order_id=order_id, vendor_id=vendor)
         except EquipmentOrder.DoesNotExist:
@@ -286,12 +299,18 @@ class UpdateOrderStatusView(APIView):
             return err('Validation failed.', errors=ser.errors)
 
         d = ser.validated_data
+        if order.order_status == d['order_status']:
+            return ok('Order status unchanged.', EquipmentOrderSerializer(order).data)
+        allowed = {'confirmed': ('pending',), 'dispatched': (), 'delivered': ('dispatched',)}
+        if order.order_status not in allowed[d['order_status']] or order.payment_status != 'paid':
+            return err('This order cannot make that transition. Use Dispatch with a delivery driver for paid orders.', status_code=409)
         order.order_status = d['order_status']
         if d.get('tracking_info'):
             order.tracking_info = d['tracking_info']
 
         if d['order_status'] == 'delivered':
             order.installed_at = datetime.now(tz=timezone.utc)
+            order.delivered_at = order.installed_at
             _update_hospital_inventory(order)
 
         order.save()
@@ -347,6 +366,7 @@ def _update_hospital_inventory(order):
 class VerifyPaymentView(APIView):
     permission_classes = [IsAuthenticated, IsVendor]
 
+    @transaction.atomic
     def post(self, request):
         vendor = get_vendor(request)
         if not vendor:
@@ -362,7 +382,7 @@ class VerifyPaymentView(APIView):
         razorpay_signature = d['razorpay_signature']
 
         try:
-            order = EquipmentOrder.objects.select_related('hospital_id').get(
+            order = EquipmentOrder.objects.select_for_update(of=('self',)).select_related('hospital_id').get(
                 razorpay_order_id=razorpay_order_id,
                 vendor_id=vendor,
             )
@@ -376,34 +396,14 @@ class VerifyPaymentView(APIView):
         ).hexdigest()
 
         if not hmac.compare_digest(expected_sig, razorpay_signature):
-            order.payment_status = 'failed'
-            order.save(update_fields=['payment_status'])
             return err('Payment signature verification failed.', status_code=400)
 
-        order.razorpay_payment_id = razorpay_payment_id
-        order.razorpay_signature = razorpay_signature
-        order.payment_status = 'paid'
-        order.order_status = 'confirmed'
-        order.save(update_fields=[
-            'razorpay_payment_id', 'razorpay_signature',
-            'payment_status', 'order_status',
-        ])
-
-        send_notification(
-            login_id=order.hospital_id.login_id,
-            title='Equipment Payment Confirmed',
-            message=f'Payment confirmed. {vendor.company_name} will process your order.',
-            notif_type='success',
-            related_id=str(order.eq_order_id),
+        result = payment_utils.process_payment_success(
+            'equipment', order.pk, razorpay_payment_id, request.user, razorpay_signature, razorpay_order_id,
         )
-
-        log_audit(
-            login_id=request.user,
-            action='Equipment order payment verified',
-            module='vendor',
-            entity_type='EquipmentOrder',
-            entity_id=str(order.eq_order_id),
-        )
+        if not result['success']:
+            return err(result.get('error', 'Payment verification failed.'), status_code=400)
+        order.refresh_from_db()
         return ok('Payment verified successfully.', {
             'eq_order_id': str(order.eq_order_id),
             'payment_status': order.payment_status,
@@ -445,6 +445,7 @@ class BrowseCatalogView(APIView):
                 'specifications': p.specifications,
                 'price': str(p.price),
                 'stock_qty': p.stock_qty,
+                'max_order_qty': p.max_order_qty,
                 'image_url': p.image_url,
                 'vendor_id': str(p.vendor_id.vendor_id),
                 'vendor_name': p.vendor_id.company_name,
@@ -472,48 +473,44 @@ class PlaceEquipmentOrderView(APIView):
         if not product_id:
             return err('product_id is required.')
         try:
-            quantity = int(quantity)
-            if quantity < 1:
-                raise ValueError
-        except (ValueError, TypeError):
+            quantity = serializers.IntegerField(min_value=1, max_value=2147483647).run_validation(quantity)
+        except serializers.ValidationError:
             return err('quantity must be a positive integer.')
 
-        try:
-            product = EquipmentCatalog.objects.select_related('vendor_id').get(
-                product_id=product_id,
-                vendor_id__approval_status='approved',
+        with transaction.atomic():
+            try:
+                product = EquipmentCatalog.objects.select_for_update(of=('self',)).select_related('vendor_id').get(
+                    product_id=product_id,
+                    vendor_id__approval_status='approved',
+                )
+            except EquipmentCatalog.DoesNotExist:
+                return err('Product not found or vendor not approved.', status_code=404)
+
+            if quantity > product.max_order_qty:
+                return err(f'This vendor allows a maximum of {product.max_order_qty} units per order.')
+            if product.stock_qty < quantity:
+                return err(
+                    f'Insufficient stock. Available: {product.stock_qty}, Requested: {quantity}.'
+                )
+
+            total_price = product.price * quantity
+            rz = payment_utils.create_razorpay_order(float(total_price), receipt=str(hospital.hospital_id)[:40])
+            razorpay_order_id = rz['order_id'] if rz.get('success') else ''
+            order = EquipmentOrder.objects.create(
+                hospital_id=hospital,
+                vendor_id=product.vendor_id,
+                product_id=product,
+                quantity=quantity,
+                total_price=total_price,
+                razorpay_order_id=razorpay_order_id,
+                status_history=[{
+                    'status': 'pending',
+                    'timestamp': dj_tz.now().strftime('%Y-%m-%d %H:%M'),
+                    'note': 'Order placed',
+                }],
             )
-        except EquipmentCatalog.DoesNotExist:
-            return err('Product not found or vendor not approved.', status_code=404)
-
-        if product.stock_qty < quantity:
-            return err(
-                f'Insufficient stock. Available: {product.stock_qty}, Requested: {quantity}.'
-            )
-
-        total_price = product.price * quantity
-        print(f'[PlaceOrder] Hospital: {hospital.hospital_name}, Product: {product.product_name}, Qty: {quantity}, Total: {total_price}')
-        rz = payment_utils.create_razorpay_order(float(total_price), receipt=str(hospital.hospital_id)[:40])
-        razorpay_order_id = rz['order_id'] if rz.get('success') else ''
-        print(f'[PlaceOrder] Razorpay order created: {razorpay_order_id} (success={rz.get("success")})')
-
-        order = EquipmentOrder.objects.create(
-            hospital_id=hospital,
-            vendor_id=product.vendor_id,
-            product_id=product,
-            quantity=quantity,
-            total_price=total_price,
-            razorpay_order_id=razorpay_order_id,
-            status_history=[{
-                'status': 'pending',
-                'timestamp': dj_tz.now().strftime('%Y-%m-%d %H:%M'),
-                'note': 'Order placed',
-            }],
-        )
-
-        # Reserve stock
-        product.stock_qty -= quantity
-        product.save(update_fields=['stock_qty'])
+            product.stock_qty -= quantity
+            product.save(update_fields=['stock_qty'])
 
         send_notification(
             login_id=product.vendor_id.login_id,
@@ -561,6 +558,8 @@ class PlaceEquipmentOrderView(APIView):
             **EquipmentOrderSerializer(order).data,
             'razorpay_order_id': razorpay_order_id,
             'razorpay_key': rz.get('key_id', getattr(settings, 'RAZORPAY_KEY_ID', '')),
+            'payment_error': rz.get('public_message', '') if not rz.get('success') else '',
+            'payment_error_code': rz.get('error_code', '') if not rz.get('success') else '',
         }, status_code=201)
 
 
@@ -569,19 +568,27 @@ class PlaceEquipmentOrderView(APIView):
 class DispatchOrderView(APIView):
     permission_classes = [IsAuthenticated, IsVendor]
 
+    @transaction.atomic
     def put(self, request, order_id):
         vendor = get_vendor(request)
         if not vendor:
             return err('Vendor profile not found.', status_code=404)
 
         try:
-            order = EquipmentOrder.objects.select_related(
+            order = EquipmentOrder.objects.select_for_update(of=('self',)).select_related(
                 'hospital_id', 'product_id', 'vendor_id'
-            ).get(eq_order_id=order_id, vendor_id=vendor, order_status='confirmed')
+            ).get(eq_order_id=order_id, vendor_id=vendor, order_status__in=['pending', 'confirmed'])
         except EquipmentOrder.DoesNotExist:
-            return err('Confirmed order not found.', status_code=404)
+            return err('Pending or confirmed order not found.', status_code=404)
+        if order.payment_status != 'paid':
+            return err('Payment must be recorded as paid before this order can be dispatched.', status_code=409)
 
-        estimated_days = int(request.data.get('estimated_delivery_days', 3))
+        try:
+            estimated_days = serializers.IntegerField(min_value=1, max_value=365).run_validation(
+                request.data.get('estimated_delivery_days', 3),
+            )
+        except serializers.ValidationError:
+            return err('Delivery estimate must be a whole number from 1 to 365 days.')
         tracking_info = request.data.get('tracking_info', '').strip()
         driver_id = request.data.get('driver_id')
 
@@ -589,7 +596,8 @@ class DispatchOrderView(APIView):
             return err('Driver is required to dispatch.')
         
         try:
-            driver = VendorDriver.objects.get(driver_id=driver_id, vendor_id=vendor, is_available=True)
+            from .models import VendorDriver
+            driver = VendorDriver.objects.select_for_update().get(driver_id=driver_id, vendor_id=vendor, is_available=True)
         except VendorDriver.DoesNotExist:
             return err('Available driver not found.', status_code=404)
 
@@ -1085,6 +1093,23 @@ class ResolveEquipmentIssueView(APIView):
         if not resolution:
             return err('Resolution type is required.')
 
+        if resolution == 'refund':
+            from .order_actions import RefundEquipmentOrderView, release_order_stock
+            with transaction.atomic():
+                rejected = EquipmentOrder.objects.select_for_update().filter(
+                    pk=order_id, vendor_id=vendor, order_status='wrong_product',
+                    delivered_at__isnull=True, installed_at__isnull=True,
+                ).first()
+                if rejected:
+                    rejected.order_status = 'cancelled'
+                    release_order_stock(rejected)
+                    rejected.status_history = [*(rejected.status_history or []), {
+                        'status': 'cancelled', 'timestamp': dj_tz.now().isoformat(),
+                        'note': 'Vendor accepted cancellation of the rejected delivery.',
+                    }]
+                    rejected.save(update_fields=['order_status', 'stock_released', 'status_history'])
+            return RefundEquipmentOrderView().post(request, order_id)
+
         try:
             order = EquipmentOrder.objects.get(eq_order_id=order_id, vendor_id=vendor, order_status='wrong_product')
         except EquipmentOrder.DoesNotExist:
@@ -1123,28 +1148,6 @@ class ResolveEquipmentIssueView(APIView):
                 related_id=str(order.eq_order_id),
             )
 
-        elif resolution == 'refund':
-            order.order_status = 'refunded'
-            order.payment_status = 'refunded'
-            order.final_resolution = 'refund'
-            
-            history.append({
-                'status': 'refunded',
-                'timestamp': dj_tz.now().strftime('%Y-%m-%d %H:%M'),
-                'note': 'Resolved via Refund.',
-            })
-
-            # Return stock
-            order.product_id.stock_qty += order.quantity
-            order.product_id.save(update_fields=['stock_qty'])
-
-            send_notification(
-                login_id=order.hospital_id.login_id,
-                title='Equipment Order Refunded',
-                message=f'Your order for {order.product_id.product_name} has been refunded.',
-                notif_type='info',
-                related_id=str(order.eq_order_id),
-            )
         else:
             return err('Invalid resolution type.')
 

@@ -19,6 +19,8 @@ staticfiles/
 .env
 backend/.env
 frontend/.env
+.env.*
+!.env.example
 
 # Node
 node_modules/

@@ -59,6 +59,7 @@ const BLANK_FORM = {
   reorder_level: '10',
   condition: 'good',
 };
+const REORDER_LEVEL_ERROR = 'Reorder level cannot exceed quantity.';
 
 // ─── Stock movement reasons ─────────────────────────────────────────────────
 const IN_REASONS = [
@@ -307,6 +308,9 @@ const InventoryPage = () => {
     item.item_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
   const lowStockCount = inventory.data?.low_stock_count ?? items.filter((i) => i.is_low_stock).length;
+  const quantity = Number(form.quantity);
+  const reorderLevel = Number(form.reorder_level || BLANK_FORM.reorder_level);
+  const reorderExceedsQuantity = form.quantity !== '' && reorderLevel > quantity;
 
   const refetchInventory = () => inventory.refetch();
 
@@ -314,14 +318,19 @@ const InventoryPage = () => {
     e.preventDefault();
     if (!form.item_name.trim()) { toast.error('Item name is required'); return; }
     if (!form.quantity) { toast.error('Quantity is required'); return; }
+    if (reorderExceedsQuantity) { toast.error(REORDER_LEVEL_ERROR); return; }
+    if (!Number.isInteger(quantity) || !Number.isInteger(reorderLevel) || quantity < 0 || reorderLevel < 0) {
+      toast.error('Enter non-negative whole numbers for quantity and reorder level.');
+      return;
+    }
     setAdding(true);
     try {
       await API.post('/api/hospital/inventory/add/', {
         item_name: form.item_name.trim(),
         category: form.category,
-        quantity: parseInt(form.quantity, 10),
+        quantity,
         unit: form.unit,
-        reorder_level: parseInt(form.reorder_level || '10', 10),
+        reorder_level: reorderLevel,
         condition: form.condition,
       });
       toast.success('Equipment added to inventory');
@@ -502,8 +511,9 @@ const InventoryPage = () => {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Quantity *</label>
+            <label htmlFor="equipment-add-quantity" className="block text-xs font-medium text-gray-600 mb-1">Quantity *</label>
             <input
+              id="equipment-add-quantity"
               type="number" min="0" placeholder="0"
               value={form.quantity}
               onChange={(e) => setForm((p) => ({ ...p, quantity: e.target.value }))}
@@ -520,9 +530,13 @@ const InventoryPage = () => {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Reorder Level</label>
+            <label htmlFor="equipment-add-reorder-level" className="block text-xs font-medium text-gray-600 mb-1">Reorder Level</label>
             <input
+              id="equipment-add-reorder-level"
               type="number" min="0" placeholder="10"
+              max={form.quantity || undefined}
+              aria-invalid={reorderExceedsQuantity}
+              aria-describedby={reorderExceedsQuantity ? 'equipment-add-reorder-error' : undefined}
               value={form.reorder_level}
               onChange={(e) => setForm((p) => ({ ...p, reorder_level: e.target.value }))}
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-orange-400"
@@ -543,7 +557,7 @@ const InventoryPage = () => {
           <div>
             <button
               type="submit"
-              disabled={adding}
+              disabled={adding || reorderExceedsQuantity}
               className="w-full inline-flex items-center justify-center gap-2 text-white px-4 py-2 rounded-full text-sm font-semibold transition disabled:opacity-60"
               style={{ backgroundColor: '#F97316' }}
             >
@@ -551,6 +565,11 @@ const InventoryPage = () => {
               {adding ? 'Adding…' : 'Add'}
             </button>
           </div>
+          {reorderExceedsQuantity && (
+            <p id="equipment-add-reorder-error" role="alert" className="col-span-full text-sm text-red-700">
+              {REORDER_LEVEL_ERROR}
+            </p>
+          )}
         </form>
       </section>
 

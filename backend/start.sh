@@ -9,16 +9,16 @@ case "${DATABASE_URL:-}" in
         ;;
 esac
 
-# Keep exceptions that may contain connection settings out of startup logs.
+# Django errors can include connection settings. Log only safe diagnostics.
 printf '%s\n' 'Applying database migrations...'
-python manage.py migrate --noinput >/dev/null 2>&1 || {
+python deploy_startup.py migrate || {
     printf '%s\n' 'Database migrations failed. Daphne was not started.' >&2
     exit 1
 }
 printf '%s\n' 'Database migrations complete.'
 
 printf '%s\n' 'Collecting static files...'
-python manage.py collectstatic --noinput >/dev/null 2>&1 || {
+python deploy_startup.py collectstatic || {
     printf '%s\n' 'Static collection failed. Daphne was not started.' >&2
     exit 1
 }

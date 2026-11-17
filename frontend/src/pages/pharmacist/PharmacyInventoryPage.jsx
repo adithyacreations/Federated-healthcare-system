@@ -1,3 +1,4 @@
+import { backendUrl } from '../../api/urls';
 import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { FiPackage, FiAlertTriangle, FiXCircle, FiClock, FiPlus, FiSearch } from 'react-icons/fi';
@@ -30,7 +31,6 @@ const CATEGORY_EMOJI = {
   other: '🏥',
 };
 
-const API_HOST = 'http://localhost:8000';
 
 const EMPTY = {
   medicine_name: '', generic_name: '', category: 'tablet', description: '',
@@ -72,7 +72,7 @@ const MedicineCard = ({ m, onEdit, onDelete, onToggle, onImageUpload }) => {
       {/* Image / icon */}
       <label className="relative h-36 flex items-center justify-center cursor-pointer block" style={{ backgroundColor: '#FFF7ED' }} title="Click to upload photo">
         {m.medicine_image ? (
-          <img src={`${API_HOST}${m.medicine_image}`} alt={m.medicine_name} className="w-full h-full object-cover" />
+          <img src={backendUrl(m.medicine_image)} alt={m.medicine_name} className="w-full h-full object-cover" />
         ) : (
           <span className="text-6xl">{CATEGORY_EMOJI[m.category] || '💊'}</span>
         )}

@@ -1,3 +1,4 @@
+import { backendUrl } from '../../api/urls';
 import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -203,7 +204,7 @@ const EHRWallet = () => {
     try {
       const token = localStorage.getItem('access_token') || localStorage.getItem('token');
       const res = await fetch(
-        `http://localhost:8000/api/doctor/prescriptions/${prescriptionId}/download/`,
+        backendUrl(`/api/doctor/prescriptions/${prescriptionId}/download/`),
         { headers: token ? { Authorization: `Bearer ${token}` } : {} },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

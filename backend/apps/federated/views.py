@@ -145,10 +145,18 @@ def _broadcast_maintenance_end():
         print(f'[FL] Restore email import error: {e}')
 
 
+def _eligible_hospitals():
+    return HospitalRegistration.objects.filter(
+        approval_status='approved',
+        login_id__role='hospital_admin',
+        login_id__is_approved=True,
+        login_id__is_active=True,
+    )
+
+
 def _notify_hospital_admins(title, message, notif_type='alert', related_id=None):
-    admins = LoginCredentials.objects.filter(role='hospital_admin', is_approved=True, is_active=True)
-    for admin in admins:
-        send_notification(admin, title, message, notif_type=notif_type, related_id=related_id)
+    for hospital in _eligible_hospitals().select_related('login_id'):
+        send_notification(hospital.login_id, title, message, notif_type=notif_type, related_id=related_id)
 
 
 def _get_active_global_model():
@@ -189,7 +197,7 @@ class FLDashboardView(APIView):
             'active_model': FLGlobalModelSerializer(active).data if active else None,
             'total_rounds': FLRound.objects.count(),
             'latest_round': FLRoundSerializer(latest_round).data if latest_round else None,
-            'participating_hospitals': HospitalRegistration.objects.filter(approval_status='approved').count(),
+            'participating_hospitals': _eligible_hospitals().count(),
             'accuracy_trend': accuracy_trend,
             'epidemic_alerts': EpidemicTrend.objects.filter(spike_detected=True).count(),
         })
@@ -227,7 +235,7 @@ class InitializeGlobalModelView(APIView):
             version=version,
             weights_file_url=cloud_url or local_path,
             accuracy=Decimal('0.00'),
-            hospitals_count=HospitalRegistration.objects.filter(approval_status='approved').count(),
+            hospitals_count=_eligible_hospitals().count(),
             aggregation_algo='FedAvg',
             is_active=True,
             privacy_epsilon=Decimal('1.0000'),
@@ -299,20 +307,20 @@ class StartFLRoundView(APIView):
                 model_id=active, round_number=next_num, status='pending',
             )
 
-        approved_count = HospitalRegistration.objects.filter(approval_status='approved').count()
-        if approved_count == 0:
-            return err('No approved hospitals to invite.', status_code=400)
+        eligible_count = _eligible_hospitals().count()
+        if eligible_count == 0:
+            return err('No active, approved hospitals to invite.', status_code=400)
 
         deadline = timezone.now() + timedelta(hours=48)
-        if approved_count <= 2:
-            threshold = approved_count
-        elif approved_count <= 5:
-            threshold = math.ceil(approved_count * 2 / 3)
+        if eligible_count <= 2:
+            threshold = eligible_count
+        elif eligible_count <= 5:
+            threshold = math.ceil(eligible_count * 2 / 3)
         else:
-            threshold = math.ceil(approved_count * 0.5)
+            threshold = math.ceil(eligible_count * 0.5)
 
         round_obj.status = 'training'
-        round_obj.hospitals_invited = approved_count
+        round_obj.hospitals_invited = eligible_count
         round_obj.hospitals_completed = 0
         round_obj.started_at = timezone.now()
         round_obj.round_deadline = deadline
@@ -336,13 +344,13 @@ class StartFLRoundView(APIView):
             module='federated',
             entity_type='FLRound',
             entity_id=str(round_obj.round_id),
-            new_value={'round_number': round_obj.round_number, 'invited': approved_count, 'threshold': threshold},
+            new_value={'round_number': round_obj.round_number, 'invited': eligible_count, 'threshold': threshold},
         )
 
         # Real-time push to FL WebSocket subscribers
         broadcast_fl_update('round_started', {
             'round_number': round_obj.round_number,
-            'hospitals_invited': approved_count,
+            'hospitals_invited': eligible_count,
             'min_threshold': threshold,
             'deadline': deadline.isoformat(),
             'message': f'FL Round {round_obj.round_number} started! Submit your weights now.',
@@ -411,9 +419,7 @@ class SubmitLocalWeightsView(APIView):
 
         # Fix hospitals_invited if it was left at 0 (round created before hospitals were approved)
         if round_obj.hospitals_invited == 0:
-            round_obj.hospitals_invited = HospitalRegistration.objects.filter(
-                approval_status='approved'
-            ).count()
+            round_obj.hospitals_invited = _eligible_hospitals().count()
             round_obj.save(update_fields=['hospitals_invited'])
 
         active = round_obj.model_id
@@ -755,18 +761,16 @@ class GetRoundDetailsView(APIView):
 
         weights = FLHospitalWeight.objects.filter(round_id=round_obj).select_related('hospital_id')
         submitted_ids = {w.hospital_id_id for w in weights}
-        pending_qs = HospitalRegistration.objects.filter(
-            approval_status='approved'
-        ).exclude(hospital_id__in=submitted_ids)
+        pending_hospitals = [
+            {'hospital_id': str(h.hospital_id), 'hospital_name': h.hospital_name}
+            for h in _eligible_hospitals().exclude(hospital_id__in=submitted_ids)
+        ]
         return ok('Round details retrieved.', {
             'round': FLRoundSerializer(round_obj).data,
             'submissions_count': weights.count(),
             'submissions': FLHospitalWeightSerializer(weights, many=True).data,
-            'pending_hospitals': [
-                {'hospital_id': str(h.hospital_id), 'hospital_name': h.hospital_name}
-                for h in pending_qs
-            ],
-            'pending_count': pending_qs.count(),
+            'pending_hospitals': pending_hospitals,
+            'pending_count': len(pending_hospitals),
         })
 
 
@@ -1176,9 +1180,9 @@ class SimulateAllHospitalsView(APIView):
                 status_code=400,
             )
 
-        hospitals = list(HospitalRegistration.objects.filter(approval_status='approved'))
+        hospitals = list(_eligible_hospitals())
         if not hospitals:
-            return err('No approved hospitals found.', status_code=400)
+            return err('No active, approved hospitals found.', status_code=400)
 
         model_type = _infer_model_type(active.weights_file_url)
         global_path = os.path.join(ML_DIR, f'{model_type}_global.pkl')
@@ -1475,9 +1479,7 @@ class SendReminderView(APIView):
             round_id=active_round
         ).values_list('hospital_id__hospital_id', flat=True)
 
-        pending_hospitals = HospitalRegistration.objects.filter(
-            approval_status='approved'
-        ).exclude(hospital_id__in=submitted_ids).select_related('login_id')
+        pending_hospitals = _eligible_hospitals().exclude(hospital_id__in=submitted_ids).select_related('login_id')
 
         deadline_str = (
             active_round.round_deadline.strftime('%d %b %Y %I:%M %p')
@@ -1734,9 +1736,7 @@ class ExtendDeadlineView(APIView):
         submitted_ids = FLHospitalWeight.objects.filter(
             round_id=active_round
         ).values_list('hospital_id__hospital_id', flat=True)
-        pending = HospitalRegistration.objects.filter(
-            approval_status='approved'
-        ).exclude(hospital_id__in=submitted_ids).select_related('login_id')
+        pending = _eligible_hospitals().exclude(hospital_id__in=submitted_ids).select_related('login_id')
 
         for hospital in pending:
             send_notification(

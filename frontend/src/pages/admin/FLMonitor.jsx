@@ -1,3 +1,4 @@
+import { openBackendSocket } from '../../api/urls';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
@@ -187,9 +188,7 @@ const FLMonitor = () => {
 
   // ─── Real-time FL updates via WebSocket ─────────────────────────────────
   useEffect(() => {
-    const wsHost = window.location.hostname || 'localhost';
-    const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${wsProto}://${wsHost}:8000/ws/fl/global/`);
+    const ws = openBackendSocket(`/ws/fl/global/`);
 
     ws.onopen = () => console.log('[FLMonitor] WebSocket connected');
 
@@ -269,6 +268,7 @@ const FLMonitor = () => {
   const handleRefreshAll = () => {
     dashboard.refetch();
     rounds.refetch();
+    if (activeRound?.round_id) fetchWeights(activeRound.round_id);
   };
 
   const handleStartRound = async () => {
@@ -537,7 +537,7 @@ const FLMonitor = () => {
           {
             label: 'Hospitals',
             value: data.participating_hospitals ?? 0,
-            sub: 'Participating',
+            sub: 'Active and approved',
             icon: '🏥',
           },
         ].map(({ label, value, sub, icon }) => (

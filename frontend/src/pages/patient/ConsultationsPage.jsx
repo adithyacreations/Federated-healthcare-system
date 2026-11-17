@@ -128,8 +128,7 @@ const ConsultationsPage = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { subscribe } = usePatientWS() || {};
-  // pollInterval = 5-min fallback refresh in case the WebSocket drops.
-  const doctors = useApi('/api/patient/doctors/', { pollInterval: 300000 });
+  const doctors = useApi('/api/patient/doctors/', { pollInterval: 15000 });
   const consults = useApi('/api/patient/consultations/');
 
   // Live updates via the shared patient notification socket. Refs keep the
@@ -166,7 +165,17 @@ const ConsultationsPage = () => {
           .catch(() => { /* best-effort; modal keeps its current slots */ });
       }
     });
-    return () => { unsubDoctor(); unsubConsult(); unsubSlots(); };
+    const unsubStatus = subscribe('doctor_status', (event) => {
+      doctorsRef.current.refetch(true);
+      const openDoc = slotDoctorRef.current;
+      if (openDoc?.doctor_id === event?.related_id) {
+        setSelectedBookingSlot(null);
+        API.get(`/api/patient/doctor-slots/${openDoc.doctor_id}/`)
+          .then(({ data }) => setSlots(data?.data?.slots || []))
+          .catch(() => setSlots([]));
+      }
+    });
+    return () => { unsubDoctor(); unsubConsult(); unsubSlots(); unsubStatus(); };
   }, [subscribe]);
 
   const [tab, setTab] = useState('upcoming');
@@ -237,7 +246,10 @@ const ConsultationsPage = () => {
     }
   }, [selectedBookingSlot, selectedDateSlots, selectedSlotDate]);
 
-  const doctorList = useMemo(() => doctors.data?.doctors || [], [doctors.data]);
+  const doctorList = useMemo(
+    () => (doctors.data?.doctors || []).filter((doctor) => doctor.is_online && doctor.available_slots_count > 0),
+    [doctors.data],
+  );
   const allConsults = useMemo(() => consults.data?.consultations || [], [consults.data]);
 
   useEffect(() => {
@@ -556,7 +568,7 @@ const ConsultationsPage = () => {
           {doctors.loading ? (
             <div className="dashboard-card text-sm text-muted">Loading doctors…</div>
           ) : filteredDoctors.length === 0 ? (
-            <div className="dashboard-card text-sm text-muted text-center py-8">No doctors match your search.</div>
+            <div className="dashboard-card text-sm text-muted text-center py-8">No online doctors with available slots today match your search.</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredDoctors.map((doc) => {

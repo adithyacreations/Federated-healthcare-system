@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 import uuid
@@ -98,7 +99,7 @@ def log_audit(login_id, action, module='', entity_type='', entity_id=None,
     )
 
 
-def send_notification(login_id, title, message, notif_type='alert', related_id=None):
+def send_notification(login_id, title, message, notif_type='alert', related_id=None, *, push_timeout=None):
     """Persist a notification and (best-effort) push it via WebSocket.
 
     The WebSocket push is wrapped in try/except so a missing/down channel layer
@@ -117,7 +118,7 @@ def send_notification(login_id, title, message, notif_type='alert', related_id=N
         channel_layer = get_channel_layer()
         if channel_layer is None:
             return notif
-        async_to_sync(channel_layer.group_send)(
+        push = channel_layer.group_send(
             f'notif_{login_id.login_id}',
             {
                 'type': 'push_notification',
@@ -127,6 +128,7 @@ def send_notification(login_id, title, message, notif_type='alert', related_id=N
                 'related_id': str(related_id) if related_id else None,
             },
         )
+        async_to_sync(asyncio.wait_for)(push, timeout=push_timeout)
     except Exception:
         pass
     return notif
@@ -176,7 +178,7 @@ def broadcast_new_doctor_to_patients(doctor_name='', hospital_name=''):
         return False
 
 
-def broadcast_new_slots_to_patients(doctor_name='', doctor_id=None):
+def broadcast_new_slots_to_patients(doctor_name='', doctor_id=None, *, availability_changed=False):
     """Tell every patient's notification socket that a doctor added new slots so
     their 'Book a Doctor' list refreshes in real time.
 
@@ -202,20 +204,25 @@ def broadcast_new_slots_to_patients(doctor_name='', doctor_id=None):
         )
         message = (f'Dr. {doctor_name} added new consultation slots!'
                    if doctor_name else 'New consultation slots are available!')
-        for pid in patient_ids[:500]:
-            try:
-                async_to_sync(channel_layer.group_send)(
-                    f'notif_{pid}',
-                    {
-                        'type': 'push_notification',
-                        'title': 'New slots available',
-                        'message': message,
-                        'notif_type': 'slots',
-                        'related_id': str(doctor_id) if doctor_id else None,
-                    },
-                )
-            except Exception:
-                pass
+        if availability_changed:
+            message = 'Doctor availability updated.'
+        ids = list(patient_ids[:500])
+        payload = {
+            'type': 'push_notification',
+            'title': 'Doctor availability' if availability_changed else 'New slots available',
+            'message': message,
+            'notif_type': 'doctor_status' if availability_changed else 'slots',
+            'related_id': str(doctor_id) if doctor_id else None,
+        }
+
+        async def push_to_patients():
+            for offset in range(0, len(ids), 20):
+                await asyncio.gather(*(
+                    channel_layer.group_send(f'notif_{pid}', payload.copy())
+                    for pid in ids[offset:offset + 20]
+                ), return_exceptions=True)
+
+        async_to_sync(asyncio.wait_for)(push_to_patients(), timeout=2)
         return True
     except Exception as e:
         print(f'[broadcast_new_slots_to_patients] {e}')

@@ -28,7 +28,7 @@ class CreateProductSerializer(serializers.Serializer):
     specifications = serializers.DictField(required=False, default=dict)
     price = serializers.DecimalField(max_digits=12, decimal_places=2)
     stock_qty = serializers.IntegerField(default=0)
-    max_order_qty = serializers.IntegerField(default=100)
+    max_order_qty = serializers.IntegerField(default=100, min_value=1, max_value=2147483647)
     image_url = serializers.CharField(max_length=500, required=False, allow_blank=True, default='')
 
     def validate_price(self, value):
@@ -43,6 +43,9 @@ class CreateProductSerializer(serializers.Serializer):
 
 
 class EquipmentOrderSerializer(serializers.ModelSerializer):
+    can_cancel = serializers.BooleanField(read_only=True)
+    can_refund = serializers.BooleanField(read_only=True)
+    return_deadline = serializers.DateTimeField(read_only=True)
     hospital_name = serializers.CharField(source='hospital_id.hospital_name', read_only=True)
     # UUIDs of both parties, so the frontend can open a chat directly.
     hospital_id = serializers.UUIDField(source='hospital_id.hospital_id', read_only=True)
@@ -65,6 +68,7 @@ class EquipmentOrderSerializer(serializers.ModelSerializer):
             'estimated_delivery_days', 'otp_expiry',
             'dispatched_at', 'delivered_at', 'status_history',
             'ordered_at', 'updated_at',
+            'can_cancel', 'can_refund', 'return_deadline', 'refund_status', 'refund_id',
         ]
 
 

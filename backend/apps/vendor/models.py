@@ -1,5 +1,7 @@
 import uuid
+from datetime import timedelta
 from django.db import models
+from django.utils import timezone
 from apps.auth_app.models import LoginCredentials
 from apps.hospital.models import HospitalRegistration
 
@@ -95,6 +97,11 @@ class EquipmentOrder(models.Model):
     razorpay_payment_id = models.CharField(max_length=100, blank=True)
     razorpay_signature = models.CharField(max_length=200, blank=True)
     payment_status = models.CharField(max_length=10, choices=PAYMENT_STATUS, default='pending')
+    refund_id = models.CharField(max_length=100, blank=True)
+    refund_status = models.CharField(max_length=20, blank=True)
+    refund_requested_at = models.DateTimeField(null=True, blank=True)
+    stock_released = models.BooleanField(default=False)
+    return_inventory_reserved = models.BooleanField(default=False)
     tracking_info = models.TextField(blank=True)
     driver_id = models.ForeignKey('VendorDriver', on_delete=models.SET_NULL, null=True, blank=True, related_name='equipment_orders')
     hospital_desired_resolution = models.CharField(max_length=20, blank=True)
@@ -112,6 +119,24 @@ class EquipmentOrder(models.Model):
     status_history = models.JSONField(default=list)
     ordered_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def can_cancel(self):
+        return self.order_status in ('pending', 'confirmed') and not self.dispatched_at and not self.refund_status
+
+    @property
+    def return_deadline(self):
+        delivered = self.delivered_at or self.installed_at
+        return delivered + timedelta(days=7) if delivered else None
+
+    @property
+    def can_refund(self):
+        if self.payment_status != 'paid' or self.refund_status in ('pending', 'processed', 'failed'):
+            return False
+        if self.order_status == 'cancelled':
+            return True
+        deadline = self.return_deadline
+        return bool(self.order_status in ('delivered', 'wrong_product') and deadline and timezone.now() < deadline)
 
     def __str__(self):
         return f"Order {self.eq_order_id} — {self.product_id.product_name} [{self.order_status}]"
